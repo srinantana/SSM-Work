@@ -1,0 +1,3 @@
+import { requireTrialAccess } from "@/lib/trial";
+import { TrialWorkspace } from "../dashboard/trial-workspace";
+export default async function Master(){const {batches}=await requireTrialAccess();return <><div className="page-heading"><div><div className="eyebrow">MASTER DATA</div><h1>ราคาและข้อมูลกลาง</h1><p>ข้อมูลจาก Sheet สำหรับค้นหาและทดลองคำนวณ · ราคาประวัติรอยืนยัน</p></div></div><div className="stats"><div><strong>{batches[0].summary.rates.toLocaleString("th-TH")}</strong><span>รายการ Master</span></div><div><strong>{batches[0].summary.customers}</strong><span>ลูกค้า</span></div><div><strong>{batches[0].summary.rules}</strong><span>กฎคำนวณ</span></div></div><TrialWorkspace/></>}
