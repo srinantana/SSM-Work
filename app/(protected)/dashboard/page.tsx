@@ -1,8 +1,10 @@
-import { requireUser } from "@/lib/auth";
+import { requireTrialAccess } from "@/lib/trial";
+import { TrialWorkspace } from "./trial-workspace";
 export default async function Dashboard() {
-  await requireUser();
-  return <><p className="eyebrow">SSM WORKSPACE</p><h1>พื้นที่ทำงาน</h1>
-    <p className="muted">เข้าสู่ระบบสำเร็จ พร้อมเริ่มงานของคุณ</p>
-    <section className="notice"><h2>Site Expense</h2><p>พื้นที่สำหรับโมดูลจัดการค่าใช้จ่ายหน้างาน จะเพิ่มข้อมูลและขั้นตอนการทำงานในลำดับถัดไป</p></section>
+  const {batches}=await requireTrialAccess();
+  return <><p className="eyebrow">SSM SITE EXPENSE</p><h1>ทดลองข้อมูลจาก Sheet</h1>
+    <p className="muted">ใช้ข้อมูลกลางประกอบการทดลองคำนวณ ก่อนยืนยันราคาและกฎสำหรับระบบจริง</p>
+    <section className="stats"><div><strong>{batches[0].summary.rates.toLocaleString("th-TH")}</strong><span>รายการ Master</span></div><div><strong>{batches[0].summary.customers}</strong><span>ลูกค้า</span></div><div><strong>{batches[0].summary.rules}</strong><span>กฎคำนวณ</span></div></section>
+    <TrialWorkspace />
   </>;
 }

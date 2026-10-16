@@ -18,7 +18,8 @@ export async function proxy(request: NextRequest) {
   const { data, error } = await supabase.auth.getClaims();
   const path = request.nextUrl.pathname;
   const loggedIn = !error && !!data?.claims.sub && !data.claims.is_anonymous;
-  if (path !== "/login" && !loggedIn) {
+  const publicPaths = new Set(["/login", "/signup", "/forgot-password", "/auth/confirm"]);
+  if (!publicPaths.has(path) && !loggedIn) {
     const blocked = path.startsWith("/api/") || path === "/api"
       ? NextResponse.json({ error: "Unauthorized" }, { status: 401 })
       : NextResponse.redirect(new URL("/login", request.url));

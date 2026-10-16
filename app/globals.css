@@ -1,29 +1,30 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap');
-:root { color-scheme: light; --ink:#18312c; --primary:#14664e; --border:#dbe5df; }
+:root { color-scheme: light; --ink:#17365c; --primary:#d52f38; --border:#dce2ec; }
 * { box-sizing:border-box; }
-body { margin:0; font-family:"IBM Plex Sans Thai",sans-serif; color:var(--ink); background:#f3f6f4; }
+body { margin:0; font-family:"IBM Plex Sans Thai",sans-serif; color:var(--ink); background:#f4f6fa; }
 button,input { font:inherit; }
 h1 { font-size:2rem; margin:10px 0; line-height:1.4; }
 h2 { margin:0 0 12px; }
-.login-shell { min-height:100dvh; display:grid; place-items:center; padding:24px; background:radial-gradient(ellipse at top left,#dceae1,transparent 65%); }
+.login-shell { min-height:100dvh; display:grid; place-items:center; padding:24px; background:radial-gradient(ellipse at top left,#e0e7f1,transparent 65%); }
 .login-card { width:100%; max-width:440px; background:white; padding:40px; border:1px solid var(--border); border-radius:20px; box-shadow:0 20px 70px #163d2610; }
 .brand { font-weight:700; font-size:24px; letter-spacing:1px; color:var(--primary); }
 .brand span { font-weight:400; font-size:15px; }
 .eyebrow { color:var(--primary); font-size:12px; font-weight:600; letter-spacing:2px; margin:28px 0 8px; }
-.muted,.hint { color:#56665e; }
+.muted,.hint { color:#647387; }
 .hint { font-size:13px; line-height:1.7; margin:24px 0 0; }
 .login-form { display:grid; gap:10px; margin-top:26px; }
 .login-form label { font-weight:500; }
 input { width:100%; padding:12px 14px; border:1px solid #a8bcb1; border-radius:8px; margin-bottom:10px; background:white; }
 button { cursor:pointer; border:0; background:var(--primary); color:white; padding:12px 20px; border-radius:8px; font-weight:500; }
-button:hover { background:#0b503d; }
+button:hover { background:#b62730; }
 button:disabled { opacity:.65; cursor:wait; }
 input:focus-visible,button:focus-visible { outline:3px solid #d29828; outline-offset:3px; }
 .error { color:#aa2020; padding:12px; background:#fff0f0; border-radius:8px; font-size:14px; margin:0; }
 .app-header { padding:20px 5vw; display:flex; justify-content:space-between; gap:20px; align-items:center; background:white; border-bottom:1px solid var(--border); }
 .account { display:flex; gap:20px; align-items:center; flex-wrap:wrap; font-size:14px; overflow-wrap:anywhere; }
-.secondary { background:#e7efe9; color:var(--primary); }
-.secondary:hover { background:#d5e5d9; }
+.secondary { background:#eaf0f7; color:#17365c; }
+.secondary:hover { background:#d7e2f0; }
 .workspace { max-width:1100px; margin:auto; padding:32px 24px; }
 .notice { margin-top:32px; padding:28px; background:white; border:1px solid var(--border); border-radius:14px; line-height:1.8; }
 @media(max-width:600px) { .login-card { padding:28px; } .app-header { align-items:flex-start; flex-direction:column; } .account { gap:12px; } }
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:24px}.stats>div{background:white;border:1px solid var(--border);border-radius:14px;padding:22px}.stats strong{display:block;font-size:30px}.stats span{font-size:13px;color:#647387}.warning{font-size:13px;color:#865c17}.filters{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.filters input{width:260px;margin:0}.filters select{padding:12px;font:inherit;background:white;border:1px solid var(--border);border-radius:8px}.table-scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:14px 10px;border-bottom:1px solid var(--border);vertical-align:top}th{background:#f5f7fa}td{min-width:100px;max-width:330px;overflow-wrap:anywhere}td small{color:#647387}.pagination{display:flex;gap:18px;align-items:center;margin-top:20px}.calculator{display:grid;gap:10px;max-width:650px}.calculator input{display:block;max-width:240px}.calculator .ack{display:flex;gap:10px;align-items:flex-start;font-size:13px}.calculator .ack input{width:18px;flex:none;margin-top:5px}.calculator button{justify-self:start}a{color:#17365c}button:disabled{cursor:not-allowed}@media(max-width:600px){.stats{gap:8px}.stats>div{padding:14px}.filters input{width:100%}}

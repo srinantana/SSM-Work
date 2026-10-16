@@ -65,3 +65,32 @@ test("forged Supabase session cannot unlock pages or APIs", async () => {
   const api = await fetch(`${base}/api/me`, { headers: { cookie }, redirect: "manual" });
   assert.equal(api.status, 401);
 });
+
+test("signup and password recovery entry points are public", async () => {
+ for(const path of ["/signup","/forgot-password"]){
+  const response=await fetch(`${base}${path}`);
+  assert.equal(response.status,200,path);
+  assert.match(await response.text(),/name="email"/);
+ }
+});
+test("pending and reset pages require verified authentication", async () => {
+ for(const path of ["/pending","/reset-password"]){
+  const response=await fetch(`${base}${path}`,{redirect:"manual"});
+  assert.equal(response.status,307,path);
+  assert.equal(new URL(response.headers.get("location"),base).pathname,"/login");
+ }
+});
+test("trial data and calculator reject anonymous callers", async () => {
+ const response=await fetch(`${base}/api/trial`,{redirect:"manual"});
+ assert.equal(response.status,401);
+ assert.deepEqual(await response.json(),{error:"Unauthorized"});
+ const calculated=await fetch(`${base}/api/trial/calculate`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({rateKey:"LEG-ALL-76",quantity:5,periods:6,trialAck:true}),redirect:"manual"});
+ assert.equal(calculated.status,401);
+});
+test("invalid email callback stays on the app and never follows external next",async()=>{
+ const response=await fetch(`${base}/auth/confirm?next=https://example.com`,{redirect:"manual"});
+ assert.equal(response.status,307);
+ const target=new URL(response.headers.get("location"),base);
+ assert.ok(["127.0.0.1","localhost"].includes(target.hostname));
+ assert.equal(target.port,new URL(base).port);assert.equal(target.pathname,"/login");
+});

@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 export const currentUser = cache(async () => {
   const supabase = await createClient();
   const { data, error } = await supabase.auth.getUser();
-  return error || data.user?.is_anonymous ? null : data.user;
+  return error || data.user?.is_anonymous || !data.user?.email_confirmed_at ? null : data.user;
 });
 export async function requireUser() {
   const user = await currentUser();
