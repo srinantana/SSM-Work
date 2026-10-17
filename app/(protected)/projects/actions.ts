@@ -19,3 +19,18 @@ export async function createProject(_state:{error:string|null},form:FormData):Pr
  }
  revalidatePath("/projects"); redirect(`/projects/${id}`);
 }
+
+export async function updateProject(projectId:string,_state:{error:string|null},form:FormData):Promise<{error:string|null}>{
+ const {user,supabase}=await requireTrialAccess();
+ let input;try{input=projectInput(form);}catch(e){return {error:e instanceof Error?e.message:"ข้อมูลไม่ถูกต้อง"};}
+ const revision=Number(form.get("revision"));
+ if(!Number.isSafeInteger(revision)||revision<1)return {error:"กรุณาโหลดหน้าใหม่ก่อนแก้ไข"};
+ const {data:project,error:readError}=await supabase.from("ssm_projects").select("batch_id,status").eq("id",projectId).eq("owner_id",user.id).maybeSingle();
+ if(readError||!project||project.status!=="DRAFT")return {error:"ไม่พบ Draft ที่คุณแก้ไขได้"};
+ const {data:customer}=await supabase.from("ssm_trial_customers").select("source_key").eq("batch_id",project.batch_id).eq("source_key",input.customer_key).maybeSingle();
+ if(!customer)return {error:"กรุณาเลือกลูกค้าจาก Master ของโครงการ"};
+ const {data,error}=await supabase.from("ssm_projects").update(input).eq("id",projectId).eq("owner_id",user.id).eq("status","DRAFT").eq("revision",revision).select("id").maybeSingle();
+ if(error)return {error:"บันทึกการแก้ไขไม่ได้ กรุณาลองใหม่"};
+ if(!data)return {error:"Draft นี้ถูกแก้จากอีกหน้าจอแล้ว กรุณาโหลดหน้าใหม่เพื่อรับข้อมูลล่าสุด"};
+ revalidatePath("/projects");revalidatePath("/dashboard");revalidatePath(`/projects/${projectId}`);redirect(`/projects/${projectId}`);
+}

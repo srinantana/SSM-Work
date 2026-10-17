@@ -40,7 +40,7 @@ test("login page is public and has accessible email/password fields", async () =
 });
 
 test("anonymous page requests, including asset-like paths, are redirected", async () => {
-  for (const path of ["/", "/projects", "/projects/new", "/projects/11111111-1111-4111-8111-111111111111", "/dashboard", "/dashboard/export.csv", "/dashboard/private.png"]) {
+  for (const path of ["/", "/projects", "/projects/new", "/projects/11111111-1111-4111-8111-111111111111/edit", "/projects/11111111-1111-4111-8111-111111111111", "/dashboard", "/dashboard/export.csv", "/dashboard/private.png"]) {
     const response = await fetch(`${base}${path}`, { redirect: "manual" });
     assert.equal(response.status, 307, path);
     assert.equal(new URL(response.headers.get("location"), base).pathname, "/login", path);

@@ -1,5 +1,6 @@
 "use client";
 import {useEffect,useState} from "react";
+import {SearchableSelect} from "@/components/searchable-select";
 type Rate={source_key:string;name:string;location:string|null;amount:number|null;currency:string;unit:string|null;review_status:string};
 export function TrialWorkspace(){
  const [rates,setRates]=useState<Rate[]>([]),[page,setPage]=useState(0),[category,setCategory]=useState("");
@@ -22,7 +23,7 @@ export function TrialWorkspace(){
  }
  return <><section className="notice"><h2>Master Database</h2><p className="warning">ราคาประวัติและสกุลเงินยังรอยืนยัน ช่องว่างไม่ใช่ราคา 0 เงินเดือนที่ต้นทางระบุ “not use” ใช้คำนวณไม่ได้</p>
  <form className="filters" onSubmit={e=>{e.preventDefault();setPage(0);setQuery(search);}}>
-  <select aria-label="หมวดราคา" value={category} onChange={e=>{setCategory(e.target.value);setPage(0);}}><option value="">ทุกหมวด</option>{["ALLOWANCE","ACCOMMODATION","TRANSPORT","TRAVEL","LOGISTICS","OTHER","LABOR"].map(c=><option key={c}>{c}</option>)}</select>
+  <SearchableSelect label="หมวดราคา" options={[{value:"",label:"ทุกหมวด"},...["ALLOWANCE","ACCOMMODATION","TRANSPORT","TRAVEL","LOGISTICS","OTHER","LABOR"].map(c=>({value:c,label:c}))]} value={category} onChange={v=>{setCategory(v);setPage(0);}}/>
   <input aria-label="ค้นหารายการ" placeholder="ค้นหาชื่อรายการ" value={search} onChange={e=>setSearch(e.target.value)} maxLength={120}/><button>ค้นหา</button>
  </form><p role="status">{status}</p><div className="table-scroll"><table><thead><tr><th>รายการ</th><th>พื้นที่</th><th>ราคา</th><th>หน่วย</th><th></th></tr></thead><tbody>{rates.map(rate=><tr key={rate.source_key}><td><small>{rate.source_key}</small><br/>{rate.name}</td><td>{rate.location||"—"}</td><td>{rate.amount===null?"รอราคา":Number(rate.amount).toLocaleString("th-TH")+" "+rate.currency}</td><td>{rate.unit||"รอหน่วย"}</td><td><button className="secondary" disabled={rate.amount===null||rate.review_status==="DEPRECATED"} onClick={()=>{setSelected(rate);setAck(false);setResult("");}}>เลือกทดลอง</button></td></tr>)}</tbody></table></div>
  <div className="pagination"><button className="secondary" disabled={page===0} onClick={()=>setPage(page-1)}>ก่อนหน้า</button><span>หน้า {page+1} / {Math.max(1,Math.ceil(count/50))}</span><button className="secondary" disabled={(page+1)*50>=count} onClick={()=>setPage(page+1)}>ถัดไป</button></div></section>
