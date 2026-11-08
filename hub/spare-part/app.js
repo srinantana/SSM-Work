@@ -206,7 +206,10 @@
     const links = [r.joFile && `<a href="${esc(r.joFile)}" target="_blank" rel="noopener">Job Order</a>`, r.folder && `<a href="${esc(r.folder)}" target="_blank" rel="noopener">โฟลเดอร์ Job</a>`,
       ...(r.pid || []).map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>`), ...(r.layout || []).map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>`)].filter(Boolean).join(" · ");
     const zones = zonesOf(p);
-    const inp = (l, k, cls = "", ph = "") => `<input class="sp-cell ${cls}" data-l="${l.id}" data-k="${k}" value="${esc(l[k])}" placeholder="${esc(ph)}"${/qty|installed|leadWeeks|unitPrice/.test(k) ? ' inputmode="decimal"' : ""}>`;
+    const NUMK = /^(qty|installed|leadWeeks|unitPrice|unit)$/;
+    const inp = (l, k, cls = "", ph = "") => NUMK.test(k)
+      ? `<input class="sp-cell ${cls}" data-l="${l.id}" data-k="${k}" value="${esc(l[k])}" placeholder="${esc(ph)}"${k !== "unit" ? ' inputmode="decimal"' : ""}>`
+      : `<textarea class="sp-cell sp-wrap ${cls}" rows="1" data-l="${l.id}" data-k="${k}" placeholder="${esc(ph)}">${esc(l[k])}</textarea>`;
     let no = 0;
     const body = zones.map((z, zi) => {
       const rows = p.lines.filter(l => l.zone === z);
@@ -230,7 +233,7 @@
         <div class="sp-links">${links}</div></div>
         <div class="sp-actions"><select class="sp-in" id="spStatus">${Object.keys(STATUS).map(s => `<option value="${s}" ${p.status === s ? "selected" : ""}>${STATUS[s][0]}</option>`).join("")}</select>
           <button class="sp-btn" data-a="zone">＋ เพิ่มโซน</button><button class="sp-btn" data-a="import">⬆ Import from template</button><button class="sp-btn" data-a="csv" title="ไฟล์ CSV สำหรับส่งลูกค้า: ไม่มี Remarks และเฉพาะรายการที่ใส่ Unit price แล้ว">Export for customer</button><button class="sp-btn primary" data-a="save">บันทึก</button>${isAdmin() ? `<button class="sp-btn danger" data-a="delete">ลบโปรเจค</button>` : ""}</div></div>
-      <div class="tbl sp-edit"><table><thead><tr>${COLS.map(c => `<th>${c}</th>`).join("")}<th></th></tr></thead><tbody>${body || `<tr><td colspan="${COLS.length + 1}" class="sub">ยังไม่มีรายการ · กด ＋ เพิ่มโซน</td></tr>`}</tbody>
+      <div class="tbl sp-edit"><table><colgroup>${[44, 210, 190, 130, 160, 190, 66, 84, 58, 150, 68, 104, 110, 170, 72].map(w => `<col style="width:${w}px">`).join("")}</colgroup><thead><tr>${COLS.map(c => `<th>${c}</th>`).join("")}<th></th></tr></thead><tbody>${body || `<tr><td colspan="${COLS.length + 1}" class="sub">ยังไม่มีรายการ · กด ＋ เพิ่มโซน</td></tr>`}</tbody>
         <tfoot><tr><td colspan="12" class="r"><b>Total (excl. VAT)</b></td><td class="r"><b id="spGrand"></b></td><td colspan="2"></td></tr></tfoot></table></div>
       <p class="sp-src">อะไหล่ที่ระบบเสนอเป็นค่าเริ่มต้นตามประเภทอุปกรณ์ · ใส่ Part No. และ Unit price (ราคาขาย) ก่อนส่งลูกค้า · Lead time เริ่มต้นจาก Project Pipeline</p>
       <span class="sp-saved" id="spSaved" aria-live="polite"></span>`;
@@ -239,6 +242,8 @@
       ROOT.querySelector("#spGrand").textContent = money(p.lines.reduce((a, l) => a + amountOf(l), 0)) || "–";
     };
     totals();
+    const fit = t => { t.style.height = "auto"; t.style.height = t.scrollHeight + 2 + "px"; };
+    ROOT.querySelectorAll("textarea.sp-wrap").forEach(t => { fit(t); t.addEventListener("input", () => fit(t)); });
     const mark = () => { ROOT.querySelector("#spSaved").textContent = "มีการแก้ไขที่ยังไม่บันทึก"; };
     const redraw = () => { const y = window.scrollY; pageProject(p); window.scrollTo(0, y); mark(); };
     const blank = zone => ({ id: uid(), zone, equip: "", tag: "", part: "", partNo: "", maker: "", spec: "", installed: "", qty: 1, unit: "pc", prio: "Recommended", leadWeeks: "", unitPrice: "", remark: "", source: "Manual" });
@@ -406,7 +411,7 @@
 .sp-create{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 14px}.sp-btn.big{font-size:15px;padding:11px 20px;border-radius:11px}
 .sp-btn.danger{color:var(--rak);border-color:var(--blush-2)}.sp-btn.danger:hover{background:var(--rak);color:#fff}.badge.off{background:#eceef1;color:#6d7582}tr.sp-off td{opacity:.55}
 .sp-drop{display:block;border:2px dashed var(--line);border-radius:12px;padding:22px;text-align:center;cursor:pointer;color:var(--muted);margin:12px 0}.sp-drop:hover,.sp-drop.on{border-color:var(--rak);background:var(--blush);color:var(--rak)}.sp-preview{background:var(--bg);border-radius:10px;padding:10px 12px;margin-top:10px}
-.sp-prio{font-weight:600;min-width:146px!important;border-radius:20px!important;padding:4px 8px!important;border:1px solid transparent!important;cursor:pointer}
+.sp-prio{font-weight:600;border-radius:20px!important;padding:4px 8px!important;border:1px solid transparent!important;cursor:pointer}
 .p-critical{background:#fde2e2!important;color:#b00000!important;border-color:#f5b5b5!important}
 .p-recommended{background:#fff1d6!important;color:#8a5a00!important;border-color:#f1d38a!important}
 .p-consumable{background:#e3f0ff!important;color:#0b5394!important;border-color:#b6d4f5!important}
@@ -429,9 +434,9 @@ option.p-critical,option.p-recommended,option.p-consumable{font-weight:600}
 .sp-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;margin:10px 0 14px}.sp-head h2{margin:6px 0 4px;font-size:20px;font-weight:600}
 .sp-links{margin-top:6px;font-size:13px}.sp-links a{color:var(--rak)}
 .sp-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sp-actions .sp-in{width:auto}
-.sp-edit{overflow-x:auto}.sp-edit table{min-width:2050px}.sp-edit th{white-space:normal;vertical-align:bottom;min-width:60px}.sp-edit .c{text-align:center;color:var(--muted)}.sp-edit .r,.sp-edit .r input{text-align:right}.sp-edit td.m .sp-cell{min-width:96px}.sp-edit td:nth-child(4) .sp-cell{min-width:150px}.sp-edit td:nth-child(2) .sp-cell{min-width:270px}.sp-edit td.amt{font-variant-numeric:tabular-nums;white-space:nowrap;padding-right:10px}.sp-edit .tag{font-size:12px;color:var(--muted)}.sp-edit td.act{white-space:nowrap}.sp-move{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:6px;background:#fff;width:34px;padding:3px}
-.sp-zone td{background:var(--blush);padding:8px 10px!important;position:sticky;left:0}.sp-zone-in{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.sp-zname{font:inherit;font-weight:600;color:var(--rak);border:1px solid transparent;background:transparent;border-radius:6px;padding:4px 6px;min-width:320px}.sp-zname:hover,.sp-zname:focus{border-color:var(--blush-2);background:#fff}.sp-ztot{font-weight:600;font-size:13px}.sp-btn.sm{font-size:12px;padding:4px 10px}.sp-edit tfoot td{padding:10px 8px;border-top:2px solid var(--line)}.sp-edit td{padding:4px 5px;vertical-align:middle}.sp-edit select.sp-cell{min-width:128px}.sp-cell{font:inherit;font-size:13px;width:100%;min-width:70px;border:1px solid transparent;border-radius:6px;padding:5px 6px;background:transparent;color:var(--ink)}
-.sp-cell:hover{border-color:var(--line);background:#fff}.sp-edit td.w2 .sp-cell{min-width:230px}.sp-edit td.n .sp-cell{min-width:48px;width:56px}
+.sp-edit{overflow-x:auto}.sp-edit table{table-layout:fixed;width:1806px}.sp-edit th{white-space:normal;vertical-align:bottom;line-height:1.3;padding:8px 6px}.sp-edit .c{text-align:center;color:var(--muted)}.sp-edit .r,.sp-edit .r input{text-align:right}.sp-edit td.amt{font-variant-numeric:tabular-nums;white-space:nowrap;padding-right:10px}.sp-edit .tag{font-size:12px;color:var(--muted)}.sp-edit td.act{white-space:nowrap}.sp-move{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:6px;background:#fff;width:40px;padding:3px 2px}
+.sp-zone td{background:var(--blush);padding:8px 10px!important;position:sticky;left:0}.sp-zone-in{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.sp-zname{font:inherit;font-weight:600;color:var(--rak);border:1px solid transparent;background:transparent;border-radius:6px;padding:4px 6px;min-width:320px}.sp-zname:hover,.sp-zname:focus{border-color:var(--blush-2);background:#fff}.sp-ztot{font-weight:600;font-size:13px}.sp-btn.sm{font-size:12px;padding:4px 10px}.sp-edit tfoot td{padding:10px 8px;border-top:2px solid var(--line)}.sp-edit td{padding:4px 4px;vertical-align:top}.sp-cell{font:inherit;font-size:13px;line-height:1.4;width:100%;min-width:0;box-sizing:border-box;border:1px solid transparent;border-radius:6px;padding:5px 6px;background:transparent;color:var(--ink)}
+.sp-cell:hover{border-color:var(--line);background:#fff}textarea.sp-wrap{resize:none;overflow:hidden;display:block;white-space:pre-wrap;word-break:break-word}.sp-edit td.c,.sp-edit td.amt{padding-top:10px}.sp-edit td.n .sp-cell{text-align:center}
 .sp-saved{display:block;font-size:12.5px;color:var(--muted);margin-top:6px}.sp-link{all:unset;color:var(--rak);cursor:pointer;text-decoration:underline}
 @media (max-width:760px){.sp-bar{grid-template-columns:1fr 1fr;position:static}.sp-bar label:nth-child(3){grid-column:span 2}.sp-form{grid-template-columns:1fr 1fr}}`;
 
