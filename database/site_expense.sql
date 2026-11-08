@@ -36,6 +36,10 @@ create table if not exists public.site_expense_projects (
   end_date     date,
   status       text not null default 'draft'
                check (status in ('draft','submitted','ssm_reviewed','approved','rejected','budget_locked','closed')),
+  award_date   date,                                   -- Get Award: IJ linked to the new Job no. (jo) and budget locked
+  award_value  numeric,                                -- contract / PO value (optional)
+  award_by     text,                                   -- person who opened the Job
+  award_ref    text,                                   -- PO / document reference
   created_by   text,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
@@ -64,8 +68,8 @@ create index if not exists site_expense_estimate_project_idx on public.site_expe
 create table if not exists public.site_expense_approvals (
   id          bigint generated always as identity primary key,
   project_id  text not null references public.site_expense_projects(id) on delete cascade,
-  step        text not null check (step in ('sc','ssm','md')),
-  action      text not null check (action in ('submit','approve','reject','revise')),
+  step        text not null check (step in ('sc','ssm','md','award')),
+  action      text not null check (action in ('submit','approve','reject','revise','award')),
   by_email    text not null,
   note        text not null default '',
   at          timestamptz not null default now()
