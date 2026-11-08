@@ -146,7 +146,7 @@
     draft:     { th: "Draft",         cls: "s-draft", wait: "SC กำลังร่าง" },
     requested: { th: "Requested",     cls: "s-req",   wait: "รอ SSM ตรวจ" },
     reviewed:  { th: "SSM reviewed",  cls: "s-req",   wait: "รอ MD อนุมัติ" },
-    approved:  { th: "Approved",      cls: "s-ok",    wait: "รอ Get Award (เปิด Job)" },
+    approved:  { th: "Approved",      cls: "s-ok",    wait: "รอ Get Award (Job no.)" },
     revise:    { th: "Revise",        cls: "s-rev",   wait: "ส่งกลับให้ SC แก้" },
     locked:    { th: "Budget locked", cls: "s-lock",  wait: "บันทึก Actual ได้" },
   };
@@ -183,11 +183,11 @@
       mk({ id: "ij2604012", ij: "IJ2604012", name: "New Dual EP Line", customer: "ULTRA CLEAN TECHNOLOGY (ISRAEL)", city: "Tel Aviv",
         start: "2027-03-01", end: "2027-03-10", phases: [{ name: "Phase 1 Installation", start: "2027-03-01", end: "2027-03-10" }], status: "draft",
         lines: [L1("manpower", "Technician", 8, 10, "", "manday", 2500)] }),
-      mk({ id: "ij20602006", ij: "IJ20602006", jo: "JO202611001", name: "Plating Line & WWTP relocation", customer: "ISOBE", city: "Nagoya",
+      mk({ id: "ij20602006", ij: "IJ20602006", jo: "03302026", name: "Plating Line & WWTP relocation", customer: "ISOBE", city: "Nagoya",
         start: "2026-11-01", end: "2027-02-04", phases: [{ name: "Dismantle", start: "2026-11-01", end: "2026-11-30" }, { name: "Installation", start: "2026-12-01", end: "2027-01-19" }, { name: "Test & SAT", start: "2027-01-20", end: "2027-02-04" }],
         status: "locked", lockedAt: new Date().toISOString(),
         lines: [L1("manpower", "Technician", 10, 96, "", "manday", 1000), L1("manpower", "Supervisor", 3, 96, "", "manday", 1500), L1("transportation", "รถ 10 ล้อ", "", "", 10, "trip", 12000), L1("accommodation", "ห้องพัก (ต่างประเทศ)", "", "", 100, "คืน", 3500)],
-        history: [{ at: new Date().toISOString(), role: "sc", action: "submit", note: "" }, { at: new Date().toISOString(), role: "ssm", action: "approve", note: "" }, { at: new Date().toISOString(), role: "md", action: "approve", note: "" }, { at: new Date().toISOString(), role: "sc", action: "lock", note: "JO202611001" }],
+        history: [{ at: new Date().toISOString(), role: "sc", action: "submit", note: "" }, { at: new Date().toISOString(), role: "ssm", action: "approve", note: "" }, { at: new Date().toISOString(), role: "md", action: "approve", note: "" }, { at: new Date().toISOString(), role: "sc", action: "lock", note: "03302026" }],
         actuals: [
           { id: uid(), date: "2026-11-03", cat: "manpower", desc: "ค่าแรงทีมรื้อถอน สัปดาห์ 1", amount: 182000, receipt: "", by: "SC", status: "checked" },
           { id: uid(), date: "2026-11-04", cat: "accommodation", desc: "ที่พัก 13 ห้อง × 7 คืน", amount: 318500, receipt: "hotel-w1.jpg", by: "SC", status: "checked" },
@@ -264,7 +264,7 @@
           ${role() === "sc" ? `<button class="se-new" data-new>${IC.plus}New Project</button>` : `<span class="se-hint">สร้างโปรเจคได้ในบทบาท SC</span>`}
         </div>
         <div class="se-row">
-          <label class="se-q">${IC.search}<input id="seQ" placeholder="Search IJ, JO, customer, city..." value="${esc(VIEW.q)}" aria-label="ค้นหาโปรเจค"></label>
+          <label class="se-q">${IC.search}<input id="seQ" placeholder="Search IJ, Job no., customer, city..." value="${esc(VIEW.q)}" aria-label="ค้นหาโปรเจค"></label>
           <div class="se-chips">${FILTERS.map(([k, t]) => `<button class="se-chip ${VIEW.status === k ? "on" : ""}" data-st="${k}">${t}</button>`).join("")}</div>
         </div>
         <div id="seList" class="se-list"></div>
@@ -291,7 +291,7 @@
       ${ph.length ? `<ul>${ph.map(x => `<li><b>${esc(x.name)}</b><span>${fmtD(x.start)} – ${fmtD(x.end)} · ${span(x.start, x.end)} days</span></li>`).join("")}</ul>` : `<p class="se-muted">ยังไม่ได้แบ่ง phase</p>`}</div>` : "";
     return `<article class="se-card ${open ? "open" : ""}">
       <a class="se-card-main" href="#site-expense/${encodeURIComponent(p.id)}">
-        <span class="se-card-l"><span class="se-id"><b>${esc(p.ij)}</b>${p.jo ? `<span class="se-jo">${esc(p.jo)}</span>` : ""}<span class="se-st ${st.cls}">${st.th}</span>
+        <span class="se-card-l"><span class="se-id"><b>${esc(p.ij)}</b>${p.jo ? `<span class="se-jo">Job ${esc(p.jo)}</span>` : ""}<span class="se-st ${st.cls}">${st.th}</span>
           <button class="se-tlb" data-tl="${esc(p.id)}" aria-expanded="${open}" aria-label="Project Timeline">${IC.cal}<span>${open ? "▴" : "▾"}</span></button><span class="se-wait">${st.wait}</span></span>
           <span class="se-nm">${esc(p.name)}</span><span class="se-cu">${esc(p.customer)}${p.city ? " · " + esc(p.city) : ""}</span></span>
         <span class="se-card-r"><span>${daysOf(p)} days</span><span class="se-ppl">${CATS[0].ic}${peopleOf(p)}</span><b>${baht(plannedOf(p))}</b></span>
@@ -342,7 +342,7 @@
     const cur = SECS.find(s => s.id === secId) || SECS[0];
     const st = STATUS[p.status];
     const href = s => `#site-expense/${encodeURIComponent(p.id)}${s === "dashboard" ? "" : "/" + s}`;
-    const steps = [["draft", "SC ร่าง"], ["requested", "SSM ตรวจ"], ["reviewed", "MD อนุมัติ"], ["approved", "Get Award (JO)"], ["locked", "Budgetary 🔒"]];
+    const steps = [["draft", "SC ร่าง"], ["requested", "SSM ตรวจ"], ["reviewed", "MD อนุมัติ"], ["approved", "Get Award (Job no.)"], ["locked", "Budgetary 🔒"]];
     const order = ["draft", "requested", "reviewed", "approved", "locked"];
     const at = p.status === "revise" ? 0 : order.indexOf(p.status);
     const stepper = steps.map(([k, t], i) => `<span class="se-step ${i < at ? "done" : i === at ? "now" : ""}"><i>${i < at ? "✓" : i + 1}</i>${t}</span>`).join('<span class="se-arr">→</span>');
@@ -353,10 +353,10 @@
         ${roleBar()}
         ${listNote}
         <div class="se-ph">
-          <div style="min-width:0"><div class="se-id"><b>${esc(p.ij)}</b>${p.jo ? `<span class="se-jo">${esc(p.jo)}</span>` : `<span class="se-jo none">ยังไม่มี JO</span>`}<span class="se-st ${st.cls}">${st.th}</span><span class="se-wait">${st.wait}</span></div>
+          <div style="min-width:0"><div class="se-id"><b>${esc(p.ij)}</b>${p.jo ? `<span class="se-jo">Job ${esc(p.jo)}</span>` : `<span class="se-jo none">ยังไม่มี Job no.</span>`}<span class="se-st ${st.cls}">${st.th}</span><span class="se-wait">${st.wait}</span></div>
             <h2>${esc(p.name)}</h2><div class="se-cu">${esc(p.customer)}${p.city ? " · " + esc(p.city) : ""} · ${fmtD(p.start)} – ${fmtD(p.end)}</div></div>
           <div class="se-ph-r"><span><small>ระยะเวลา</small><b>${daysOf(p)} days</b></span><span><small>คน</small><b>${peopleOf(p)}</b></span><span><small>${p.budget ? "Budget" : "Planned"}</small><b>${baht(plannedOf(p))}</b></span></div>
-          ${p.award ? `<div class="se-award"><span class="se-aw-ic">🏆</span><span><b>Awarded</b> · ${esc(p.ij)} → <b class="se-jo">${esc(p.jo)}</b> · ${fmtD(p.award.date)}${p.award.value ? ` · มูลค่างาน ${baht(p.award.value)}` : ""}${p.award.by ? ` · เปิด Job โดย ${esc(p.award.by)}` : ""}${p.award.note ? `<small>${esc(p.award.note)}</small>` : ""}</span><span class="se-aw-b">Budget control ${baht(plannedOf(p))} 🔒</span></div>` : ""}
+          ${p.award ? `<div class="se-award"><span class="se-aw-ic">🏆</span><span><b>Awarded</b> · ${esc(p.ij)} → <b class="se-jo">Job ${esc(p.jo)}</b> · ${fmtD(p.award.date)}${p.award.value ? ` · มูลค่างาน ${baht(p.award.value)}` : ""}${p.award.by ? ` · เปิด Job โดย ${esc(p.award.by)}` : ""}${p.award.note ? `<small>${esc(p.award.note)}</small>` : ""}</span><span class="se-aw-b">Budget control ${baht(plannedOf(p))} 🔒</span></div>` : ""}
           <div class="se-ph-a">${p.status === "approved" && p.list === "active" ? (role() === "md" ? `<span class="se-hint" style="margin-right:auto">รอผู้เปิด Job กด Get Award · สลับเป็น SC / SSM เพื่อทดสอบ</span>` : `<button class="se-btn award" data-award>🏆 Get Award</button>`) : ""}${editable(p) ? `<button class="se-btn" data-edit>${IC.edit}แก้ไขข้อมูล</button>` : ""}${p.list === "active" ? `<button class="se-btn" data-arch>${IC.box}Archive</button><button class="se-btn danger" data-trash>${IC.trash}Trash</button>` : ""}</div>
         </div>
         <div class="se-steps">${stepper}</div>
@@ -376,14 +376,14 @@
   }
 
 
-  /* ---------- Get Award: link IJ → Job no. (JO) and lock the Estimate as Budget control ---------- */
+  /* ---------- Get Award: link IJ → Job no. and lock the Estimate as Budget control ---------- */
   function getAward(p) {
     const by = sumByCat(p), total = totalOf(p);
     const me = (window.SSM_ME && (window.SSM_ME.name || window.SSM_ME.email)) || "";
     const m = modal("🏆 Get Award · " + p.ij, `
       <p class="se-hint" style="margin:0">ใส่ Job no. ที่เปิดใหม่ ระบบจะผูก ${esc(p.ij)} กับ Job นี้ และล็อกยอด Estimate ที่ MD อนุมัติเป็น Budget control · ทีมหน้างานบันทึก Actual ได้ทันที</p>
       <div class="se-fgrid">
-        <label>Job no. (JO) *<input id="awJo" placeholder="JO2611001" value="${esc(p.jo)}" autocomplete="off"></label>
+        <label>Job no. *<input id="awJo" placeholder="เช่น 04002026" inputmode="numeric" value="${esc(p.jo)}" autocomplete="off"></label>
         <label>วันที่ได้งาน / เปิด Job *<input id="awDate" type="date" value="${today()}"></label>
         <label>มูลค่างาน / PO (บาท)<input id="awVal" inputmode="decimal" placeholder="ไม่บังคับ"></label>
         <label class="w2">ผู้เปิด Job<input id="awBy" value="${esc(me)}" placeholder="ชื่อผู้เปิด Job"></label>
@@ -395,16 +395,16 @@
       <p class="se-hint" style="margin:0">🔒 หลังกดยืนยัน จะแก้ Estimate ไม่ได้อีก</p>`,
       mm => {
         const g = id => mm.querySelector(id).value.trim();
-        const jo = g("#awJo").toUpperCase(), date = g("#awDate");
-        if (!jo) return "ใส่ Job no. (JO)";
-        if (!/^JO[\w-]{3,}$/i.test(jo)) return "Job no. ควรขึ้นต้นด้วย JO เช่น JO2611001";
+        const jo = g("#awJo").replace(/\s+/g, "").toUpperCase(), date = g("#awDate");
+        if (!jo) return "ใส่ Job no.";
+        if (!/^[A-Z0-9][A-Z0-9\-\/]{3,19}$/.test(jo)) return "Job no. ใช้ตัวเลข/ตัวอักษร 4–20 ตัว เช่น 04002026";
         if (!date) return "ใส่วันที่ได้งาน";
         const dup = DB.projects.find(x => x !== p && x.jo && x.jo.toUpperCase() === jo && x.list !== "trash");
-        if (dup) return `${jo} ผูกกับ ${dup.ij} อยู่แล้ว`;
+        if (dup) return `Job ${jo} ผูกกับ ${dup.ij} อยู่แล้ว`;
         p.jo = jo; p.budget = by; p.lockedAt = new Date().toISOString(); p.status = "locked";
         p.award = { date, value: num(g("#awVal")) || 0, by: g("#awBy"), note: g("#awRef"), at: new Date().toISOString() };
         p.history.push({ at: p.award.at, role: role(), action: "award", note: jo + (p.award.note ? " · " + p.award.note : "") });
-        save(); toast(`Get Award แล้ว · ${p.ij} → ${jo} · ล็อก Budget control`);
+        save(); toast(`Get Award แล้ว · ${p.ij} → Job ${jo} · ล็อก Budget control`);
         location.hash = "#site-expense/" + encodeURIComponent(p.id);
         window.dispatchEvent(new HashChangeEvent("hashchange"));
       }, "ยืนยัน Get Award");
@@ -422,7 +422,7 @@
     const kpi = (l, v, s, c = "") => `<div class="se-kpi ${c}"><span>${l}</span><b>${v}</b><small>${s}</small></div>`;
     sec.innerHTML = `
       <div class="se-sec-h"><h3>📊 Dashboard · Budget vs Actual</h3>${bud ? `<span class="badge live">งบล็อกแล้ว</span>` : `<span class="badge soon">ยังไม่มี Budgetary</span>`}</div>
-      ${bud ? "" : `<div class="se-gate">${IC.lock} ยังไม่มีงบ Budgetary — แสดงยอด Estimate ไว้ให้ดูก่อน เมื่อ MD อนุมัติและเปิด Job (JO) แล้ว จะเทียบ Budget กับ Actual ได้</div>`}
+      ${bud ? "" : `<div class="se-gate">${IC.lock} ยังไม่มีงบ Budgetary — แสดงยอด Estimate ไว้ให้ดูก่อน เมื่อ MD อนุมัติและ Get Award (ได้ Job no.) แล้ว จะเทียบ Budget กับ Actual ได้</div>`}
       <div class="se-kpis">
         ${kpi(bud ? "Budget (ล็อกแล้ว)" : "Estimate", baht(bud ? B : totalOf(p)), "บาท")}
         ${kpi("Actual (ใช้จริง)", baht(A), pend.length ? `รวมรายการรอตรวจ ${pend.length} รายการ` : "บาท")}
@@ -519,7 +519,7 @@
   function secActual(sec, p, redraw) {
     if (p.status !== "locked") {
       sec.innerHTML = `<div class="se-sec-h"><h3>🧾 Actual record · บันทึกค่าใช้จ่ายจริงจากหน้างาน</h3><span class="badge off">ยังบันทึกไม่ได้</span></div>
-        <div class="se-gate big">${IC.lock}<span><b>บันทึก Actual ได้เมื่อโปรเจคมี JO และ Budgetary ที่ล็อกแล้ว</b><br>สถานะตอนนี้: ${STATUS[p.status].th} · ${STATUS[p.status].wait} · <a href="#site-expense/${encodeURIComponent(p.id)}/estimate">ไปที่ Estimate →</a></span></div>`;
+        <div class="se-gate big">${IC.lock}<span><b>บันทึก Actual ได้เมื่อ Get Award แล้ว (มี Job no. และ Budget control ที่ล็อกแล้ว)</b><br>สถานะตอนนี้: ${STATUS[p.status].th} · ${STATUS[p.status].wait} · <a href="#site-expense/${encodeURIComponent(p.id)}/estimate">ไปที่ Estimate →</a></span></div>`;
       return;
     }
     const act = actualBy(p), r = role(), can = p.list === "active";
@@ -527,7 +527,7 @@
     const rows = p.actuals.slice().sort((a, b) => b.date.localeCompare(a.date));
     const STA = { pending: ["รอตรวจ", "s-req"], checked: ["ตรวจแล้ว", "s-ok"], rejected: ["ไม่ผ่าน", "s-rev"] };
     sec.innerHTML = `
-      <div class="se-sec-h"><h3>🧾 Actual record · ${esc(p.jo)}</h3><span class="badge live">บันทึกได้</span></div>
+      <div class="se-sec-h"><h3>🧾 Actual record · Job ${esc(p.jo)}</h3><span class="badge live">บันทึกได้</span></div>
       ${can ? `<div class="se-form2">
         <label class="se-f">วันที่<input type="date" id="aDate" value="${today()}"></label>
         <label class="se-f">หมวด<select id="aCat">${CATS.map(c => `<option value="${c.code}">${esc(c.name)}</option>`).join("")}</select></label>
