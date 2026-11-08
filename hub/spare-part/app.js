@@ -227,7 +227,7 @@
         <div class="sub">${esc(p.customer)} · ${esc(p.site || "")} · ผู้ติดต่อ ${esc(p.contact || "-")} ${esc(p.tel || "")} · QO ${esc(p.qo || "-")} · PO ${esc(p.po || "-")} · ส่งมอบ ${esc(p.delivery || "-")}</div>
         <div class="sp-links">${links}</div></div>
         <div class="sp-actions"><select class="sp-in" id="spStatus">${Object.keys(STATUS).map(s => `<option value="${s}" ${p.status === s ? "selected" : ""}>${STATUS[s][0]}</option>`).join("")}</select>
-          <button class="sp-btn" data-a="zone">＋ เพิ่มโซน</button><button class="sp-btn" data-a="csv">Export Excel (CSV)</button><button class="sp-btn primary" data-a="save">บันทึก</button>${isAdmin() ? `<button class="sp-btn danger" data-a="delete">ลบโปรเจค</button>` : ""}</div></div>
+          <button class="sp-btn" data-a="zone">＋ เพิ่มโซน</button><button class="sp-btn" data-a="csv" title="ไฟล์ CSV สำหรับส่งลูกค้า: ไม่มี Remarks และเฉพาะรายการที่ใส่ Unit price แล้ว">Export for customer</button><button class="sp-btn primary" data-a="save">บันทึก</button>${isAdmin() ? `<button class="sp-btn danger" data-a="delete">ลบโปรเจค</button>` : ""}</div></div>
       <div class="tbl sp-edit"><table><thead><tr>${COLS.map(c => `<th>${c}</th>`).join("")}<th></th></tr></thead><tbody>${body || `<tr><td colspan="${COLS.length + 1}" class="sub">ยังไม่มีรายการ · กด ＋ เพิ่มโซน</td></tr>`}</tbody>
         <tfoot><tr><td colspan="12" class="r"><b>Total (excl. VAT)</b></td><td class="r"><b id="spGrand"></b></td><td colspan="2"></td></tr></tfoot></table></div>
       <p class="sp-src">อะไหล่ที่ระบบเสนอเป็นค่าเริ่มต้นตามประเภทอุปกรณ์ · ใส่ Part No. และ Unit price (ราคาขาย) ก่อนส่งลูกค้า · Lead time เริ่มต้นจาก Project Pipeline</p>
@@ -261,22 +261,26 @@
         const ok = await remove(p.id); if (ok) location.hash = "#spare-part"; else ROOT.querySelector("#spSaved").textContent = "ลบไม่สำเร็จ (ต้องเป็น admin)"; }
     });
   }
-  function exportCsv(p) {
+  function exportCsv(p) { // customer copy: no Remarks column, only lines that have a Unit price
     migrate(p);
     const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const out = [["Recommended Spare Part List"], ["Customer", p.customer], ["Project", p.name], ["Job No.", p.jo], ["QO / PO", (p.qo || "") + " / " + (p.po || "")], [], COLS];
+    const cols = COLS.filter(c => c !== "Remarks"), pad = n => Array(n).fill("");
+    const priced = l => String(l.unitPrice ?? "").trim() !== "" && num(l.unitPrice) > 0;
+    if (!p.lines.some(priced)) { alert("ยังไม่มีรายการที่ใส่ Unit price · Export for customer ส่งออกเฉพาะรายการที่มีราคา"); return; }
+    const out = [["Recommended Spare Part List"], ["Customer", p.customer], ["Project", p.name], ["Job No.", p.jo], ["QO / PO", (p.qo || "") + " / " + (p.po || "")], [], cols];
     let no = 0, grand = 0;
     zonesOf(p).forEach(z => {
-      const rows = p.lines.filter(l => l.zone === z); out.push([z]);
-      let sub = 0;
-      rows.forEach(l => { const a = amountOf(l); sub += a; out.push([++no, [l.equip, l.tag].filter(Boolean).join(" / "), l.part, l.partNo, l.maker, l.spec, l.installed, l.qty, l.unit, l.prio, l.leadWeeks, l.unitPrice === "" ? "" : num(l.unitPrice), a || "", l.remark]); });
-      grand += sub; out.push(["", "", "", "", "", "", "", "", "", "", "", "Subtotal " + z, sub || "", ""]);
+      const rows = p.lines.filter(l => l.zone === z && priced(l)); if (!rows.length) return;
+      out.push([z]); let sub = 0;
+      rows.forEach(l => { const a = amountOf(l); sub += a; out.push([++no, [l.equip, l.tag].filter(Boolean).join(" / "), l.part, l.partNo, l.maker, l.spec, l.installed, l.qty, l.unit, l.prio, l.leadWeeks, num(l.unitPrice), a]); });
+      grand += sub; out.push([...pad(11), "Subtotal " + z, sub]);
     });
-    out.push([], ["", "", "", "", "", "", "", "", "", "", "", "Total (excl. VAT)", grand || "", ""]);
-    const csv = "﻿" + out.map(r => r.map(q).join(",")).join("\r\n");
+    out.push([], [...pad(11), "Total (excl. VAT)", grand]);
+    const csv = "\ufeff" + out.map(r => r.map(q).join(",")).join("\r\n");
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    a.download = `SparePart_${p.jo}_${(p.customerShort || "").replace(/\W+/g, "")}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    a.download = `SparePart_${p.jo}_${(p.customerShort || "").replace(/\W+/g, "")}_customer.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
+
 
   /* ---------- mount ---------- */
   const CSS = `
