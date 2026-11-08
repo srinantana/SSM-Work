@@ -6,44 +6,29 @@
 <title>HAM-LET EP500L Spare Part List</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 /* Layout idea: engineering document — project title block on top, system strip as the index, one dense editable register per system below. */
 :root{
-  --bg:#f3f5f7; --paper:#ffffff; --ink:#18212b; --muted:#5d6b7a; --line:#d8dee5;
-  --accent:#0b5e8a; --accent-soft:#e3eff6;
-  --crit:#b42318; --crit-soft:#fdecea; --rec:#a15c00; --rec-soft:#fdf1dc; --opt:#55606c; --opt-soft:#edf0f3;
-  --flag:#8a5a00; --flag-soft:#fff6d6; --input:#fffbe6; --good:#1d7a46;
+  --bg:#f5f6f8; --paper:#ffffff; --ink:#22252b; --muted:#6d7582; --line:#e6e8ed;
+  --accent:#c70404; --accent-dark:#a00303; --accent-soft:#fff0f0; --blush-2:#ffd9d9;
+  --crit:#a00303; --crit-soft:#ffe3e3; --rec:#946719; --rec-soft:#fff4da; --opt:#55606c; --opt-soft:#edf0f3;
+  --flag:#8a5a00; --flag-soft:#fff6d6; --input:#fffbe6; --good:#188764;
   --font-body:"IBM Plex Sans Thai", "Leelawadee UI", "Tahoma", system-ui, sans-serif;
-  --font-mono:"IBM Plex Mono", ui-monospace, "Consolas", monospace;
+  --font-mono:"IBM Plex Sans Thai", "Leelawadee UI", "Tahoma", system-ui, sans-serif;
   color-scheme:light;
-}
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --bg:#11161c; --paper:#182029; --ink:#e4e9ef; --muted:#93a1b0; --line:#2b3642;
-    --accent:#5fb3e0; --accent-soft:#15303f;
-    --crit:#ff8a7a; --crit-soft:#3a1c1a; --rec:#f0b35a; --rec-soft:#382a12; --opt:#a9b4bf; --opt-soft:#232c36;
-    --flag:#f1c75b; --flag-soft:#33290f; --input:#262a1c; --good:#6fd39a; color-scheme:dark;
-  }
-}
-:root[data-theme="dark"]{
-  --good:#6fd39a;
-  --bg:#11161c; --paper:#182029; --ink:#e4e9ef; --muted:#93a1b0; --line:#2b3642;
-  --accent:#5fb3e0; --accent-soft:#15303f;
-  --crit:#ff8a7a; --crit-soft:#3a1c1a; --rec:#f0b35a; --rec-soft:#382a12; --opt:#a9b4bf; --opt-soft:#232c36;
-  --flag:#f1c75b; --flag-soft:#33290f; --input:#262a1c; color-scheme:dark;
 }
 *{box-sizing:border-box}
 html,body{margin:0}
-body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:14px;line-height:1.5}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:14px;line-height:1.5;font-variant-numeric:tabular-nums}
 h1,h2,h3{text-wrap:balance;margin:0}
 button,select,input{font:inherit;color:inherit}
 button{cursor:pointer}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+:focus-visible{outline:3px solid #df8989;outline-offset:2px}
 .wrap{max-width:1500px;margin:0 auto;padding:20px 20px 60px;display:grid;gap:16px}
 
 /* title block */
-.titleblock{background:var(--paper);border:1px solid var(--line);border-radius:6px;display:grid;grid-template-columns:minmax(220px,300px) 1fr;overflow:hidden}
+.titleblock{background:var(--paper);border:1px solid var(--line);border-radius:12px;display:grid;grid-template-columns:minmax(220px,300px) 1fr;overflow:hidden}
 .tb-brand{padding:18px 20px;border-right:1px solid var(--line);display:grid;gap:6px;align-content:start}
 .tb-brand .eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
 .tb-brand h1{font-size:20px;line-height:1.25}
@@ -57,11 +42,10 @@ button{cursor:pointer}
 
 /* toolbar */
 .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-.btn{border:1px solid var(--line);background:var(--paper);padding:7px 12px;border-radius:5px;display:inline-flex;gap:6px;align-items:center}
+.btn{border:1px solid var(--line);background:var(--paper);padding:7px 12px;border-radius:8px;display:inline-flex;gap:6px;align-items:center}
 .btn:hover{border-color:var(--accent)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-:root[data-theme="dark"] .btn.primary{color:#0b1a24}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .btn.primary{color:#0b1a24}}
+.btn.primary:hover{background:var(--accent-dark);border-color:var(--accent-dark)}
 .spacer{flex:1}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:5px;overflow:hidden;background:var(--paper)}
 .seg button{border:0;background:transparent;padding:7px 11px}
@@ -69,7 +53,7 @@ button{cursor:pointer}
 .search{border:1px solid var(--line);background:var(--paper);border-radius:5px;padding:7px 10px;min-width:220px}
 
 /* rules panel */
-.rules{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:12px 16px;display:flex;flex-wrap:wrap;gap:18px;align-items:end}
+.rules{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:12px 16px;display:flex;flex-wrap:wrap;gap:18px;align-items:end}
 .rules h3{font-size:13px;width:100%;color:var(--muted);font-weight:600}
 .rule{display:grid;gap:3px}
 .rule label{font-size:12px;color:var(--muted)}
@@ -79,7 +63,7 @@ button{cursor:pointer}
 /* system strip */
 .strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
 @media (min-width:1360px){.strip{grid-template-columns:repeat(8,minmax(0,1fr))}}
-.sys{background:var(--paper);border:1px solid var(--line);border-radius:6px;padding:10px 12px;text-align:left;display:grid;gap:4px;position:relative}
+.sys{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:10px 12px;text-align:left;display:grid;gap:4px;position:relative}
 .sys:hover{border-color:var(--accent)}
 .sys[aria-current="true"]{border-color:var(--accent);box-shadow:inset 0 3px 0 var(--accent)}
 .sys .no{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
@@ -97,7 +81,7 @@ button{cursor:pointer}
 .syshead .ds{color:var(--muted);font-size:13px}
 
 /* table */
-.tablebox{background:var(--paper);border:1px solid var(--line);border-radius:6px;overflow-x:auto}
+.tablebox{background:var(--paper);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
 table{border-collapse:collapse;width:100%;min-width:1500px}
 td:nth-child(2){min-width:200px}td:nth-child(3){min-width:220px}td:nth-child(6){min-width:200px}td:nth-child(14){min-width:170px}
 th,td{border-bottom:1px solid var(--line);padding:6px 8px;vertical-align:top;text-align:left}
@@ -141,21 +125,38 @@ tfoot td{font-weight:600;background:var(--bg)}
 .legend span{display:inline-flex;gap:5px;align-items:center}
 .dot{width:10px;height:10px;border-radius:2px;display:inline-block}
 .foot{font-size:12px;color:var(--muted);display:grid;gap:4px;max-width:110ch}
-.toast{position:fixed;right:16px;bottom:16px;background:var(--ink);color:var(--paper);padding:9px 14px;border-radius:6px;font-size:13px;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none;z-index:9}
+.toast{position:fixed;right:16px;bottom:16px;background:var(--ink);color:var(--paper);padding:9px 14px;border-radius:12px;font-size:13px;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none;z-index:9}
 .toast.on{opacity:1;transform:none}
 @media (prefers-reduced-motion: reduce){.toast{transition:none}}
 .dialog{position:fixed;inset:0;background:rgba(10,15,20,.45);display:none;align-items:center;justify-content:center;padding:16px;z-index:8}
 .dialog.on{display:flex}
 .dialog .box{background:var(--paper);border-radius:8px;padding:18px;max-width:440px;display:grid;gap:12px;border:1px solid var(--line)}
 .dialog .row{display:flex;gap:8px;justify-content:flex-end}
+
+/* RAK app bar — links back to the SSM Work hub */
+.rakbar{background:#121212;color:#fff}
+.rakbar .in{max-width:1500px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;gap:16px}
+.rakbar img{height:26px;width:auto;display:block}
+.rakbar .word{display:none;font-weight:700;letter-spacing:.06em}
+.rakbar .word b{color:var(--accent)}
+.rakbar .ws{font-size:10px;letter-spacing:2px;color:#b7b7b7;border-left:1px solid #3a3a3a;padding-left:16px}
+.rakbar a.back{margin-left:auto;display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:#fff;background:#2a2a2a;border-radius:999px;padding:5px 14px 5px 6px;font-size:12.5px}
+.rakbar a.back:hover{background:var(--accent)}
+.rakbar a.back .t{display:grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent)}
+.rakbar a.back:hover .t{background:#fff}
+.tb-brand{background:linear-gradient(180deg,var(--accent-soft),var(--paper) 70%)}
+.tb-brand .eyebrow{color:var(--accent);font-weight:600}
+.tb-brand .eyebrow svg{width:18px;height:18px;vertical-align:-4px;margin-right:4px}
+@media print{.rakbar{display:none}}
 </style>
 </head>
 <body>
+<header class="rakbar"><div class="in"><img src="../../../../assets/rak-logo.svg" alt="RAK Engineering" onerror="this.style.display='none';this.nextElementSibling.style.display='inline'"><span class="word"><b>RAK</b> ENGINEERING</span><span class="ws">SSM WORK · SPARE PART</span><a class="back" href="../../../../#spare-part"><span class="t">←</span>กลับหน้า SSM Work</a></div></header>
 <div class="wrap" id="app">
 
   <section class="titleblock" aria-label="Document header">
     <div class="tb-brand">
-      <span class="eyebrow">Spare Part List · แนะนำอะไหล่สำรอง</span>
+      <span class="eyebrow"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6.2a5.8 5.8 0 1 1 0 11.6 5.8 5.8 0 0 1 0-11.6z" fill="#ffd9d9"/><path d="M10.4 3.5h3.2l.5 2.2 1.6.7 1.9-1.2 2.3 2.3-1.2 1.9.7 1.6 2.2.5v3.2l-2.2.5-.7 1.6 1.2 1.9-2.3 2.3-1.9-1.2-1.6.7-.5 2.2h-3.2l-.5-2.2-1.6-.7-1.9 1.2-2.3-2.3 1.2-1.9-.7-1.6-2.2-.5v-3.2l2.2-.5.7-1.6-1.2-1.9 2.3-2.3 1.9 1.2 1.6-.7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="10.2" cy="11" r=".95" fill="currentColor"/><circle cx="13.8" cy="11" r=".95" fill="currentColor"/><path d="M10 13.6a2.6 2.6 0 0 0 4 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Spare Part List · แนะนำอะไหล่สำรอง</span>
       <h1 id="projTitle">Double Soak EP Process (500L) × 2 systems</h1>
       <span class="jo" id="projJo">JO 02702026 · HAM-LET (Thailand)</span>
     </div>
@@ -647,7 +648,7 @@ const stamp = () => (S.header.docNo||"SPL")+"_Rev"+(S.header.rev||"0");
 document.getElementById("dlCsv").onclick=()=>{
   const all=[["System"].concat(headCols())];
   S.systems.forEach(sys=>tableRows(sys).forEach(r=>all.push([sys.name+" ("+sys.tags+")"].concat(r))));
-  const csv="﻿"+all.map(r=>r.map(c=>{ const s=String(c); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }).join(",")).join("\r\n");
+  const csv="\ufeff"+all.map(r=>r.map(c=>{ const s=String(c); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s; }).join(",")).join("\r\n");
   saveFile(stamp()+".csv", csv, "text/csv");
 };
 document.getElementById("dlXlsx").onclick=()=>{
