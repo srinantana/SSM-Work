@@ -34,8 +34,12 @@
     upsert(p); lsWrite(PROJECTS); return p;
   }
   async function remove(id) {
-    if (MODE === "server") await fetch("/api/spare-part/projects?id=" + encodeURIComponent(id), { method: "DELETE" }).catch(() => null);
+    if (MODE === "server") {
+      const r = await fetch("/api/spare-part/projects?id=" + encodeURIComponent(id), { method: "DELETE" }).catch(() => null);
+      if (!r || !r.ok) return false;
+    }
     PROJECTS = PROJECTS.filter(x => x.id !== id); if (MODE === "local") lsWrite(PROJECTS);
+    return true;
   }
   const upsert = p => { const i = PROJECTS.findIndex(x => x.id === p.id); i < 0 ? PROJECTS.unshift(p) : (PROJECTS[i] = p); };
   const uid = () => "sp-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -82,7 +86,8 @@
   }
 
   /* ---------- views ---------- */
-  const STATUS = { draft: ["Draft", "soon"], review: ["Review", "soon"], issued: ["Issued", "live"] };
+  const STATUS = { draft: ["Draft", "soon"], review: ["Review", "soon"], issued: ["Issued", "live"], inactive: ["Inactive", "off"] };
+  const isAdmin = () => !!(window.SSM_ME && window.SSM_ME.role === "admin");
   const pill = s => { const [t, k] = STATUS[s] || STATUS.draft; return `<span class="badge ${k}">${t}</span>`; };
   const fmtDate = d => d ? new Date(d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : "";
 
@@ -100,7 +105,7 @@
     if (!PROJECTS.length) return `<div class="empty">ยังไม่มีโปรเจค Spare Part · กด <b>Create new project</b> เพื่อเลือก Job แล้วระบบจะดึงข้อมูลจาก Job Order, Aux list และ P&ID ให้</div>`;
     if (!rows.length) return `<div class="empty">ไม่พบโปรเจคที่ตรงกับคำค้น</div>`;
     return `<div class="tbl"><table><thead><tr><th>Job No.</th><th>Customer</th><th>Project name</th><th>รายการอะไหล่</th><th>สถานะ</th><th>อัปเดต</th><th></th></tr></thead><tbody>${rows.map(p => `
-      <tr><td><span class="jo">${esc(p.jo)}</span></td><td>${esc(p.customerShort || p.customer)}<div class="sub">${esc(p.site || "")}</div></td>
+      <tr class="${p.status === "inactive" ? "sp-off" : ""}"><td><span class="jo">${esc(p.jo)}</span></td><td>${esc(p.customerShort || p.customer)}<div class="sub">${esc(p.site || "")}</div></td>
       <td>${esc(p.name)}</td><td>${(p.lines || []).length}</td><td>${pill(p.status)}</td><td class="sub">${fmtDate(p.updated)}</td>
       <td><a class="open" href="#spare-part/${encodeURIComponent(p.id)}">เปิด →</a></td></tr>`).join("")}</tbody></table></div>`;
   }
@@ -222,10 +227,10 @@
         <div class="sub">${esc(p.customer)} · ${esc(p.site || "")} · ผู้ติดต่อ ${esc(p.contact || "-")} ${esc(p.tel || "")} · QO ${esc(p.qo || "-")} · PO ${esc(p.po || "-")} · ส่งมอบ ${esc(p.delivery || "-")}</div>
         <div class="sp-links">${links}</div></div>
         <div class="sp-actions"><select class="sp-in" id="spStatus">${Object.keys(STATUS).map(s => `<option value="${s}" ${p.status === s ? "selected" : ""}>${STATUS[s][0]}</option>`).join("")}</select>
-          <button class="sp-btn" data-a="zone">＋ เพิ่มโซน</button><button class="sp-btn" data-a="csv">Export Excel (CSV)</button><button class="sp-btn primary" data-a="save">บันทึก</button></div></div>
+          <button class="sp-btn" data-a="zone">＋ เพิ่มโซน</button><button class="sp-btn" data-a="csv">Export Excel (CSV)</button><button class="sp-btn primary" data-a="save">บันทึก</button>${isAdmin() ? `<button class="sp-btn danger" data-a="delete">ลบโปรเจค</button>` : ""}</div></div>
       <div class="tbl sp-edit"><table><thead><tr>${COLS.map(c => `<th>${c}</th>`).join("")}<th></th></tr></thead><tbody>${body || `<tr><td colspan="${COLS.length + 1}" class="sub">ยังไม่มีรายการ · กด ＋ เพิ่มโซน</td></tr>`}</tbody>
         <tfoot><tr><td colspan="12" class="r"><b>Total (excl. VAT)</b></td><td class="r"><b id="spGrand"></b></td><td colspan="2"></td></tr></tfoot></table></div>
-      <p class="sp-src">อะไหล่ที่ระบบเสนอเป็นค่าเริ่มต้นตามประเภทอุปกรณ์ · ใส่ Part No. และ Unit price (ราคาขาย) ก่อนส่งลูกค้า · Lead time เริ่มต้นจาก Project Pipeline · <button class="sp-link" data-a="delete">ลบโปรเจคนี้</button></p>
+      <p class="sp-src">อะไหล่ที่ระบบเสนอเป็นค่าเริ่มต้นตามประเภทอุปกรณ์ · ใส่ Part No. และ Unit price (ราคาขาย) ก่อนส่งลูกค้า · Lead time เริ่มต้นจาก Project Pipeline</p>
       <span class="sp-saved" id="spSaved" aria-live="polite"></span>`;
     const totals = () => {
       zones.forEach((z, i) => { const t = p.lines.filter(l => l.zone === z).reduce((a, l) => a + amountOf(l), 0); const el = ROOT.querySelector(`[data-ztot="${i}"]`); if (el) el.textContent = t ? "รวม " + money(t) : ""; });
@@ -252,7 +257,8 @@
       if (a === "zone") { const n = prompt("ชื่อโซนใหม่ (Process tank หรือ System)", "Zone " + String.fromCharCode(65 + zones.length) + " – "); if (n && n.trim()) { p.zones = [...(p.zones || []), n.trim()]; p.lines.push(blank(n.trim())); redraw(); } }
       if (a === "csv") exportCsv(p);
       if (a === "save") { p.zones = zonesOf(p); await save(p); ROOT.querySelector("#spSaved").textContent = "บันทึกแล้ว " + new Date().toLocaleTimeString("th-TH") + (MODE === "local" ? " (ในเบราว์เซอร์นี้)" : ""); }
-      if (a === "delete" && confirm("ลบโปรเจค Spare Part " + p.jo + " ? (ลบแล้วกู้คืนไม่ได้)")) { await remove(p.id); location.hash = "#spare-part"; }
+      if (a === "delete" && isAdmin() && confirm("ลบโปรเจค Spare Part " + p.jo + " – " + p.name + " ?\nลบแล้วกู้คืนไม่ได้ (ถ้าแค่เลิกใช้ ให้เปลี่ยนสถานะเป็น Inactive)")) {
+        const ok = await remove(p.id); if (ok) location.hash = "#spare-part"; else ROOT.querySelector("#spSaved").textContent = "ลบไม่สำเร็จ (ต้องเป็น admin)"; }
     });
   }
   function exportCsv(p) {
@@ -282,6 +288,7 @@
 .sp-btn{font:inherit;font-size:13.5px;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:9px;padding:8px 14px;cursor:pointer;white-space:nowrap}
 .sp-btn.primary{background:var(--rak);border-color:var(--rak);color:#fff;font-weight:600}.sp-btn.primary:hover{background:var(--rak-dark)}
 .sp-create{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 14px}.sp-btn.big{font-size:15px;padding:11px 20px;border-radius:11px}
+.sp-btn.danger{color:var(--rak);border-color:var(--blush-2)}.sp-btn.danger:hover{background:var(--rak);color:#fff}.badge.off{background:#eceef1;color:#6d7582}tr.sp-off td{opacity:.55}
 .sp-note{background:var(--amber-soft,#fff6e0);border:1px solid #f1d38a;border-radius:10px;padding:10px 12px;margin:0 0 14px;font-size:13px}
 .sp-src{color:var(--muted);font-size:12.5px;margin-top:14px}.sp-src a{color:var(--rak)}
 .sp-modal{position:fixed;inset:0;background:rgba(18,18,18,.45);display:grid;place-items:center;z-index:50;padding:16px}

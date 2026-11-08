@@ -130,6 +130,7 @@ async function sparePartApi(cfg, req, url, prof) {
   const origin = req.headers.get('origin');
   if (origin && origin !== cfg.app) return json({ error: 'bad origin' }, 403);
   if (req.method === 'DELETE') {
+    if (prof.role !== 'admin') return json({ error: 'admin only' }, 403);
     const id = url.searchParams.get('id') || '';
     if (!/^[\w-]{3,64}$/.test(id)) return json({ error: 'id' }, 400);
     const r = await rest('?id=eq.' + encodeURIComponent(id), { method: 'DELETE' });
