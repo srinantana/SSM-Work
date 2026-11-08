@@ -16,13 +16,12 @@ Add a row whenever a new customer, project or tool is created.
 
 | Customer | Project (JO) | Tool | Folder | Live URL |
 |---|---|---|---|---|
-| HAM-LET (Thailand) | JO 02702026 · Double Soak EP 500L × 2 systems | Customer spare part list | [`hamlet/jo02702026-ep500l-double-soak/spare-part-list`](hamlet/jo02702026-ep500l-double-soak/spare-part-list) | https://ssmwork.vercel.app/customers/hamlet/jo02702026-ep500l-double-soak/spare-part-list/ |
 
 ## Naming rules
 
 - **Folder names:** lower-case, hyphens, no spaces or Thai characters.
-  - Customer: short company name — `hamlet`, `pandora`, `daisin`, `uct`
-  - Project: `jo` + job-order number + short description — `jo02702026-ep500l-double-soak`
+  - Customer: short company name — `pandora`, `daisin`, `uct`
+  - Project: `jo` + job-order number + short description — `jo<job-order>-<short-description>`
   - Tool: what it does — `spare-part-list`, `punch-list`, `site-expense`
 - **Vercel:** all tools are served by the one hub project `ssmwork` (Root Directory `hub`). A tool's URL is `https://ssmwork.vercel.app/customers/<customer>/<project>/<tool>/`. Create a separate Vercel project only for a tool that needs its own server or database.
 - **README in every customer and project folder** — who, what, which documents the data came from.
