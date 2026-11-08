@@ -16,7 +16,7 @@ Add a row whenever a new customer, project or tool is created.
 
 | Customer | Project (JO) | Tool | Folder | Live URL |
 |---|---|---|---|---|
-| HAM-LET (Thailand) | JO 02702026 · Double Soak EP 500L × 2 systems | Customer spare part list | [`hamlet/jo02702026-ep500l-double-soak/spare-part-list`](hamlet/jo02702026-ep500l-double-soak/spare-part-list) | https://hamlet-ep500l-spare-parts-ssm-rak.vercel.app |
+| HAM-LET (Thailand) | JO 02702026 · Double Soak EP 500L × 2 systems | Customer spare part list | [`hamlet/jo02702026-ep500l-double-soak/spare-part-list`](hamlet/jo02702026-ep500l-double-soak/spare-part-list) | https://hamlet-02702026-spare-parts-ssm-rak.vercel.app |
 
 ## Naming rules
 
@@ -24,7 +24,7 @@ Add a row whenever a new customer, project or tool is created.
   - Customer: short company name — `hamlet`, `pandora`, `daisin`, `uct`
   - Project: `jo` + job-order number + short description — `jo02702026-ep500l-double-soak`
   - Tool: what it does — `spare-part-list`, `punch-list`, `site-expense`
-- **Vercel project names:** `<customer>-<jo-number>-<tool>` — for example `hamlet-02702026-spare-parts`. Set the project's **Root Directory** to the tool folder.
+- **Vercel project names:** `<customer>-<jo-number>-<tool>` — for example `hamlet-02702026-spare-parts` (Vercel project for HAM-LET JO 02702026). Set the project's **Root Directory** to the tool folder.
 - **README in every customer and project folder** — who, what, which documents the data came from.
 
 ## Adding a new project
