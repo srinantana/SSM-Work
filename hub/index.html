@@ -138,7 +138,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:#f1f3
   .menu-btn{display:inline-flex}
   .topbar{padding:0 16px;height:60px}
   .topbar .chip{display:none}
-  .logout{margin-left:auto}
+  #acct{margin-left:auto}
   .content{padding:20px 16px 44px}
   .project{grid-template-columns:1fr}
   .soon-card{grid-template-columns:1fr}
@@ -177,7 +177,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:#f1f3
     <div class="topbar">
       <button class="menu-btn" id="menuBtn" aria-controls="nav" aria-expanded="false" aria-label="เปิดเมนู"><svg class="ic"><use href="#i-menu"/></svg></button>
       <div class="crumb" id="crumb"></div>
-      <span class="chip" id="who">SSM Work</span><a class="logout" id="logout" href="/auth/logout" hidden>ออกจากระบบ</a>
+      <span class="chip" id="who">SSM Work</span><span id="acct" hidden><a class="logout" id="admin" href="/admin" hidden>จัดการผู้ใช้</a> <a class="logout" href="/auth/password">เปลี่ยนรหัสผ่าน</a> <a class="logout" href="/auth/logout">ออกจากระบบ</a></span>
     </div>
     <main class="content" id="content" tabindex="-1"></main>
   </div>
@@ -302,7 +302,8 @@ fetch("/auth/me", {cache:"no-store"}).then(r => r.ok ? r.json() : null).then(u =
   if (!u || !u.email) return;
   document.getElementById("who").textContent = "👋 " + (u.name || u.email);
   document.getElementById("who").title = u.email;
-  document.getElementById("logout").hidden = false;
+  document.getElementById("acct").hidden = false;
+  if (u.role === "admin") document.getElementById("admin").hidden = false;
 }).catch(() => {});
 render();
 fetch("registry.json", {cache:"no-store"})
