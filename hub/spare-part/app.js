@@ -182,6 +182,8 @@
   }
 
   /* --- project detail --- */
+  const PRIOS = ["Critical", "Recommended", "Consumable"];
+  const prioCls = v => "p-" + String(v || "recommended").toLowerCase();
   const COLS = ["No.", "Equipment / Tag", "Part description", "Part No. / Drawing Ref.", "Manufacturer / Model", "Specification / Material", "Installed qty", "Recommended spare qty", "Unit", "Priority", "Lead time (weeks)", "Unit price", "Amount", "Remarks"];
   const num = v => { const n = parseFloat(String(v ?? "").replace(/,/g, "")); return isFinite(n) ? n : 0; };
   const money = n => n ? n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
@@ -217,7 +219,7 @@
           <td class="w2">${inp(l, "equip", "", "Equipment")}${inp(l, "tag", "tag", "Tag")}</td>
           <td class="w2">${inp(l, "part")}</td><td>${inp(l, "partNo")}</td><td class="w2">${inp(l, "maker")}</td><td class="w2">${inp(l, "spec")}</td>
           <td class="n">${inp(l, "installed")}</td><td class="n">${inp(l, "qty")}</td><td class="n">${inp(l, "unit")}</td>
-          <td><select class="sp-cell" data-l="${l.id}" data-k="prio">${["Critical", "Recommended", "Consumable"].map(o => `<option ${l.prio === o ? "selected" : ""}>${o}</option>`).join("")}</select></td>
+          <td><select class="sp-cell sp-prio ${prioCls(l.prio)}" data-l="${l.id}" data-k="prio">${PRIOS.map(o => `<option class="${prioCls(o)}" ${l.prio === o ? "selected" : ""}>${o}</option>`).join("")}</select></td>
           <td class="n">${inp(l, "leadWeeks")}</td><td class="m">${inp(l, "unitPrice", "r")}</td><td class="m r amt" data-amt="${l.id}">${money(amountOf(l))}</td>
           <td class="w2">${inp(l, "remark")}</td>
           <td class="act"><select class="sp-move" data-move="${l.id}" title="ย้ายโซน" aria-label="ย้ายโซน"><option value="">⇄</option>${zones.map((x, i) => x === z ? "" : `<option value="${i}">${esc(x)}</option>`).join("")}</select><button class="sp-x" data-del="${l.id}" title="ลบรายการ">✕</button></td></tr>`; }).join("");
@@ -242,6 +244,7 @@
     const blank = zone => ({ id: uid(), zone, equip: "", tag: "", part: "", partNo: "", maker: "", spec: "", installed: "", qty: 1, unit: "pc", prio: "Recommended", leadWeeks: "", unitPrice: "", remark: "", source: "Manual" });
     ROOT.querySelectorAll(".sp-cell").forEach(i => i.oninput = i.onchange = () => {
       const l = p.lines.find(x => x.id === i.dataset.l); l[i.dataset.k] = i.value; mark();
+      if (i.dataset.k === "prio") i.className = "sp-cell sp-prio " + prioCls(i.value);
       if (i.dataset.k === "qty" || i.dataset.k === "unitPrice") { ROOT.querySelector(`[data-amt="${l.id}"]`).textContent = money(amountOf(l)); totals(); }
     });
     ROOT.querySelectorAll(".sp-zname").forEach(i => i.onchange = () => {
@@ -403,6 +406,11 @@
 .sp-create{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 14px}.sp-btn.big{font-size:15px;padding:11px 20px;border-radius:11px}
 .sp-btn.danger{color:var(--rak);border-color:var(--blush-2)}.sp-btn.danger:hover{background:var(--rak);color:#fff}.badge.off{background:#eceef1;color:#6d7582}tr.sp-off td{opacity:.55}
 .sp-drop{display:block;border:2px dashed var(--line);border-radius:12px;padding:22px;text-align:center;cursor:pointer;color:var(--muted);margin:12px 0}.sp-drop:hover,.sp-drop.on{border-color:var(--rak);background:var(--blush);color:var(--rak)}.sp-preview{background:var(--bg);border-radius:10px;padding:10px 12px;margin-top:10px}
+.sp-prio{font-weight:600;min-width:146px!important;border-radius:20px!important;padding:4px 8px!important;border:1px solid transparent!important;cursor:pointer}
+.p-critical{background:#fde2e2!important;color:#b00000!important;border-color:#f5b5b5!important}
+.p-recommended{background:#fff1d6!important;color:#8a5a00!important;border-color:#f1d38a!important}
+.p-consumable{background:#e3f0ff!important;color:#0b5394!important;border-color:#b6d4f5!important}
+option.p-critical,option.p-recommended,option.p-consumable{font-weight:600}
 .sp-note{background:var(--amber-soft,#fff6e0);border:1px solid #f1d38a;border-radius:10px;padding:10px 12px;margin:0 0 14px;font-size:13px}
 .sp-src{color:var(--muted);font-size:12.5px;margin-top:14px}.sp-src a{color:var(--rak)}
 .sp-modal{position:fixed;inset:0;background:rgba(18,18,18,.45);display:grid;place-items:center;z-index:50;padding:16px}
