@@ -20,7 +20,7 @@
 
 | Folder | What | Live URL |
 |---|---|---|
-| [`spare-part-list`](spare-part-list) | Customer spare part recommendation, grouped by system, with P&ID locations and Excel export | https://hamlet-02702026-spare-parts-ssm-rak.vercel.app |
+| [`spare-part-list`](spare-part-list) | Customer spare part recommendation, grouped by system, with P&ID locations and Excel export | https://ssmwork.vercel.app/customers/hamlet/jo02702026-ep500l-double-soak/spare-part-list/ |
 
 ## Data sources used by the spare part list
 

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SSM Work</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: one index page — L1 header, L2 customer blocks, L3 project rows with their tools as links. Same tokens as the project tools. */
+:root{
+  --bg:#f3f5f7; --paper:#ffffff; --ink:#18212b; --muted:#5d6b7a; --line:#d8dee5;
+  --accent:#0b5e8a; --accent-soft:#e3eff6; --good:#1d7a46;
+  --font-body:"IBM Plex Sans Thai","Leelawadee UI","Tahoma",system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,"Consolas",monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){--bg:#11161c;--paper:#182029;--ink:#e4e9ef;--muted:#93a1b0;--line:#2b3642;--accent:#5fb3e0;--accent-soft:#15303f;--good:#6fd39a;color-scheme:dark}
+}
+:root[data-theme="dark"]{--bg:#11161c;--paper:#182029;--ink:#e4e9ef;--muted:#93a1b0;--line:#2b3642;--accent:#5fb3e0;--accent-soft:#15303f;--good:#6fd39a;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.55}
+a{color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1100px;margin:0 auto;padding:28px 20px 64px;display:grid;gap:22px}
+header{display:flex;flex-wrap:wrap;gap:14px 24px;align-items:flex-end;justify-content:space-between;border-bottom:2px solid var(--ink);padding-bottom:16px}
+.brand .eyebrow{font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;color:var(--muted);text-transform:uppercase}
+.brand h1{margin:2px 0 0;font-size:30px;line-height:1.15;text-wrap:balance}
+.brand p{margin:4px 0 0;color:var(--muted);font-size:14px}
+.stats{display:flex;gap:22px;font-variant-numeric:tabular-nums}
+.stats div{display:grid}
+.stats b{font-size:22px;line-height:1.1}
+.stats span{font-size:12px;color:var(--muted)}
+.search{width:100%;border:1px solid var(--line);background:var(--paper);border-radius:6px;padding:10px 12px;font:inherit;color:inherit}
+.levels{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:12.5px;color:var(--muted)}
+.levels code{font-family:var(--font-mono);font-size:12px;background:var(--accent-soft);color:var(--accent);padding:1px 6px;border-radius:3px}
+.customer{background:var(--paper);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.c-head{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;padding:14px 18px;border-bottom:1px solid var(--line)}
+.c-head h2{margin:0;font-size:19px}
+.c-head .meta{color:var(--muted);font-size:13px}
+.lvl{font-family:var(--font-mono);font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:3px;padding:0 5px}
+.project{display:grid;grid-template-columns:minmax(190px,260px) 1fr;gap:16px;padding:16px 18px;border-top:1px solid var(--line)}
+.project:first-of-type{border-top:0}
+.p-info .jo{font-family:var(--font-mono);font-size:13px;color:var(--accent);font-weight:500}
+.p-info h3{margin:2px 0 6px;font-size:15.5px;line-height:1.35}
+.p-info .row{display:flex;flex-wrap:wrap;gap:6px;font-size:12px;color:var(--muted)}
+.pill{border:1px solid var(--line);border-radius:999px;padding:0 8px}
+.pill.status{border-color:var(--good);color:var(--good)}
+.tools{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;align-content:start}
+.tool{display:grid;gap:4px;text-decoration:none;border:1px solid var(--line);border-radius:6px;padding:12px 14px;background:var(--bg)}
+.tool:hover{border-color:var(--accent);background:var(--accent-soft)}
+.tool .t-name{font-weight:600;display:flex;justify-content:space-between;gap:8px}
+.tool .t-name::after{content:"→";color:var(--accent)}
+.tool .t-th{font-size:13px;color:var(--muted)}
+.tool .t-desc{font-size:12.5px;color:var(--muted);line-height:1.45}
+.tool .t-type{font-family:var(--font-mono);font-size:11px;color:var(--accent)}
+.empty{color:var(--muted);padding:20px;text-align:center;border:1px dashed var(--line);border-radius:8px}
+footer{font-size:12px;color:var(--muted);display:grid;gap:4px}
+@media (max-width:700px){.project{grid-template-columns:1fr}.brand h1{font-size:25px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="eyebrow">RAK Engineering · Site &amp; Service Management</div>
+      <h1>SSM Work</h1>
+      <p>รวมเครื่องมือและเอกสารของงานติดตั้งและบริการ แยกตามลูกค้าและโปรเจค</p>
+    </div>
+    <div class="stats" id="stats" aria-live="polite"></div>
+  </header>
+
+  <input id="q" class="search" type="search" placeholder="ค้นหาลูกค้า, JO, ชื่อโปรเจค หรือเครื่องมือ…" aria-label="ค้นหา">
+  <div class="levels"><span><code>L1</code> SSM Work</span><span><code>L2</code> ลูกค้า</span><span><code>L3</code> โปรเจค (Job Order)</span><span>→ เครื่องมือของแต่ละโปรเจค</span></div>
+
+  <main id="list" aria-label="Customers"></main>
+
+  <footer>
+    <span id="updated"></span>
+    <span>เพิ่มลูกค้า/โปรเจค/เครื่องมือใหม่: แก้ไฟล์ <code>hub/registry.json</code> และวางไฟล์ไว้ที่ <code>hub/customers/&lt;customer&gt;/&lt;jo-project&gt;/&lt;tool&gt;/</code> ใน repo SSM-Work</span>
+  </footer>
+</div>
+<script>
+"use strict";
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let REG = {customers:[]};
+
+function render(){
+  const q = document.getElementById("q").value.trim().toLowerCase();
+  const out = [];
+  let nC = 0, nP = 0, nT = 0;
+  REG.customers.forEach(c => {
+    const projects = (c.projects || []).map(p => {
+      const hay = [c.name, c.id, p.jo, p.name, (p.tags||[]).join(" "), ...(p.tools||[]).map(t => t.name + " " + t.th)].join(" ").toLowerCase();
+      return (!q || hay.includes(q)) ? p : null;
+    }).filter(Boolean);
+    if (!projects.length) return;
+    nC++;
+    out.push(`<section class="customer" aria-label="${esc(c.name)}">
+      <div class="c-head"><span class="lvl">L2</span><h2>${esc(c.name)}</h2><span class="meta">${esc(c.site || "")} · ${projects.length} โปรเจค</span></div>
+      ${projects.map(p => { nP++; nT += (p.tools||[]).length; return `
+      <div class="project">
+        <div class="p-info">
+          <span class="lvl">L3</span> <span class="jo">JO ${esc(p.jo)}</span>
+          <h3>${esc(p.name)}</h3>
+          <div class="row">${p.status ? `<span class="pill status">${esc(p.status)}</span>` : ""}${p.due ? `<span class="pill">ส่งมอบ ${esc(p.due)}</span>` : ""}${(p.tags||[]).map(t => `<span class="pill">${esc(t)}</span>`).join("")}</div>
+        </div>
+        <div class="tools">${(p.tools||[]).map(t => `
+          <a class="tool" href="${esc(t.path)}">
+            <span class="t-type">${esc(t.type || "Tool")}</span>
+            <span class="t-name">${esc(t.name)}</span>
+            <span class="t-th">${esc(t.th || "")}</span>
+            <span class="t-desc">${esc(t.desc || "")}</span>
+          </a>`).join("") || `<div class="empty">ยังไม่มีเครื่องมือ</div>`}
+        </div>
+      </div>`; }).join("")}
+    </section>`);
+  });
+  document.getElementById("list").innerHTML = out.join("") || `<div class="empty">ไม่พบรายการที่ตรงกับ “${esc(q)}”</div>`;
+  document.getElementById("stats").innerHTML = `<div><b>${nC}</b><span>ลูกค้า</span></div><div><b>${nP}</b><span>โปรเจค</span></div><div><b>${nT}</b><span>เครื่องมือ</span></div>`;
+}
+
+document.getElementById("q").addEventListener("input", render);
+fetch("registry.json", {cache: "no-store"})
+  .then(r => r.json())
+  .then(d => { REG = d; document.getElementById("updated").textContent = "อัปเดตรายการล่าสุด " + (d.updated || ""); render(); })
+  .catch(() => { document.getElementById("list").innerHTML = `<div class="empty">โหลดรายการไม่สำเร็จ — ลองรีเฟรชหน้า</div>`; });
+</script>
+</body>
+</html>

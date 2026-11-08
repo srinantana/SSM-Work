@@ -1,0 +1,30 @@
+{
+  "updated": "2026-11-08",
+  "customers": [
+    {
+      "id": "hamlet",
+      "name": "HAM-LET (Thailand) Ltd.",
+      "site": "Samut Prakan",
+      "projects": [
+        {
+          "id": "jo02702026-ep500l-double-soak",
+          "jo": "02702026",
+          "name": "Double Soak EP Process (500L) × 2 systems",
+          "status": "Installation / SAT",
+          "due": "2026-12-31",
+          "tags": ["EP", "Electropolishing", "UHP"],
+          "tools": [
+            {
+              "id": "spare-part-list",
+              "name": "Spare Part List",
+              "th": "รายการอะไหล่แนะนำให้ลูกค้า",
+              "desc": "อะไหล่แนะนำแยกตามระบบ (EP, Wash, Hot RO, Storage, RYC, Pneumatic, ไฟฟ้า, PLC) พร้อมจุดใช้งานตาม P&ID และ Export Excel",
+              "path": "customers/hamlet/jo02702026-ep500l-double-soak/spare-part-list/",
+              "type": "Customer document"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
