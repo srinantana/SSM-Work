@@ -114,8 +114,8 @@ function menuOfPath(path) {
   if (!m) return null; // not a tool page
   return MENU_IDS.find((id) => m[1].startsWith(id)) || '__admin';
 }
-// modules === null means "every menu" (the default for new accounts).
-const effectiveMenus = (prof) => (prof.role === 'admin' || !Array.isArray(prof.modules) ? MENU_IDS.slice() : prof.modules.filter((id) => MENU_IDS.includes(id)));
+// Non-admins see only the menus an admin has ticked for them; a new account starts with none.
+const effectiveMenus = (prof) => (prof.role === 'admin' ? MENU_IDS.slice() : Array.isArray(prof.modules) ? prof.modules.filter((id) => MENU_IDS.includes(id)) : []);
 const canOpen = (prof, menu) => menu === null || prof.role === 'admin' || (menu !== '__admin' && effectiveMenus(prof).includes(menu));
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
@@ -229,7 +229,7 @@ async function adminApi(cfg, req, path) {
     const users = await listUsers(cfg);
     return json(users.map((u) => {
       const p = profileOf(cfg, u);
-      return { id: u.id, email: p.email, name: p.name, role: p.role, modules: effectiveMenus(p), allMenus: p.modules === null, mustChange: p.mustChange, banned: !!(u.banned_until && new Date(u.banned_until) > new Date()), lastSignIn: u.last_sign_in_at || null, superAdmin: p.email === cfg.superAdmin };
+      return { id: u.id, email: p.email, name: p.name, role: p.role, modules: effectiveMenus(p), mustChange: p.mustChange, banned: !!(u.banned_until && new Date(u.banned_until) > new Date()), lastSignIn: u.last_sign_in_at || null, superAdmin: p.email === cfg.superAdmin };
     }).sort((a, b) => a.email.localeCompare(b.email)));
   }
   if (req.method !== 'POST') return json({ error: 'method' }, 405);
@@ -325,7 +325,7 @@ td{padding:10px 14px;border-bottom:1px solid #edf0f4;vertical-align:middle}tr:la
 </style></head><body>
 <header class="bar"><div class="in"><img src="/assets/rak-logo.svg" alt="RAK Engineering"><span class="ws">SSM WORK · ผู้ดูแลระบบ</span><a href="/">← กลับหน้า SSM Work</a></div></header>
 <main>
-<div><h1>ผู้ใช้งาน</h1><p class="sub">เข้าระบบในชื่อ ${esc(me.email)} · บัญชีใหม่และบัญชีที่รีเซ็ตจะใช้รหัสเริ่มต้น และต้องตั้งรหัสใหม่ตอนเข้าครั้งแรก · บัญชีใหม่เข้าได้ทุกเมนู ติ๊กออกเพื่อจำกัดสิทธิ์ (มีผลทันที)</p></div>
+<div><h1>ผู้ใช้งาน</h1><p class="sub">เข้าระบบในชื่อ ${esc(me.email)} · บัญชีใหม่และบัญชีที่รีเซ็ตจะใช้รหัสเริ่มต้น และต้องตั้งรหัสใหม่ตอนเข้าครั้งแรก · บัญชีใหม่ยังเข้าเมนูไม่ได้ ติ๊กเมนูที่ให้สิทธิ์ (มีผลทันที)</p></div>
 <div class="cards" id="stats"></div>
 <section class="panel"><h2>นำเข้ารายชื่อจาก Excel</h2>
 <p class="muted">ไฟล์ต้องมีคอลัมน์อีเมล (หัวคอลัมน์มีคำว่า "อีเมล" หรือ "email") และจะใช้คอลัมน์ "ชื่อ" กับ "Role" ถ้ามี · อีเมลที่ซ้ำกันจะรวมเป็นบัญชีเดียว · บัญชีที่มีอยู่แล้วจะอัปเดตชื่อและ role เท่านั้น ไม่แตะรหัสผ่าน</p>
