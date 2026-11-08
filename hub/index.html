@@ -320,7 +320,7 @@ function render(){
   document.title = (id === "home" ? "SSM Work" : m.name + " · SSM Work") + " · RAK Engineering";
   const sp = id === "spare-part" && ME !== null && allowed(id) && window.SparePart;
   const se = id === "site-expense" && ME !== null && allowed(id) && window.SiteExpense;
-  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : sp ? (subRoute() ? "" : hero(m)) + `<div id="spRoot"></div>` : se ? hero(m) + `<div id="seRoot"></div>` : allowed(id) ? pageModule(m) : pageDenied(m))
+  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : sp ? (subRoute() ? "" : hero(m)) + `<div id="spRoot"></div>` : se ? (subRoute() ? "" : hero(m)) + `<div id="seRoot"></div>` : allowed(id) ? pageModule(m) : pageDenied(m))
     + `<div class="foot"><span>RAK Engineering Co., Ltd. · Site &amp; Service Management</span><span>${REG.updated ? "อัปเดตรายการ " + esc(REG.updated) : ""}</span></div>`;
   renderNav();
   if (sp) window.SparePart.mount(document.getElementById("spRoot"), subRoute());
