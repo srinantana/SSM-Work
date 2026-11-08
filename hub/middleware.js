@@ -110,10 +110,44 @@ const MENUS = [
 ];
 const MENU_IDS = MENUS.map((m) => m.id);
 function menuOfPath(path) {
+  if (path.startsWith('/spare-part/') || path.startsWith('/api/spare-part/')) return 'spare-part';
   const m = path.match(/^\/customers\/[^/]+\/[^/]+\/([^/]+)/);
   if (!m) return null; // not a tool page
   return MENU_IDS.find((id) => m[1].startsWith(id)) || '__admin';
 }
+// Spare Part projects live in Supabase table public.spare_part_projects (database/spare_part_projects.sql).
+// The table has RLS on and no policies, so only this middleware (service key) can read or write it.
+const SP_TABLE = '/rest/v1/spare_part_projects';
+async function sparePartApi(cfg, req, url, prof) {
+  if (url.pathname !== '/api/spare-part/projects') return json({ error: 'not found' }, 404);
+  const rest = (q, opt) => call(cfg, SP_TABLE + q, { admin: true, ...opt });
+  if (req.method === 'GET') {
+    const r = await rest('?select=data&order=updated_at.desc&limit=1000', { method: 'GET' });
+    if (!r.ok) return json({ error: 'no_table' }, 503);
+    return json((Array.isArray(r.data) ? r.data : []).map((x) => x.data));
+  }
+  if (req.method !== 'POST' && req.method !== 'DELETE') return json({ error: 'method' }, 405);
+  const origin = req.headers.get('origin');
+  if (origin && origin !== cfg.app) return json({ error: 'bad origin' }, 403);
+  if (req.method === 'DELETE') {
+    const id = url.searchParams.get('id') || '';
+    if (!/^[\w-]{3,64}$/.test(id)) return json({ error: 'id' }, 400);
+    const r = await rest('?id=eq.' + encodeURIComponent(id), { method: 'DELETE' });
+    return r.ok ? json({ ok: true }) : json({ error: 'supabase' }, 502);
+  }
+  let p;
+  try { p = await req.json(); } catch { return json({ error: 'json' }, 400); }
+  if (!p || typeof p !== 'object' || !/^[\w-]{3,64}$/.test(String(p.id || ''))) return json({ error: 'id' }, 400);
+  const body = JSON.stringify(p);
+  if (body.length > 900000) return json({ error: 'too large' }, 413);
+  const now = new Date().toISOString();
+  p.updated = now; p.updatedBy = prof.email;
+  if (!p.createdBy) p.createdBy = prof.email;
+  const row = { id: p.id, jo: String(p.jo || ''), customer: String(p.customer || ''), name: String(p.name || ''), status: String(p.status || 'draft'), data: p, updated_by: prof.email, updated_at: now };
+  const res = await fetch(cfg.url + SP_TABLE + '?on_conflict=id', { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(row) });
+  return res.ok ? json(p) : json({ error: res.status === 404 ? 'no_table' : 'supabase' }, res.status === 404 ? 503 : 502);
+}
+
 // Non-admins see only the menus an admin has ticked for them; a new account starts with none.
 const effectiveMenus = (prof) => (prof.role === 'admin' ? MENU_IDS.slice() : Array.isArray(prof.modules) ? prof.modules.filter((id) => MENU_IDS.includes(id)) : []);
 const canOpen = (prof, menu) => menu === null || prof.role === 'admin' || (menu !== '__admin' && effectiveMenus(prof).includes(menu));
@@ -524,6 +558,14 @@ export default async function middleware(req) {
       try { return await adminApi(cfg, req, path); } catch { return json({ error: 'supabase' }, 502); }
     }
     return adminPage(cfg, live);
+  }
+
+  if (path.startsWith('/api/spare-part/')) {
+    if (!signedIn) return json({ error: 'login required' }, 401);
+    const live = await liveProfile(cfg, user);
+    if (!live) return json({ error: 'login required' }, 401);
+    if (!canOpen(live, 'spare-part')) return json({ error: 'no access' }, 403);
+    try { return await sparePartApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
   }
 
   if (signedIn) {

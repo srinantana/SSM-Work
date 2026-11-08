@@ -203,6 +203,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:#f1f3
     <main class="content" id="content" tabindex="-1"></main>
   </div>
 </div>
+<script src="/spare-part/app.js"></script>
 <script>
 "use strict";
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -213,7 +214,7 @@ const MODULES = [
   {id:"home",        icon:"i-home",    name:"Home",         th:"ภาพรวม",                  desc:"ลูกค้า โปรเจค และเครื่องมือทั้งหมดของ SSM"},
   {id:"site-expense",icon:"i-expense", name:"Site Expense", th:"ประเมินค่าใช้จ่ายหน้างาน",  desc:"ประเมิน manday และค่าใช้จ่ายติดตั้ง พร้อมขั้นตอนอนุมัติ SC → SSM → MD",
      plan:["ประเมิน manday และค่าใช้จ่ายรายโปรเจค","Master rate (คน รถ ที่พัก เบี้ยเลี้ยง)","ขั้นตอนอนุมัติ SC → SSM → MD","เทียบงบกับค่าใช้จ่ายจริง"]},
-  {id:"spare-part",  icon:"i-gear",    name:"Spare Part",   th:"รายการอะไหล่แนะนำ",        desc:"รายการอะไหล่แนะนำให้ลูกค้า แยกตามระบบ อ้างอิง P&ID และ Aux list",
+  {id:"spare-part",  icon:"i-gear",    live:true, name:"Spare Part",   th:"รายการอะไหล่แนะนำ",        desc:"รายการอะไหล่แนะนำให้ลูกค้า แยกตามระบบ อ้างอิง P&ID และ Aux list",
      plan:["สร้างรายการอะไหล่จาก P&ID + Aux list + BOM","จุดใช้งานตาม P&ID และข้อมูลผู้ผลิต","Export Excel ตามแบบฟอร์มลูกค้า"]},
   {id:"punch-list",  icon:"i-punch",   name:"Punch List",   th:"ติดตามงานค้างก่อนส่งมอบ",    desc:"บันทึกและติดตาม punch list ระหว่างติดตั้ง จนถึง SAT และปิดงาน",
      plan:["บันทึกรายการพร้อมรูปถ่ายและผู้รับผิดชอบ","สถานะ Open / In progress / Closed","รายงานให้ลูกค้าก่อน SAT","สรุปจำนวนงานค้างรายโปรเจค"]},
@@ -230,13 +231,14 @@ function rows(){
 }
 const toolsOf = mod => rows().filter(r => r.t.module === mod);
 const modOf = id => MODULES.find(m => m.id === id);
-function route(){ const id = (location.hash || "#home").slice(1); return MODULES.some(m => m.id === id) ? id : "home"; }
+function route(){ const id = (location.hash || "#home").slice(1).split("/")[0]; return MODULES.some(m => m.id === id) ? id : "home"; }
+const subRoute = () => (location.hash || "").slice(1).split("/").slice(1).join("/");
 
 function renderNav(){
   const cur = route();
   document.getElementById("nav").innerHTML = visibleModules().map(m => {
     const n = toolsOf(m.id).length;
-    const tail = m.id === "home" ? "" : (n ? `<span class="cnt">${n}</span>` : `<span class="soon">เร็วๆ นี้</span>`);
+    const tail = m.id === "home" || m.live ? "" : (n ? `<span class="cnt">${n}</span>` : `<span class="soon">เร็วๆ นี้</span>`);
     return `<li><a href="#${m.id}" ${m.id===cur?'aria-current="page"':""}><span class="tile">${icon(m.icon)}</span>${esc(m.name)}${tail}</a></li>`;
   }).join("");
   document.getElementById("sideFoot").textContent = REG.updated ? "อัปเดตรายการ " + REG.updated : "พร้อมใช้งาน";
@@ -283,7 +285,7 @@ function pageHome(){
     <blockquote>“มุ่งมั่นผลิตสินค้าที่มีคุณภาพ ส่งมอบตรงเวลา และมีประสิทธิภาพในการบริการ เพื่อสร้างความพึงพอใจให้กับลูกค้า”</blockquote></figure>`;
   const mods = mine.map(m => {
     const n = toolsOf(m.id).length;
-    return `<a class="mod" href="#${m.id}"><span class="tile">${icon(m.icon)}</span><span class="m-name">${esc(m.name)}</span><span class="m-desc">${esc(m.th)}</span><span class="badge ${n?"live":"soon"}">${n ? "ใช้งานได้ · " + n + " รายการ" : "กำลังพัฒนา"}</span></a>`;
+    return `<a class="mod" href="#${m.id}"><span class="tile">${icon(m.icon)}</span><span class="m-name">${esc(m.name)}</span><span class="m-desc">${esc(m.th)}</span><span class="badge ${n||m.live?"live":"soon"}">${n ? "ใช้งานได้ · " + n + " รายการ" : m.live ? "ใช้งานได้" : "กำลังพัฒนา"}</span></a>`;
   }).join("");
   const menus = ME === null ? `<div class="empty">กำลังโหลดเมนู…</div>`
     : mods ? `<div class="modules">${mods}</div>`
@@ -315,9 +317,11 @@ function pageModule(m){
 function render(){
   const id = route(), m = modOf(id);
   document.title = (id === "home" ? "SSM Work" : m.name + " · SSM Work") + " · RAK Engineering";
-  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : allowed(id) ? pageModule(m) : pageDenied(m))
+  const sp = id === "spare-part" && ME !== null && allowed(id) && window.SparePart;
+  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : sp ? (subRoute() ? "" : hero(m)) + `<div id="spRoot"></div>` : allowed(id) ? pageModule(m) : pageDenied(m))
     + `<div class="foot"><span>RAK Engineering Co., Ltd. · Site &amp; Service Management</span><span>${REG.updated ? "อัปเดตรายการ " + esc(REG.updated) : ""}</span></div>`;
   renderNav();
+  if (sp) window.SparePart.mount(document.getElementById("spRoot"), subRoute());
   const q = document.getElementById("q");
   if (q) q.addEventListener("input", () => { document.getElementById("list").innerHTML = customerBlocks(rows(), q.value.trim().toLowerCase()); });
   setMenu(false);
@@ -329,7 +333,7 @@ document.getElementById("menuBtn").addEventListener("click", e => { e.stopPropag
 document.querySelector(".main").addEventListener("click", () => { if (document.getElementById("shell").classList.contains("open")) setMenu(false); });
 fetch("/auth/me", {cache:"no-store"}).then(r => r.ok ? r.json() : null).then(u => {
   if (!u || !u.email) return;
-  ME = u; render();
+  ME = u; window.SSM_ME = u; render();
   document.getElementById("who").textContent = "👋 " + (u.name || u.email);
   document.getElementById("who").title = u.email;
   document.getElementById("acct").hidden = false;
