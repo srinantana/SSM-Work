@@ -71,16 +71,11 @@ h1{font-size:28px;font-weight:600;line-height:1.3;letter-spacing:-.4px;margin:2p
 .stat b{display:block;font-size:26px;font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums}
 .stat span{font-size:11px;color:var(--muted)}
 
-.quote{position:relative;margin:0;background:linear-gradient(120deg,#fff 0%,var(--blush) 100%);border:1px solid var(--blush-2);border-left:5px solid var(--rak);border-radius:14px;padding:22px 26px 20px 30px;overflow:hidden}
-.quote .q-mark{position:absolute;right:18px;top:-34px;font-size:150px;line-height:1;color:var(--rak);opacity:.1;font-family:Georgia,serif;pointer-events:none}
-.quote .q-label{display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:1.6px;color:var(--rak);font-weight:600;text-transform:uppercase}
-.quote .q-label .ic{width:16px;height:16px}
-.quote blockquote{margin:8px 0 12px;font-size:20px;line-height:1.55;font-weight:600;color:var(--ink);max-width:62ch;text-wrap:pretty}
-.quote blockquote span{white-space:nowrap}
-.q-pills{display:flex;flex-wrap:wrap;gap:8px}
-.q-pills span{font-size:12px;font-weight:500;color:var(--rak);background:#fff;border:1px solid var(--blush-2);border-radius:999px;padding:2px 12px}
-.q-by{margin-top:10px;font-size:12px;color:var(--muted)}
-@media (max-width:860px){.quote blockquote{font-size:17px}}
+.quote{display:flex;align-items:center;gap:14px;margin:0;background:linear-gradient(120deg,#fff 0%,var(--blush) 100%);border:1px solid var(--blush-2);border-left:4px solid var(--rak);border-radius:12px;padding:12px 18px;min-width:0}
+.quote .q-label{flex:none;display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:1px;color:var(--rak);font-weight:600;background:#fff;border:1px solid var(--blush-2);border-radius:999px;padding:3px 11px}
+.quote .q-label .ic{width:14px;height:14px}
+.quote blockquote{margin:0;min-width:0;font-size:15px;line-height:1.5;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:860px){.quote{flex-direction:column;align-items:flex-start;gap:8px}.quote blockquote{white-space:normal;font-size:14px}}
 h2.sec{font-size:15px;font-weight:600;margin:4px 0 -6px;display:flex;align-items:center;gap:8px}
 .modules{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
 .mod{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;text-decoration:none;background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:18px;transition:transform .15s,box-shadow .15s,border-color .15s}
@@ -148,7 +143,10 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:#f1f3
   .menu-btn{display:inline-flex}
   .topbar{padding:0 16px;height:60px}
   .topbar .chip{display:none}
-  #acct{margin-left:auto}
+  #acct{margin-left:auto;min-width:0;display:flex;gap:6px;overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+  #acct:not([hidden]) ~ *{display:none}
+  .crumb{flex:none}
+  .logout{flex:none;font-size:11px;padding:3px 9px}
   .content{padding:20px 16px 44px}
   .project{grid-template-columns:1fr}
   .soon-card{grid-template-columns:1fr}
@@ -266,15 +264,10 @@ function customerBlocks(list, q){
 }
 
 function pageHome(){
-  const all = rows();
-  const nP = new Set(all.map(r=>r.c.id+"/"+r.p.id)).size;
   const mine = visibleModules().filter(m => m.id !== "home");
-  const stats = `<div class="stats"><div class="stat"><b>${mine.length}</b><span>เมนูที่ใช้ได้</span></div><div class="stat"><b>${nP}</b><span>โปรเจค</span></div><div class="stat"><b>${all.length}</b><span>เครื่องมือ</span></div></div>`;
-  const quote = `<figure class="quote"><span class="q-mark" aria-hidden="true">“</span>
-    <figcaption class="q-label">${icon("i-spark","ic")} นโยบายคุณภาพ · Quality Policy</figcaption>
-    <blockquote><span>มุ่งมั่นผลิตสินค้าที่มีคุณภาพ</span> <span>ส่งมอบตรงเวลา</span> <span>และมีประสิทธิภาพในการบริการ</span> <span>เพื่อสร้างความพึงพอใจให้กับลูกค้า</span></blockquote>
-    <div class="q-pills"><span>คุณภาพ</span><span>ตรงเวลา</span><span>ประสิทธิภาพ</span><span>ความพึงพอใจลูกค้า</span></div>
-    <div class="q-by">— RAK Engineering Co., Ltd.</div></figure>`;
+  const quote = `<figure class="quote" title="นโยบายคุณภาพ RAK Engineering Co., Ltd.">
+    <figcaption class="q-label">${icon("i-spark","ic")} นโยบายคุณภาพ</figcaption>
+    <blockquote>“มุ่งมั่นผลิตสินค้าที่มีคุณภาพ ส่งมอบตรงเวลา และมีประสิทธิภาพในการบริการ เพื่อสร้างความพึงพอใจให้กับลูกค้า”</blockquote></figure>`;
   const mods = mine.map(m => {
     const n = toolsOf(m.id).length;
     return `<a class="mod" href="#${m.id}"><span class="tile">${icon(m.icon)}</span><span class="m-name">${esc(m.name)}</span><span class="m-desc">${esc(m.th)}</span><span class="badge ${n?"live":"soon"}">${n ? "ใช้งานได้ · " + n + " รายการ" : "กำลังพัฒนา"}</span></a>`;
@@ -282,7 +275,7 @@ function pageHome(){
   const menus = ME === null ? `<div class="empty">กำลังโหลดเมนู…</div>`
     : mods ? `<div class="modules">${mods}</div>`
     : `<div class="empty">บัญชีนี้ยังไม่ได้รับสิทธิ์เข้าเมนูใด ติดต่อผู้ดูแลระบบ</div>`;
-  return hero(modOf("home"), stats) + quote
+  return hero(modOf("home")) + quote
     + `<h2 class="sec">${icon("i-spark","ic")} เมนูของคุณ</h2>${menus}`;
 }
 
