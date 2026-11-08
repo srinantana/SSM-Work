@@ -197,7 +197,13 @@ function checkNewPassword(cfg, pw, confirm, email) {
 
 // Re-read the account from Supabase so bans, deletions and permission changes apply right away.
 async function liveProfile(cfg, sess) {
-  if (!sess.id) return null;
+  if (!sess.id) { // session from before per-menu permissions: look the account up by email once
+    const users = await listUsers(cfg).catch(() => null);
+    const u = users && users.find((x) => String(x.email).toLowerCase() === String(sess.email).toLowerCase());
+    if (!users) return sess;
+    if (!u) return null;
+    sess = { ...sess, id: u.id };
+  }
   const r = await call(cfg, `/auth/v1/admin/users/${sess.id}`, { method: 'GET', admin: true });
   if (!r.ok) return r.status >= 500 ? sess : null; // keep working through a Supabase outage, but not for a removed account
   if (r.data.banned_until && new Date(r.data.banned_until) > new Date()) return null;

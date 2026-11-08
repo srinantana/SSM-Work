@@ -234,7 +234,7 @@ function renderNav(){
 }
 
 function hero(m, extra=""){
-  return `<div class="hero"><div class="hero-l"><span class="hero-ic">${icon(m.icon)}</span><div><div class="eyebrow">${esc(m.th)}</div><h1>${esc(m.id==="home" ? "ยินดีต้อนรับเข้าสู่ Site & Service Management" : m.name)}</h1><p>${esc(m.id==="home" ? "รวมเครื่องมือและเอกสารของงานติดตั้งและบริการ แยกตามลูกค้าและโปรเจค" : m.desc)}</p></div></div>${extra}</div>`;
+  return `<div class="hero"><div class="hero-l"><span class="hero-ic">${icon(m.icon)}</span><div><div class="eyebrow">${esc(m.th)}</div><h1>${esc(m.id==="home" ? "Welcome to Site & Service Management" : m.name)}</h1><p>${esc(m.id==="home" ? "รวมเครื่องมือและเอกสารของงานติดตั้งและบริการ แยกตามลูกค้าและโปรเจค" : m.desc)}</p></div></div>${extra}</div>`;
 }
 
 function customerBlocks(list, q){
