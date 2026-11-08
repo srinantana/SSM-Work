@@ -62,14 +62,23 @@
     R("Air solenoid valve 'Festo' 2x3/2", 1, "pc", "Recommended", "VCA / jig clamping"),
     R("PVDF union ball valve d32", 2, "pc", "Recommended"),
   ];
+  // Specification / Material without the model text already shown under Manufacturer / Model
+  const specOf = eq => (eq.spec || "").split(" · ").filter(seg => { const k = norm(seg).slice(0, 6); return !(k && norm(eq.model).includes(k)) && !/^(series|power station|ptfe immersion coil$)/i.test(seg); }).join(" · ");
   function suggest(job, eqs) {
     const lines = [];
-    eqs.forEach(eq => rulesFor(eq).forEach(r => lines.push({
-      id: uid(), equip: eq.name, tag: eq.tag || "", location: eq.location || eq.system || "", part: r.part,
-      qty: Math.max(1, Math.ceil((eq.qty || 1) * r.per)), unit: r.unit, prio: r.prio, source: "Aux list", remark: r.remark,
-    })));
-    if ((job.pid || []).length) PID_COMMON.forEach(r => lines.push({ id: uid(), equip: "Instrument / valve", tag: "", location: "ตาม P&ID", part: r.part, qty: r.per, unit: r.unit, prio: r.prio, source: "P&ID", remark: r.remark }));
-    return lines;
+    const weeks = d => d ? Math.ceil(d / 7) : "";
+    eqs.forEach(eq => rulesFor(eq).forEach(r => {
+      const same = /same model|pump head/i.test(r.part);
+      lines.push({
+        id: uid(), zone: eq.zone || eq.location || eq.system || "Zone A", equip: eq.name, tag: eq.tag || "", part: r.part, partNo: same ? (eq.model || "") : "",
+        maker: [eq.maker, eq.model].filter(Boolean).join(" / "), spec: specOf(eq), installed: eq.qty || "",
+        qty: Math.max(1, Math.ceil((eq.qty || 1) * r.per)), unit: r.unit, prio: r.prio, leadWeeks: weeks(eq.leadDays), unitPrice: "", source: "Aux list", remark: r.remark,
+      });
+    }));
+    if ((job.pid || []).length) PID_COMMON.forEach(r => lines.push({ id: uid(), zone: "Instrument & Valve (ตาม P&ID)", equip: "Instrument / valve", tag: "", part: r.part, partNo: "", maker: "", spec: "", installed: "",
+      qty: r.per, unit: r.unit, prio: r.prio, leadWeeks: "", unitPrice: "", source: "P&ID", remark: r.remark }));
+    const order = [...new Set(lines.map(l => l.zone))].sort((x, y) => (x.startsWith("Instrument") ? 1 : 0) - (y.startsWith("Instrument") ? 1 : 0) || x.localeCompare(y));
+    return lines.sort((x, y) => order.indexOf(x.zone) - order.indexOf(y.zone));
   }
 
   /* ---------- views ---------- */
@@ -130,9 +139,9 @@
     } else {
       const j = WIZ.job;
       body = `<p class="sp-sub">Aux / Equipment list จาก Project Pipeline (JO ${esc(j.jo)}) · เลือกอุปกรณ์ที่จะทำอะไหล่แนะนำ</p>
-        <div class="tbl"><table><thead><tr><th></th><th>Equipment</th><th>Tag (P&ID)</th><th>System / Location</th><th>Qty</th></tr></thead><tbody>${j.aux.map((e, i) => `
+        <div class="tbl"><table><thead><tr><th></th><th>Equipment</th><th>Tag (P&ID)</th><th>Zone</th><th>Qty</th></tr></thead><tbody>${j.aux.map((e, i) => `
           <tr><td><input type="checkbox" data-eq="${i}" ${WIZ.eqSel[i] ? "checked" : ""}></td><td><b>${esc(e.name)}</b><div class="sub">${esc(e.spec)}</div>${e.specStatus !== "approved" ? `<span class="badge soon">spec ${esc(e.specStatus)}</span>` : ""}</td>
-          <td>${esc(e.tag || "–")}</td><td>${esc(e.system || "")}<div class="sub">${esc(e.location || "")}</div></td><td>${e.qty} ${esc(e.unit)}</td></tr>`).join("")}</tbody></table></div>
+          <td>${esc(e.tag || "–")}</td><td>${esc(e.zone || e.system || "")}<div class="sub">${esc([e.system, e.location].filter(Boolean).join(" · "))}</div></td><td>${e.qty} ${esc(e.unit)}</td></tr>`).join("")}</tbody></table></div>
         <h4 class="sp-h">อ้างอิง P&ID</h4>${j.pid.length ? `<ul class="sp-scope">${j.pid.map(p => `<li><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.title)}</a></li>`).join("")}${j.pidTags.map(t => `<li class="sub">${esc(t)}</li>`).join("")}</ul>`
           : `<p class="sub">ยังไม่พบ P&ID ในโฟลเดอร์ job${(j.layout || []).length ? ` · มี <a href="${esc(j.layout[0].url)}" target="_blank" rel="noopener">${esc(j.layout[0].title)}</a>` : ""}</p>`}`;
     }
@@ -168,41 +177,97 @@
   }
 
   /* --- project detail --- */
+  const COLS = ["No.", "Equipment / Tag", "Part description", "Part No. / Drawing Ref.", "Manufacturer / Model", "Specification / Material", "Installed qty", "Recommended spare qty", "Unit", "Priority", "Lead time (weeks)", "Unit price", "Amount", "Remarks"];
+  const num = v => { const n = parseFloat(String(v ?? "").replace(/,/g, "")); return isFinite(n) ? n : 0; };
+  const money = n => n ? n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
+  const amountOf = l => num(l.qty) * num(l.unitPrice);
+  const zonesOf = p => { const z = []; (p.lines || []).forEach(l => { if (!z.includes(l.zone)) z.push(l.zone); }); (p.zones || []).forEach(x => { if (!z.includes(x)) z.push(x); }); return z; };
+  function migrate(p) { // projects saved before the 14-column layout
+    (p.lines || []).forEach(l => {
+      if (l.zone === undefined) l.zone = l.location || "Zone A";
+      if (l.maker === undefined) l.maker = "";
+      if (l.spec === undefined) l.spec = "";
+      if (l.installed === undefined) l.installed = "";
+      if (l.leadWeeks === undefined) l.leadWeeks = "";
+      if (l.unitPrice === undefined) l.unitPrice = "";
+    });
+    return p;
+  }
   function pageProject(p) {
+    migrate(p);
     const r = p.refs || {};
     const links = [r.joFile && `<a href="${esc(r.joFile)}" target="_blank" rel="noopener">Job Order</a>`, r.folder && `<a href="${esc(r.folder)}" target="_blank" rel="noopener">โฟลเดอร์ Job</a>`,
       ...(r.pid || []).map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>`), ...(r.layout || []).map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>`)].filter(Boolean).join(" · ");
-    const cell = (l, k, cls = "") => `<td class="${cls}"><input class="sp-cell" data-l="${l.id}" data-k="${k}" value="${esc(l[k])}"${k === "qty" ? ' inputmode="decimal"' : ""}></td>`;
+    const zones = zonesOf(p);
+    const inp = (l, k, cls = "", ph = "") => `<input class="sp-cell ${cls}" data-l="${l.id}" data-k="${k}" value="${esc(l[k])}" placeholder="${esc(ph)}"${/qty|installed|leadWeeks|unitPrice/.test(k) ? ' inputmode="decimal"' : ""}>`;
+    let no = 0;
+    const body = zones.map((z, zi) => {
+      const rows = p.lines.filter(l => l.zone === z);
+      return `<tr class="sp-zone"><td colspan="${COLS.length + 1}"><div class="sp-zone-in">
+          <input class="sp-zname" data-zone="${zi}" value="${esc(z)}" aria-label="ชื่อโซน">
+          <span class="sub">${rows.length} รายการ</span><span class="sp-ztot" data-ztot="${zi}"></span>
+          <button class="sp-btn sm" data-addin="${zi}">＋ เพิ่มรายการในโซนนี้</button></div></td></tr>`
+        + rows.map(l => { no++; return `<tr data-row="${l.id}">
+          <td class="c">${no}</td>
+          <td class="w2">${inp(l, "equip", "", "Equipment")}${inp(l, "tag", "tag", "Tag")}</td>
+          <td class="w2">${inp(l, "part")}</td><td>${inp(l, "partNo")}</td><td class="w2">${inp(l, "maker")}</td><td class="w2">${inp(l, "spec")}</td>
+          <td class="n">${inp(l, "installed")}</td><td class="n">${inp(l, "qty")}</td><td class="n">${inp(l, "unit")}</td>
+          <td><select class="sp-cell" data-l="${l.id}" data-k="prio">${["Critical", "Recommended", "Consumable"].map(o => `<option ${l.prio === o ? "selected" : ""}>${o}</option>`).join("")}</select></td>
+          <td class="n">${inp(l, "leadWeeks")}</td><td class="m">${inp(l, "unitPrice", "r")}</td><td class="m r amt" data-amt="${l.id}">${money(amountOf(l))}</td>
+          <td class="w2">${inp(l, "remark")}</td>
+          <td class="act"><select class="sp-move" data-move="${l.id}" title="ย้ายโซน" aria-label="ย้ายโซน"><option value="">⇄</option>${zones.map((x, i) => x === z ? "" : `<option value="${i}">${esc(x)}</option>`).join("")}</select><button class="sp-x" data-del="${l.id}" title="ลบรายการ">✕</button></td></tr>`; }).join("");
+    }).join("");
     ROOT.innerHTML = `<a class="open" href="#spare-part">← รายการโปรเจค</a>
       <div class="sp-head"><div><span class="jo">JO ${esc(p.jo)}</span> ${pill(p.status)}<h2>${esc(p.name)}</h2>
         <div class="sub">${esc(p.customer)} · ${esc(p.site || "")} · ผู้ติดต่อ ${esc(p.contact || "-")} ${esc(p.tel || "")} · QO ${esc(p.qo || "-")} · PO ${esc(p.po || "-")} · ส่งมอบ ${esc(p.delivery || "-")}</div>
         <div class="sp-links">${links}</div></div>
         <div class="sp-actions"><select class="sp-in" id="spStatus">${Object.keys(STATUS).map(s => `<option value="${s}" ${p.status === s ? "selected" : ""}>${STATUS[s][0]}</option>`).join("")}</select>
-          <button class="sp-btn" data-a="add">＋ เพิ่มรายการ</button><button class="sp-btn" data-a="csv">Export Excel (CSV)</button><button class="sp-btn primary" data-a="save">บันทึก</button></div></div>
-      <div class="tbl sp-edit"><table><thead><tr><th>#</th><th>Equipment</th><th>Tag</th><th>Location</th><th>Spare part</th><th>Part no.</th><th>Qty</th><th>Unit</th><th>Priority</th><th>Source</th><th>Remark</th><th></th></tr></thead><tbody>
-      ${(p.lines || []).map((l, i) => `<tr><td>${i + 1}</td>${cell(l, "equip", "w2")}${cell(l, "tag")}${cell(l, "location")}${cell(l, "part", "w2")}${cell(l, "partNo")}${cell(l, "qty", "n")}${cell(l, "unit", "n")}
-        <td><select class="sp-cell" data-l="${l.id}" data-k="prio">${["Critical", "Recommended", "Consumable"].map(o => `<option ${l.prio === o ? "selected" : ""}>${o}</option>`).join("")}</select></td>
-        <td class="sub">${esc(l.source || "")}</td>${cell(l, "remark", "w2")}<td><button class="sp-x" data-del="${l.id}" title="ลบรายการ">✕</button></td></tr>`).join("")}</tbody></table></div>
-      <p class="sp-src">อะไหล่ที่ระบบเสนอเป็นค่าเริ่มต้นตามประเภทอุปกรณ์ ตรวจสอบ part no. และจำนวนกับผู้ผลิต/วิศวกรก่อนส่งลูกค้า · <button class="sp-link" data-a="delete">ลบโปรเจคนี้</button></p>
+          <button class="sp-btn" data-a="zone">＋ เพิ่มโซน</button><button class="sp-btn" data-a="csv">Export Excel (CSV)</button><button class="sp-btn primary" data-a="save">บันทึก</button></div></div>
+      <div class="tbl sp-edit"><table><thead><tr>${COLS.map(c => `<th>${c}</th>`).join("")}<th></th></tr></thead><tbody>${body || `<tr><td colspan="${COLS.length + 1}" class="sub">ยังไม่มีรายการ · กด ＋ เพิ่มโซน</td></tr>`}</tbody>
+        <tfoot><tr><td colspan="12" class="r"><b>Total (excl. VAT)</b></td><td class="r"><b id="spGrand"></b></td><td colspan="2"></td></tr></tfoot></table></div>
+      <p class="sp-src">อะไหล่ที่ระบบเสนอเป็นค่าเริ่มต้นตามประเภทอุปกรณ์ · ใส่ Part No. และ Unit price (ราคาขาย) ก่อนส่งลูกค้า · Lead time เริ่มต้นจาก Project Pipeline · <button class="sp-link" data-a="delete">ลบโปรเจคนี้</button></p>
       <span class="sp-saved" id="spSaved" aria-live="polite"></span>`;
-    let dirty = false; const mark = () => { dirty = true; ROOT.querySelector("#spSaved").textContent = "มีการแก้ไขที่ยังไม่บันทึก"; };
-    ROOT.querySelectorAll(".sp-cell").forEach(i => i.oninput = i.onchange = () => { const l = p.lines.find(x => x.id === i.dataset.l); l[i.dataset.k] = i.dataset.k === "qty" ? Number(i.value) || i.value : i.value; mark(); });
+    const totals = () => {
+      zones.forEach((z, i) => { const t = p.lines.filter(l => l.zone === z).reduce((a, l) => a + amountOf(l), 0); const el = ROOT.querySelector(`[data-ztot="${i}"]`); if (el) el.textContent = t ? "รวม " + money(t) : ""; });
+      ROOT.querySelector("#spGrand").textContent = money(p.lines.reduce((a, l) => a + amountOf(l), 0)) || "–";
+    };
+    totals();
+    const mark = () => { ROOT.querySelector("#spSaved").textContent = "มีการแก้ไขที่ยังไม่บันทึก"; };
+    const redraw = () => { const y = window.scrollY; pageProject(p); window.scrollTo(0, y); mark(); };
+    const blank = zone => ({ id: uid(), zone, equip: "", tag: "", part: "", partNo: "", maker: "", spec: "", installed: "", qty: 1, unit: "pc", prio: "Recommended", leadWeeks: "", unitPrice: "", remark: "", source: "Manual" });
+    ROOT.querySelectorAll(".sp-cell").forEach(i => i.oninput = i.onchange = () => {
+      const l = p.lines.find(x => x.id === i.dataset.l); l[i.dataset.k] = i.value; mark();
+      if (i.dataset.k === "qty" || i.dataset.k === "unitPrice") { ROOT.querySelector(`[data-amt="${l.id}"]`).textContent = money(amountOf(l)); totals(); }
+    });
+    ROOT.querySelectorAll(".sp-zname").forEach(i => i.onchange = () => {
+      const old = zones[+i.dataset.zone], nu = i.value.trim() || old;
+      p.lines.forEach(l => { if (l.zone === old) l.zone = nu; }); p.zones = (p.zones || []).map(z => z === old ? nu : z); redraw();
+    });
+    ROOT.querySelectorAll("[data-addin]").forEach(b => b.onclick = () => { p.lines.push(blank(zones[+b.dataset.addin])); redraw(); });
+    ROOT.querySelectorAll("[data-move]").forEach(s => s.onchange = () => { if (s.value === "") return; p.lines.find(x => x.id === s.dataset.move).zone = zones[+s.value]; redraw(); });
     ROOT.querySelector("#spStatus").onchange = e => { p.status = e.target.value; mark(); };
-    ROOT.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { p.lines = p.lines.filter(x => x.id !== b.dataset.del); pageProject(p); mark(); });
+    ROOT.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { p.lines = p.lines.filter(x => x.id !== b.dataset.del); redraw(); });
     ROOT.querySelectorAll("[data-a]").forEach(b => b.onclick = async () => {
       const a = b.dataset.a;
-      if (a === "add") { p.lines.push({ id: uid(), equip: "", tag: "", location: "", part: "", partNo: "", qty: 1, unit: "pc", prio: "Recommended", source: "Manual", remark: "" }); pageProject(p); mark(); }
+      if (a === "zone") { const n = prompt("ชื่อโซนใหม่ (Process tank หรือ System)", "Zone " + String.fromCharCode(65 + zones.length) + " – "); if (n && n.trim()) { p.zones = [...(p.zones || []), n.trim()]; p.lines.push(blank(n.trim())); redraw(); } }
       if (a === "csv") exportCsv(p);
-      if (a === "save") { await save(p); dirty = false; ROOT.querySelector("#spSaved").textContent = "บันทึกแล้ว " + new Date().toLocaleTimeString("th-TH") + (MODE === "local" ? " (ในเบราว์เซอร์นี้)" : ""); }
+      if (a === "save") { p.zones = zonesOf(p); await save(p); ROOT.querySelector("#spSaved").textContent = "บันทึกแล้ว " + new Date().toLocaleTimeString("th-TH") + (MODE === "local" ? " (ในเบราว์เซอร์นี้)" : ""); }
       if (a === "delete" && confirm("ลบโปรเจค Spare Part " + p.jo + " ? (ลบแล้วกู้คืนไม่ได้)")) { await remove(p.id); location.hash = "#spare-part"; }
     });
   }
   function exportCsv(p) {
-    const head = ["No.", "Equipment", "Tag", "Location", "Spare part", "Part no.", "Qty", "Unit", "Priority", "Source", "Remark"];
+    migrate(p);
     const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const meta = [["Recommended Spare Part List"], ["Customer", p.customer], ["Project", p.name], ["Job No.", p.jo], ["QO / PO", (p.qo || "") + " / " + (p.po || "")], []];
-    const rows = (p.lines || []).map((l, i) => [i + 1, l.equip, l.tag, l.location, l.part, l.partNo, l.qty, l.unit, l.prio, l.source, l.remark]);
-    const csv = "﻿" + [...meta, head, ...rows].map(r => r.map(q).join(",")).join("\r\n");
+    const out = [["Recommended Spare Part List"], ["Customer", p.customer], ["Project", p.name], ["Job No.", p.jo], ["QO / PO", (p.qo || "") + " / " + (p.po || "")], [], COLS];
+    let no = 0, grand = 0;
+    zonesOf(p).forEach(z => {
+      const rows = p.lines.filter(l => l.zone === z); out.push([z]);
+      let sub = 0;
+      rows.forEach(l => { const a = amountOf(l); sub += a; out.push([++no, [l.equip, l.tag].filter(Boolean).join(" / "), l.part, l.partNo, l.maker, l.spec, l.installed, l.qty, l.unit, l.prio, l.leadWeeks, l.unitPrice === "" ? "" : num(l.unitPrice), a || "", l.remark]); });
+      grand += sub; out.push(["", "", "", "", "", "", "", "", "", "", "", "Subtotal " + z, sub || "", ""]);
+    });
+    out.push([], ["", "", "", "", "", "", "", "", "", "", "", "Total (excl. VAT)", grand || "", ""]);
+    const csv = "﻿" + out.map(r => r.map(q).join(",")).join("\r\n");
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     a.download = `SparePart_${p.jo}_${(p.customerShort || "").replace(/\W+/g, "")}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
   }
@@ -235,7 +300,8 @@
 .sp-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;margin:10px 0 14px}.sp-head h2{margin:6px 0 4px;font-size:20px;font-weight:600}
 .sp-links{margin-top:6px;font-size:13px}.sp-links a{color:var(--rak)}
 .sp-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sp-actions .sp-in{width:auto}
-.sp-edit{overflow-x:auto}.sp-edit table{min-width:1500px}.sp-edit td{padding:4px 5px;vertical-align:middle}.sp-edit select.sp-cell{min-width:128px}.sp-cell{font:inherit;font-size:13px;width:100%;min-width:70px;border:1px solid transparent;border-radius:6px;padding:5px 6px;background:transparent;color:var(--ink)}
+.sp-edit{overflow-x:auto}.sp-edit table{min-width:2050px}.sp-edit th{white-space:normal;vertical-align:bottom;min-width:60px}.sp-edit .c{text-align:center;color:var(--muted)}.sp-edit .r,.sp-edit .r input{text-align:right}.sp-edit td.m .sp-cell{min-width:96px}.sp-edit td:nth-child(4) .sp-cell{min-width:150px}.sp-edit td:nth-child(2) .sp-cell{min-width:270px}.sp-edit td.amt{font-variant-numeric:tabular-nums;white-space:nowrap;padding-right:10px}.sp-edit .tag{font-size:12px;color:var(--muted)}.sp-edit td.act{white-space:nowrap}.sp-move{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:6px;background:#fff;width:34px;padding:3px}
+.sp-zone td{background:var(--blush);padding:8px 10px!important;position:sticky;left:0}.sp-zone-in{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.sp-zname{font:inherit;font-weight:600;color:var(--rak);border:1px solid transparent;background:transparent;border-radius:6px;padding:4px 6px;min-width:320px}.sp-zname:hover,.sp-zname:focus{border-color:var(--blush-2);background:#fff}.sp-ztot{font-weight:600;font-size:13px}.sp-btn.sm{font-size:12px;padding:4px 10px}.sp-edit tfoot td{padding:10px 8px;border-top:2px solid var(--line)}.sp-edit td{padding:4px 5px;vertical-align:middle}.sp-edit select.sp-cell{min-width:128px}.sp-cell{font:inherit;font-size:13px;width:100%;min-width:70px;border:1px solid transparent;border-radius:6px;padding:5px 6px;background:transparent;color:var(--ink)}
 .sp-cell:hover{border-color:var(--line);background:#fff}.sp-edit td.w2 .sp-cell{min-width:230px}.sp-edit td.n .sp-cell{min-width:48px;width:56px}
 .sp-saved{display:block;font-size:12.5px;color:var(--muted);margin-top:6px}.sp-link{all:unset;color:var(--rak);cursor:pointer;text-decoration:underline}
 @media (max-width:760px){.sp-bar{grid-template-columns:1fr 1fr;position:static}.sp-bar label:nth-child(3){grid-column:span 2}.sp-form{grid-template-columns:1fr 1fr}}`;
