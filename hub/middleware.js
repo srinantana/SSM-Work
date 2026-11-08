@@ -1,16 +1,16 @@
-// SSM Work login gate — Vercel Routing Middleware.
-// Every request must carry a signed session cookie for a Google account in ALLOWED_DOMAIN (default rak.co.th).
+// SSM Work login gate — Vercel Routing Middleware + Supabase email sign-in link (PKCE).
+// Only addresses in ALLOWED_DOMAIN (default rak.co.th) can sign in; every other request needs a signed session cookie.
 // Env vars (Vercel → Project ssmwork → Settings → Environment Variables):
-//   GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET  – OAuth client (Google Cloud → Credentials, type "Web application")
-//   SESSION_SECRET                          – long random string used to sign the session cookie
-//   APP_URL                                 – https://ssmwork.vercel.app (must match the OAuth redirect URI host)
-//   ALLOWED_DOMAIN                          – rak.co.th
-// If any required value is missing the site stays locked (fails closed).
+//   SUPABASE_URL, SUPABASE_ANON_KEY – Supabase project (Settings → API). The anon/publishable key is not a secret.
+//   SESSION_SECRET                  – long random string used to sign the session cookie
+//   APP_URL                         – https://ssmwork.vercel.app (add APP_URL/auth/callback to Supabase Auth → URL Configuration → Redirect URLs)
+//   ALLOWED_DOMAIN                  – rak.co.th
+// If a required value is missing the site stays locked (fails closed).
 
 export const config = { matcher: ['/((?!favicon\\.ico).*)'] };
 
 const SESSION = 'ssm_session';
-const STATE = 'ssm_oauth';
+const PKCE = 'ssm_pkce';
 const SESSION_HOURS = 12;
 
 const te = new TextEncoder();
@@ -77,6 +77,11 @@ h1{margin:0;font-size:21px;font-weight:600;line-height:1.35}p{margin:0;color:var
 .btn{display:inline-flex;align-items:center;gap:10px;text-decoration:none;background:var(--rak);color:#fff;border-radius:10px;padding:10px 18px;font-weight:500}
 .btn:hover{background:var(--rak-dark)}.btn .g{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#fff}
 .note{font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px;width:100%}
+form{display:grid;gap:10px;width:100%}
+input[type=email]{width:100%;font:inherit;border:1px solid #dce1e8;border-radius:10px;padding:11px 14px;color:var(--ink)}
+input[type=email]:focus{outline:3px solid #f3c2c2;border-color:var(--rak)}
+button.btn{border:0;cursor:pointer;font:inherit;justify-content:center}
+.err{color:var(--rak);background:var(--blush);border-radius:8px;padding:8px 12px;font-size:13px;width:100%}
 code{background:var(--blush);color:var(--rak);border-radius:4px;padding:1px 6px}
 </style></head><body><main class="card">
 <div class="brand"><img src="/assets/rak-logo.svg" alt="RAK Engineering" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><span class="word"><b>RAK</b> ENGINEERING</span><span class="ws">SSM WORK</span></div>
@@ -85,77 +90,105 @@ code{background:var(--blush);color:var(--rak);border-radius:4px;padding:1px 6px}
 }
 
 const LOCK = `<span class="ic"><svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.6" fill="#ffd9d9"/><rect x="5" y="10.5" width="14" height="10" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10.3" cy="14.6" r=".9" fill="currentColor"/><circle cx="13.7" cy="14.6" r=".9" fill="currentColor"/><path d="M10.4 17a2.2 2.2 0 0 0 3.2 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>`;
-const G = `<span class="g"><svg width="14" height="14" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.3-8.5 2.3-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg></span>`;
+const MAIL = `<span class="ic"><svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="6" width="17" height="13" rx="2.6" fill="#ffd9d9"/><rect x="3.5" y="6" width="17" height="13" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="m4.5 7.5 7.5 5.5 7.5-5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M17.5 3.2l.4 1.1 1.1.4-1.1.4-.4 1.1-.4-1.1-1.1-.4 1.1-.4z" fill="currentColor"/></svg></span>`;
+const EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+$/;
 
-function signInPage(next, domain, { status = 401, title = 'เข้าสู่ระบบ', heading = 'เข้าสู่ระบบ SSM Work', msg, headers } = {}) {
-  const href = '/auth/login?next=' + encodeURIComponent(next);
+function signInPage(app, next, domain, { status = 401, heading = 'เข้าสู่ระบบ SSM Work', msg, error, email = '', headers } = {}) {
   return page({
-    status, title, headers,
-    body: `${LOCK}<h1>${esc(heading)}</h1><p>${msg || `สำหรับพนักงาน RAK Engineering ใช้บัญชี Google <b>@${esc(domain)}</b> เท่านั้น`}</p>
-<a class="btn" href="${esc(href)}">${G}เข้าสู่ระบบด้วย Google</a>
-<div class="note">ปัญหาการเข้าใช้งาน ติดต่อทีม SSM</div>`,
+    status, title: 'เข้าสู่ระบบ', headers,
+    body: `${LOCK}<h1>${esc(heading)}</h1><p>${msg || `สำหรับพนักงาน RAK Engineering ใส่อีเมล <b>@${esc(domain)}</b> แล้วกดลิงก์ที่ส่งไปในอีเมล`}</p>
+${error ? `<div class="err">${error}</div>` : ''}
+<form method="post" action="${esc(app)}/auth/login">
+<input type="hidden" name="next" value="${esc(next)}">
+<input type="email" name="email" required autocomplete="email" inputmode="email" placeholder="name@${esc(domain)}" value="${esc(email)}" aria-label="อีเมลบริษัท">
+<button class="btn" type="submit">ส่งลิงก์เข้าสู่ระบบ →</button>
+</form>
+<div class="note">ลิงก์ใช้ได้ครั้งเดียว · เปิดลิงก์ในเบราว์เซอร์เดียวกับที่ขอ · ปัญหาการเข้าใช้งาน ติดต่อทีม SSM</div>`,
   });
+}
+
+async function supa(env, path, body) {
+  const res = await fetch(env.url + path, {
+    method: 'POST',
+    headers: { apikey: env.key, authorization: 'Bearer ' + env.key, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  let data = {};
+  try { data = await res.json(); } catch {}
+  return { ok: res.ok, status: res.status, data };
 }
 
 export default async function middleware(req) {
   const url = new URL(req.url);
   const path = url.pathname;
   const env = (typeof process !== 'undefined' && process.env) || {};
-  const clientId = env.GOOGLE_CLIENT_ID, clientSecret = env.GOOGLE_CLIENT_SECRET, secret = env.SESSION_SECRET;
+  const sb = { url: (env.SUPABASE_URL || '').replace(/\/$/, ''), key: env.SUPABASE_ANON_KEY };
+  const secret = env.SESSION_SECRET;
   const domain = (env.ALLOWED_DOMAIN || 'rak.co.th').toLowerCase().replace(/^@/, '');
   const app = (env.APP_URL || url.origin).replace(/\/$/, '');
 
   // Logo on the sign-in page is public; nothing else is.
   if (path === '/assets/rak-logo.svg') return;
 
-  if (!clientId || !clientSecret || !secret || secret.length < 32) {
-    return page({ status: 503, title: 'กำลังตั้งค่า', body: `${LOCK}<h1>ระบบ login กำลังตั้งค่า</h1><p>ผู้ดูแลยังตั้งค่า Google sign-in ไม่ครบ เว็บจึงปิดไว้ก่อนเพื่อความปลอดภัย</p><div class="note">ผู้ดูแล: ใส่ <code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code> และ <code>SESSION_SECRET</code> (32 ตัวอักษรขึ้นไป) ใน Vercel แล้ว redeploy</div>` });
+  if (!sb.url || !sb.key || !secret || secret.length < 32) {
+    return page({ status: 503, title: 'กำลังตั้งค่า', body: `${LOCK}<h1>ระบบ login กำลังตั้งค่า</h1><p>ผู้ดูแลยังตั้งค่าการเข้าสู่ระบบไม่ครบ เว็บจึงปิดไว้ก่อนเพื่อความปลอดภัย</p><div class="note">ผู้ดูแล: ใส่ <code>SUPABASE_URL</code>, <code>SUPABASE_ANON_KEY</code> และ <code>SESSION_SECRET</code> ใน Vercel แล้ว redeploy</div>` });
   }
 
   if (path === '/auth/login') {
-    // Start every login on APP_URL so the state cookie and the callback share one host.
-    if (url.origin !== app) return Response.redirect(app + path + url.search, 302);
-    const next = safeNext(url.searchParams.get('next'));
-    const state = b64u(crypto.getRandomValues(new Uint8Array(24)));
-    const g = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-    g.search = new URLSearchParams({
-      client_id: clientId, redirect_uri: app + '/auth/callback', response_type: 'code',
-      scope: 'openid email profile', hd: domain, prompt: 'select_account', state,
+    if (req.method !== 'POST') return Response.redirect(app + '/', 302);
+    const form = await req.formData().catch(() => null);
+    const email = String(form?.get('email') || '').trim().toLowerCase();
+    const next = safeNext(String(form?.get('next') || '/'));
+    if (!EMAIL_RE.test(email) || !email.endsWith('@' + domain)) {
+      return signInPage(app, next, domain, { status: 403, email, error: `ใช้ได้เฉพาะอีเมล <b>@${esc(domain)}</b> เท่านั้น` });
+    }
+    const verifier = b64u(crypto.getRandomValues(new Uint8Array(32)));
+    const challenge = b64u(await crypto.subtle.digest('SHA-256', te.encode(verifier)));
+    const r = await supa(sb, '/auth/v1/otp?redirect_to=' + encodeURIComponent(app + '/auth/callback'), {
+      email, create_user: true, code_challenge: challenge, code_challenge_method: 's256',
     });
-    return new Response(null, { status: 302, headers: { location: g.toString(), 'set-cookie': setCookie(STATE, state + '|' + next, 600), 'cache-control': 'no-store' } });
+    if (!r.ok) {
+      const tooMany = r.status === 429;
+      return signInPage(app, next, domain, { status: tooMany ? 429 : 502, email, error: tooMany ? 'ขอลิงก์ถี่เกินไป รอสักครู่แล้วลองใหม่' : 'ส่งอีเมลไม่สำเร็จ ลองใหม่อีกครั้ง' });
+    }
+    return page({
+      title: 'เช็คอีเมล', headers: { 'set-cookie': setCookie(PKCE, verifier + '|' + next, 3600) },
+      body: `${MAIL}<h1>เช็คอีเมลได้เลย ✨</h1><p>ส่งลิงก์เข้าสู่ระบบไปที่ <b>${esc(email)}</b> แล้ว เปิดลิงก์จากอีเมลในเบราว์เซอร์นี้ภายใน 1 ชั่วโมง</p><div class="note">ไม่เจออีเมล? ดูในโฟลเดอร์ Spam หรือ <a href="${esc(app)}/">ขอลิงก์ใหม่</a></div>`,
+    });
   }
 
   if (path === '/auth/callback') {
-    const saved = getCookie(req, STATE) || '';
-    const [state, next = '/'] = saved.split('|');
-    const clearState = setCookie(STATE, '', 0);
-    const retry = (heading, msg) => signInPage('/', domain, { status: 403, title: 'เข้าไม่ได้', heading, msg, headers: { 'set-cookie': clearState } });
-    if (url.searchParams.get('error')) return retry('ยกเลิกการเข้าสู่ระบบ', 'ลองเข้าสู่ระบบใหม่อีกครั้ง');
-    if (!state || state !== url.searchParams.get('state')) return retry('เซสชันหมดอายุ', 'ลิงก์เข้าสู่ระบบหมดอายุหรือถูกเปิดจากหน้าอื่น ลองใหม่อีกครั้ง');
-    const res = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ code: url.searchParams.get('code') || '', client_id: clientId, client_secret: clientSecret, redirect_uri: app + '/auth/callback', grant_type: 'authorization_code' }),
-    });
-    if (!res.ok) return retry('เข้าสู่ระบบไม่สำเร็จ', 'Google ไม่ยืนยันการเข้าสู่ระบบ ลองใหม่อีกครั้ง');
-    const tok = await res.json();
-    let claims = {};
-    // id_token came straight from Google's token endpoint over TLS, so its payload can be trusted without re-verifying the signature.
-    try { claims = JSON.parse(unb64u(String(tok.id_token).split('.')[1])); } catch {}
-    const email = String(claims.email || '').toLowerCase();
-    const okIssuer = claims.iss === 'https://accounts.google.com' || claims.iss === 'accounts.google.com';
-    if (!okIssuer || claims.aud !== clientId || claims.email_verified !== true || !email.endsWith('@' + domain) || String(claims.hd || '').toLowerCase() !== domain) {
-      return retry('บัญชีนี้ใช้ไม่ได้', `${email ? `<b>${esc(email)}</b> ไม่ใช่บัญชี @${esc(domain)} ` : ''}กรุณาเข้าสู่ระบบด้วยบัญชี Google ของบริษัท (@${esc(domain)})`);
+    const saved = getCookie(req, PKCE) || '';
+    const [verifier, next = '/'] = saved.split('|');
+    const clear = setCookie(PKCE, '', 0);
+    const fail = (error) => signInPage(app, '/', domain, { status: 403, error, headers: { 'set-cookie': clear } });
+    if (url.searchParams.get('error_description')) return fail('ลิงก์ไม่ถูกต้องหรือหมดอายุแล้ว ขอลิงก์ใหม่ได้เลย');
+    let r;
+    const code = url.searchParams.get('code');
+    const tokenHash = url.searchParams.get('token_hash');
+    if (code) {
+      if (!verifier) return fail('เปิดลิงก์คนละเบราว์เซอร์กับที่ขอไว้ ขอลิงก์ใหม่ในเบราว์เซอร์นี้ได้เลย');
+      r = await supa(sb, '/auth/v1/token?grant_type=pkce', { auth_code: code, code_verifier: verifier });
+    } else if (tokenHash) {
+      r = await supa(sb, '/auth/v1/verify', { type: url.searchParams.get('type') || 'email', token_hash: tokenHash });
+    } else {
+      return fail('ลิงก์ไม่ครบ ขอลิงก์ใหม่ได้เลย');
     }
-    const session = await makeToken(secret, { email, name: claims.name || email, exp: Math.floor(Date.now() / 1000) + SESSION_HOURS * 3600 });
+    const user = r.ok ? r.data.user || {} : {};
+    const email = String(user.email || '').toLowerCase();
+    if (!r.ok || !email.endsWith('@' + domain) || !(user.email_confirmed_at || user.confirmed_at)) {
+      return fail(r.ok ? `ใช้ได้เฉพาะอีเมล @${esc(domain)} เท่านั้น` : 'ลิงก์ไม่ถูกต้องหรือหมดอายุแล้ว ขอลิงก์ใหม่ได้เลย');
+    }
+    const name = (user.user_metadata && (user.user_metadata.full_name || user.user_metadata.name)) || email.split('@')[0];
+    const session = await makeToken(secret, { email, name, exp: Math.floor(Date.now() / 1000) + SESSION_HOURS * 3600 });
     const h = new Headers({ location: app + safeNext(next), 'cache-control': 'no-store' });
     h.append('set-cookie', setCookie(SESSION, session, SESSION_HOURS * 3600));
-    h.append('set-cookie', clearState);
+    h.append('set-cookie', clear);
     return new Response(null, { status: 302, headers: h });
   }
 
   if (path === '/auth/logout') {
-    return signInPage('/', domain, { status: 200, title: 'ออกจากระบบแล้ว', heading: 'ออกจากระบบแล้ว', msg: 'แล้วพบกันใหม่ 👋 เข้าสู่ระบบอีกครั้งด้วยบัญชี @' + esc(domain), headers: { 'set-cookie': setCookie(SESSION, '', 0) } });
+    return signInPage(app, '/', domain, { status: 200, heading: 'ออกจากระบบแล้ว', msg: 'แล้วพบกันใหม่ 👋 เข้าสู่ระบบอีกครั้งด้วยอีเมล @' + esc(domain), headers: { 'set-cookie': setCookie(SESSION, '', 0) } });
   }
 
   const user = await readToken(secret, getCookie(req, SESSION));
@@ -168,5 +201,5 @@ export default async function middleware(req) {
 
   const navigating = req.headers.get('sec-fetch-mode') === 'navigate' || (req.headers.get('accept') || '').includes('text/html');
   if (!navigating) return new Response(JSON.stringify({ error: 'login required' }), { status: 401, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
-  return signInPage(path + url.search, domain);
+  return signInPage(app, path + url.search, domain);
 }
