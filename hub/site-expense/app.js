@@ -146,7 +146,7 @@
     draft:     { th: "Draft",         cls: "s-draft", wait: "SC กำลังร่าง" },
     requested: { th: "Requested",     cls: "s-req",   wait: "รอ SSM ตรวจ" },
     reviewed:  { th: "SSM reviewed",  cls: "s-req",   wait: "รอ MD อนุมัติ" },
-    approved:  { th: "Approved",      cls: "s-ok",    wait: "รอเปิด Job (JO)" },
+    approved:  { th: "Approved",      cls: "s-ok",    wait: "รอ Get Award (เปิด Job)" },
     revise:    { th: "Revise",        cls: "s-rev",   wait: "ส่งกลับให้ SC แก้" },
     locked:    { th: "Budget locked", cls: "s-lock",  wait: "บันทึก Actual ได้" },
   };
@@ -342,7 +342,7 @@
     const cur = SECS.find(s => s.id === secId) || SECS[0];
     const st = STATUS[p.status];
     const href = s => `#site-expense/${encodeURIComponent(p.id)}${s === "dashboard" ? "" : "/" + s}`;
-    const steps = [["draft", "SC ร่าง"], ["requested", "SSM ตรวจ"], ["reviewed", "MD อนุมัติ"], ["approved", "เปิด Job (JO)"], ["locked", "Budgetary 🔒"]];
+    const steps = [["draft", "SC ร่าง"], ["requested", "SSM ตรวจ"], ["reviewed", "MD อนุมัติ"], ["approved", "Get Award (JO)"], ["locked", "Budgetary 🔒"]];
     const order = ["draft", "requested", "reviewed", "approved", "locked"];
     const at = p.status === "revise" ? 0 : order.indexOf(p.status);
     const stepper = steps.map(([k, t], i) => `<span class="se-step ${i < at ? "done" : i === at ? "now" : ""}"><i>${i < at ? "✓" : i + 1}</i>${t}</span>`).join('<span class="se-arr">→</span>');
@@ -356,7 +356,8 @@
           <div style="min-width:0"><div class="se-id"><b>${esc(p.ij)}</b>${p.jo ? `<span class="se-jo">${esc(p.jo)}</span>` : `<span class="se-jo none">ยังไม่มี JO</span>`}<span class="se-st ${st.cls}">${st.th}</span><span class="se-wait">${st.wait}</span></div>
             <h2>${esc(p.name)}</h2><div class="se-cu">${esc(p.customer)}${p.city ? " · " + esc(p.city) : ""} · ${fmtD(p.start)} – ${fmtD(p.end)}</div></div>
           <div class="se-ph-r"><span><small>ระยะเวลา</small><b>${daysOf(p)} days</b></span><span><small>คน</small><b>${peopleOf(p)}</b></span><span><small>${p.budget ? "Budget" : "Planned"}</small><b>${baht(plannedOf(p))}</b></span></div>
-          <div class="se-ph-a">${editable(p) ? `<button class="se-btn" data-edit>${IC.edit}แก้ไขข้อมูล</button>` : ""}${p.list === "active" ? `<button class="se-btn" data-arch>${IC.box}Archive</button><button class="se-btn danger" data-trash>${IC.trash}Trash</button>` : ""}</div>
+          ${p.award ? `<div class="se-award"><span class="se-aw-ic">🏆</span><span><b>Awarded</b> · ${esc(p.ij)} → <b class="se-jo">${esc(p.jo)}</b> · ${fmtD(p.award.date)}${p.award.value ? ` · มูลค่างาน ${baht(p.award.value)}` : ""}${p.award.by ? ` · เปิด Job โดย ${esc(p.award.by)}` : ""}${p.award.note ? `<small>${esc(p.award.note)}</small>` : ""}</span><span class="se-aw-b">Budget control ${baht(plannedOf(p))} 🔒</span></div>` : ""}
+          <div class="se-ph-a">${p.status === "approved" && p.list === "active" ? (role() === "md" ? `<span class="se-hint" style="margin-right:auto">รอผู้เปิด Job กด Get Award · สลับเป็น SC / SSM เพื่อทดสอบ</span>` : `<button class="se-btn award" data-award>🏆 Get Award</button>`) : ""}${editable(p) ? `<button class="se-btn" data-edit>${IC.edit}แก้ไขข้อมูล</button>` : ""}${p.list === "active" ? `<button class="se-btn" data-arch>${IC.box}Archive</button><button class="se-btn danger" data-trash>${IC.trash}Trash</button>` : ""}</div>
         </div>
         <div class="se-steps">${stepper}</div>
         <nav class="se-tabs" aria-label="Section ของโปรเจค">${SECS.map(s => `<a class="se-tab" href="${href(s.id)}" ${s.id === cur.id ? 'aria-current="page"' : ""}><span class="n">${s.ic}</span><b>${s.no}. ${esc(s.name)}</b><small>${esc(s.th)}</small></a>`).join("")}</nav>
@@ -366,11 +367,48 @@
     wireRole(el, redraw);
     const on = (sel, fn) => { const b = el.querySelector(sel); if (b) b.onclick = fn; };
     on("[data-edit]", () => projectForm(p));
+    on("[data-award]", () => getAward(p));
     on("[data-arch]", () => { p.list = "archived"; save(); toast("ย้ายไป Archived แล้ว"); redraw(); });
     on("[data-trash]", () => { if (confirm("ย้ายโปรเจคนี้ไป Trash?")) { p.list = "trash"; save(); toast("ย้ายไป Trash แล้ว"); location.hash = "#site-expense"; } });
     on("[data-restore]", () => { p.list = "active"; save(); toast("กู้คืนแล้ว"); redraw(); });
     const sec = el.querySelector("#seSec");
     ({ dashboard: secDashboard, estimate: secEstimate, actual: secActual })[cur.id](sec, p, redraw);
+  }
+
+
+  /* ---------- Get Award: link IJ → Job no. (JO) and lock the Estimate as Budget control ---------- */
+  function getAward(p) {
+    const by = sumByCat(p), total = totalOf(p);
+    const me = (window.SSM_ME && (window.SSM_ME.name || window.SSM_ME.email)) || "";
+    const m = modal("🏆 Get Award · " + p.ij, `
+      <p class="se-hint" style="margin:0">ใส่ Job no. ที่เปิดใหม่ ระบบจะผูก ${esc(p.ij)} กับ Job นี้ และล็อกยอด Estimate ที่ MD อนุมัติเป็น Budget control · ทีมหน้างานบันทึก Actual ได้ทันที</p>
+      <div class="se-fgrid">
+        <label>Job no. (JO) *<input id="awJo" placeholder="JO2611001" value="${esc(p.jo)}" autocomplete="off"></label>
+        <label>วันที่ได้งาน / เปิด Job *<input id="awDate" type="date" value="${today()}"></label>
+        <label>มูลค่างาน / PO (บาท)<input id="awVal" inputmode="decimal" placeholder="ไม่บังคับ"></label>
+        <label class="w2">ผู้เปิด Job<input id="awBy" value="${esc(me)}" placeholder="ชื่อผู้เปิด Job"></label>
+        <label>อ้างอิง PO / เอกสาร<input id="awRef" placeholder="เช่น PO-12345"></label>
+      </div>
+      <div class="tbl"><table style="min-width:0"><thead><tr><th>Budget control ที่จะล็อก</th><th class="r">จำนวนเงิน</th></tr></thead>
+        <tbody>${CATS.map(c => `<tr><td>${catCell(c)}</td><td class="r">${by[c.code] ? money(by[c.code]) : "–"}</td></tr>`).join("")}</tbody>
+        <tfoot><tr><td><b>รวม Budget control</b></td><td class="r"><b>${money(total)}</b></td></tr></tfoot></table></div>
+      <p class="se-hint" style="margin:0">🔒 หลังกดยืนยัน จะแก้ Estimate ไม่ได้อีก</p>`,
+      mm => {
+        const g = id => mm.querySelector(id).value.trim();
+        const jo = g("#awJo").toUpperCase(), date = g("#awDate");
+        if (!jo) return "ใส่ Job no. (JO)";
+        if (!/^JO[\w-]{3,}$/i.test(jo)) return "Job no. ควรขึ้นต้นด้วย JO เช่น JO2611001";
+        if (!date) return "ใส่วันที่ได้งาน";
+        const dup = DB.projects.find(x => x !== p && x.jo && x.jo.toUpperCase() === jo && x.list !== "trash");
+        if (dup) return `${jo} ผูกกับ ${dup.ij} อยู่แล้ว`;
+        p.jo = jo; p.budget = by; p.lockedAt = new Date().toISOString(); p.status = "locked";
+        p.award = { date, value: num(g("#awVal")) || 0, by: g("#awBy"), note: g("#awRef"), at: new Date().toISOString() };
+        p.history.push({ at: p.award.at, role: role(), action: "award", note: jo + (p.award.note ? " · " + p.award.note : "") });
+        save(); toast(`Get Award แล้ว · ${p.ij} → ${jo} · ล็อก Budget control`);
+        location.hash = "#site-expense/" + encodeURIComponent(p.id);
+        window.dispatchEvent(new HashChangeEvent("hashchange"));
+      }, "ยืนยัน Get Award");
+    return m;
   }
 
   /* ---------- 1. Dashboard ---------- */
@@ -426,12 +464,12 @@
       if ((p.status === "draft" || p.status === "revise") && r === "sc") actions.push(`<button class="se-btn primary" data-act="submit">ส่งให้ SSM ตรวจ →</button>`);
       if (p.status === "requested" && r === "ssm") actions.push(`<button class="se-btn" data-act="back">↩ ส่งกลับให้ SC แก้</button><button class="se-btn primary" data-act="approve">✓ ผ่าน ส่งให้ MD</button>`);
       if (p.status === "reviewed" && r === "md") actions.push(`<button class="se-btn" data-act="back">↩ ส่งกลับให้ SC แก้</button><button class="se-btn primary" data-act="approve">✓ อนุมัติงบ</button>`);
-      if (p.status === "approved" && r !== "md") actions.push(`<label class="se-jo-in">JO no.<input id="seJo" placeholder="JO2611xxx" value="${esc(p.jo)}"></label><button class="se-btn primary" data-act="lock">🔒 เปิด Job &amp; Transform เป็น Budgetary</button>`);
+      if (p.status === "approved" && r !== "md") actions.push(`<button class="se-btn award" data-act="award">🏆 Get Award · ผูก Job no. &amp; ล็อก Budget control</button>`);
     }
     const who = { draft: "sc", revise: "sc", requested: "ssm", reviewed: "md", approved: "sc" }[p.status];
     const waitMsg = p.list === "active" && who && !actions.length ? `<span class="se-hint">ขั้นตอนนี้เป็นของ ${who.toUpperCase()} · สลับบทบาทด้านบนเพื่อทดสอบ</span>` : "";
     const hist = p.history.slice().reverse();
-    const ACT = { submit: "ส่งตรวจ", approve: "ผ่าน / อนุมัติ", back: "ส่งกลับแก้", lock: "เปิด Job & ล็อกงบ" };
+    const ACT = { submit: "ส่งตรวจ", approve: "ผ่าน / อนุมัติ", back: "ส่งกลับแก้", lock: "เปิด Job & ล็อกงบ", award: "Get Award · ผูก Job no. & ล็อก Budget control" };
     sec.innerHTML = `
       <div class="se-sec-h"><h3>📝 Estimate · ประเมินจาก Scope of Work</h3>${ed ? `<span class="badge live">แก้ไขได้</span>` : `<span class="badge off">${p.status === "locked" ? "🔒 ล็อกเป็น Budgetary แล้ว" : "อ่านอย่างเดียว"}</span>`}</div>
       ${p.status === "revise" ? `<div class="se-alert">↩ ถูกส่งกลับให้แก้: ${esc((p.history.filter(h => h.action === "back").pop() || {}).note || "-")}</div>` : ""}
@@ -473,13 +511,7 @@
           const n = mm.querySelector("#seNote").value.trim(); if (!n) return "ใส่เหตุผลก่อนส่งกลับ";
           log("back", n); p.status = "revise"; save(); toast("ส่งกลับให้ SC แก้แล้ว"); redraw();
         }, "ส่งกลับ");
-      } else if (a === "lock") {
-        const jo = sec.querySelector("#seJo").value.trim();
-        if (!jo) return toast("ใส่ JO no. ก่อนเปิด Job");
-        if (!confirm(`เปิด Job ${jo} และล็อก Estimate เป็น Budgetary?\nหลังล็อกแล้วจะแก้ Estimate ไม่ได้`)) return;
-        p.jo = jo; p.budget = sumByCat(p); p.lockedAt = new Date().toISOString(); p.status = "locked"; log("lock", jo); save();
-        toast("ล็อกงบแล้ว · ทีมหน้างานบันทึก Actual ได้"); location.hash = "#site-expense/" + encodeURIComponent(p.id) + "/actual";
-      }
+      } else if (a === "award") getAward(p);
     });
   }
 
@@ -583,6 +615,9 @@ td.neg,.neg{color:var(--rak);font-weight:600}
 .se-fgrid input,.se-phr input{font:inherit;font-size:14px;border:1px solid var(--line);border-radius:9px;padding:7px 10px;width:100%;color:var(--ink)}
 .se-phs{display:grid;gap:8px}.se-phs>b{font-size:13px}.se-phs .se-btn{justify-self:start}
 .se-phr{display:grid;grid-template-columns:1.4fr 1fr 1fr auto;gap:8px;align-items:center;margin-bottom:6px}
+.se-btn.award{background:#1d7a4f;border-color:#1d7a4f;color:#fff;font-weight:600;margin-right:auto}.se-btn.award:hover{background:#166340}
+.se-award{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;width:100%;background:#eefaf3;border:1px solid #bfe3d3;border-radius:10px;padding:9px 14px;font-size:13.5px}
+.se-award small{display:block;color:var(--muted);font-size:12px}.se-aw-ic{font-size:20px}.se-aw-b{margin-left:auto;font-weight:600;color:#1d7a4f;white-space:nowrap}
 #seToast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);opacity:0;background:#22252b;color:#fff;border-radius:10px;padding:10px 18px;font-size:13.5px;z-index:70;transition:.2s;pointer-events:none}
 #seToast.on{opacity:1;transform:translate(-50%,0)}
 @media (max-width:1000px){.se-sum{grid-template-columns:repeat(3,minmax(0,1fr))}}
