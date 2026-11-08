@@ -2,8 +2,8 @@
 // Accounts are created by the super admin at /admin from the company email list. New accounts get
 // DEFAULT_PASSWORD and must set their own password at first sign-in. Only ALLOWED_DOMAIN addresses can sign in.
 // Env vars (Vercel → Project ssmwork → Settings → Environment Variables):
-//   SUPABASE_URL, SUPABASE_ANON_KEY  – Supabase project (Settings → API). The anon key is not a secret.
-//   SUPABASE_SERVICE_ROLE_KEY        – secret; used only for /admin actions. Never expose it in a page.
+//   SUPABASE_URL, SUPABASE_ANON_KEY  – Supabase project URL and publishable (anon) key. Not secret.
+//   SUPABASE_SERVICE_ROLE_KEY        – secret key (sb_secret_… or legacy service_role); /admin only. Never expose it.
 //   SESSION_SECRET                   – long random string used to sign the session cookie
 //   APP_URL                          – https://ssmwork.vercel.app
 //   ALLOWED_DOMAIN                   – rak.co.th
@@ -131,11 +131,20 @@ ${first ? '' : '<label class="f">รหัสผ่านปัจจุบั�
   });
 }
 
+// New Supabase keys (sb_publishable_ / sb_secret_) go only in the apikey header; the gateway rejects them as a Bearer token.
+// Legacy JWT keys (eyJ…) are also sent as the Bearer token. A signed-in user's access token always goes in Authorization.
+function authHeaders(key, bearer) {
+  const h = { apikey: key, 'content-type': 'application/json' };
+  if (bearer) h.authorization = 'Bearer ' + bearer;
+  else if (String(key).startsWith('eyJ')) h.authorization = 'Bearer ' + key;
+  return h;
+}
+
 async function call(cfg, path, { method = 'POST', body, bearer, admin } = {}) {
   const key = admin ? cfg.service : cfg.anon;
   const res = await fetch(cfg.url + path, {
     method,
-    headers: { apikey: key, authorization: 'Bearer ' + (bearer || key), 'content-type': 'application/json' },
+    headers: authHeaders(key, bearer),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   let data = {};
