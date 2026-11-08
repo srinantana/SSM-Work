@@ -183,6 +183,9 @@
 
   /* --- project detail --- */
   const PRIOS = ["Critical", "Recommended", "Consumable"];
+  //              No. Equip/Tag Part PartNo Maker Spec Inst Rec Unit Prio Lead Price Amount Remarks (actions)
+  const COL_W  = [46, 230, 210, 150, 180, 220, 76, 96, 64, 152, 76, 116, 124, 210, 74];
+  const COL_AL = ["c", "", "", "", "", "", "c", "c", "c", "c", "c", "r", "r", ""];
   const prioCls = v => "p-" + String(v || "recommended").toLowerCase();
   const COLS = ["No.", "Equipment / Tag", "Part description", "Part No. / Drawing Ref.", "Manufacturer / Model", "Specification / Material", "Installed qty", "Recommended spare qty", "Unit", "Priority", "Lead time (weeks)", "Unit price", "Amount", "Remarks"];
   const num = v => { const n = parseFloat(String(v ?? "").replace(/,/g, "")); return isFinite(n) ? n : 0; };
@@ -219,12 +222,12 @@
           <button class="sp-btn sm" data-addin="${zi}">＋ เพิ่มรายการในโซนนี้</button></div></td></tr>`
         + rows.map(l => { no++; return `<tr data-row="${l.id}">
           <td class="c">${no}</td>
-          <td class="w2">${inp(l, "equip", "", "Equipment")}${inp(l, "tag", "tag", "Tag")}</td>
-          <td class="w2">${inp(l, "part")}</td><td>${inp(l, "partNo")}</td><td class="w2">${inp(l, "maker")}</td><td class="w2">${inp(l, "spec")}</td>
-          <td class="n">${inp(l, "installed")}</td><td class="n">${inp(l, "qty")}</td><td class="n">${inp(l, "unit")}</td>
-          <td><select class="sp-cell sp-prio ${prioCls(l.prio)}" data-l="${l.id}" data-k="prio">${PRIOS.map(o => `<option class="${prioCls(o)}" ${l.prio === o ? "selected" : ""}>${o}</option>`).join("")}</select></td>
-          <td class="n">${inp(l, "leadWeeks")}</td><td class="m">${inp(l, "unitPrice", "r")}</td><td class="m r amt" data-amt="${l.id}">${money(amountOf(l))}</td>
-          <td class="w2">${inp(l, "remark")}</td>
+          <td>${inp(l, "equip", "", "Equipment")}${inp(l, "tag", "tag", "Tag")}</td>
+          <td>${inp(l, "part")}</td><td>${inp(l, "partNo")}</td><td>${inp(l, "maker")}</td><td>${inp(l, "spec")}</td>
+          <td class="c">${inp(l, "installed")}</td><td class="c">${inp(l, "qty")}</td><td class="c">${inp(l, "unit")}</td>
+          <td class="c"><select class="sp-cell sp-prio ${prioCls(l.prio)}" data-l="${l.id}" data-k="prio">${PRIOS.map(o => `<option class="${prioCls(o)}" ${l.prio === o ? "selected" : ""}>${o}</option>`).join("")}</select></td>
+          <td class="c">${inp(l, "leadWeeks")}</td><td class="r">${inp(l, "unitPrice")}</td><td class="r amt" data-amt="${l.id}">${money(amountOf(l))}</td>
+          <td>${inp(l, "remark")}</td>
           <td class="act"><select class="sp-move" data-move="${l.id}" title="ย้ายโซน" aria-label="ย้ายโซน"><option value="">⇄</option>${zones.map((x, i) => x === z ? "" : `<option value="${i}">${esc(x)}</option>`).join("")}</select><button class="sp-x" data-del="${l.id}" title="ลบรายการ">✕</button></td></tr>`; }).join("");
     }).join("");
     ROOT.innerHTML = `<a class="open" href="#spare-part">← รายการโปรเจค</a>
@@ -233,7 +236,7 @@
         <div class="sp-links">${links}</div></div>
         <div class="sp-actions"><select class="sp-in" id="spStatus">${Object.keys(STATUS).map(s => `<option value="${s}" ${p.status === s ? "selected" : ""}>${STATUS[s][0]}</option>`).join("")}</select>
           <button class="sp-btn" data-a="zone">＋ เพิ่มโซน</button><button class="sp-btn" data-a="import">⬆ Import from template</button><button class="sp-btn" data-a="csv" title="ไฟล์ CSV สำหรับส่งลูกค้า: ไม่มี Remarks และเฉพาะรายการที่ใส่ Unit price แล้ว">Export for customer</button><button class="sp-btn primary" data-a="save">บันทึก</button>${isAdmin() ? `<button class="sp-btn danger" data-a="delete">ลบโปรเจค</button>` : ""}</div></div>
-      <div class="tbl sp-edit"><table><colgroup>${[44, 210, 190, 130, 160, 190, 66, 84, 58, 150, 68, 104, 110, 170, 72].map(w => `<col style="width:${w}px">`).join("")}</colgroup><thead><tr>${COLS.map(c => `<th>${c}</th>`).join("")}<th></th></tr></thead><tbody>${body || `<tr><td colspan="${COLS.length + 1}" class="sub">ยังไม่มีรายการ · กด ＋ เพิ่มโซน</td></tr>`}</tbody>
+      <div class="tbl sp-edit"><table><colgroup>${COL_W.map(w => `<col style="width:${w}px">`).join("")}</colgroup><thead><tr>${COLS.map((c, i) => `<th class="${COL_AL[i]}">${c}</th>`).join("")}<th></th></tr></thead><tbody>${body || `<tr><td colspan="${COLS.length + 1}" class="sub">ยังไม่มีรายการ · กด ＋ เพิ่มโซน</td></tr>`}</tbody>
         <tfoot><tr><td colspan="12" class="r"><b>Total (excl. VAT)</b></td><td class="r"><b id="spGrand"></b></td><td colspan="2"></td></tr></tfoot></table></div>
       <p class="sp-src">อะไหล่ที่ระบบเสนอเป็นค่าเริ่มต้นตามประเภทอุปกรณ์ · ใส่ Part No. และ Unit price (ราคาขาย) ก่อนส่งลูกค้า · Lead time เริ่มต้นจาก Project Pipeline</p>
       <span class="sp-saved" id="spSaved" aria-live="polite"></span>`;
@@ -434,9 +437,9 @@ option.p-critical,option.p-recommended,option.p-consumable{font-weight:600}
 .sp-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;margin:10px 0 14px}.sp-head h2{margin:6px 0 4px;font-size:20px;font-weight:600}
 .sp-links{margin-top:6px;font-size:13px}.sp-links a{color:var(--rak)}
 .sp-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sp-actions .sp-in{width:auto}
-.sp-edit{overflow-x:auto}.sp-edit table{table-layout:fixed;width:1806px}.sp-edit th{white-space:normal;vertical-align:bottom;line-height:1.3;padding:8px 6px}.sp-edit .c{text-align:center;color:var(--muted)}.sp-edit .r,.sp-edit .r input{text-align:right}.sp-edit td.amt{font-variant-numeric:tabular-nums;white-space:nowrap;padding-right:10px}.sp-edit .tag{font-size:12px;color:var(--muted)}.sp-edit td.act{white-space:nowrap}.sp-move{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:6px;background:#fff;width:40px;padding:3px 2px}
-.sp-zone td{background:var(--blush);padding:8px 10px!important;position:sticky;left:0}.sp-zone-in{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.sp-zname{font:inherit;font-weight:600;color:var(--rak);border:1px solid transparent;background:transparent;border-radius:6px;padding:4px 6px;min-width:320px}.sp-zname:hover,.sp-zname:focus{border-color:var(--blush-2);background:#fff}.sp-ztot{font-weight:600;font-size:13px}.sp-btn.sm{font-size:12px;padding:4px 10px}.sp-edit tfoot td{padding:10px 8px;border-top:2px solid var(--line)}.sp-edit td{padding:4px 4px;vertical-align:top}.sp-cell{font:inherit;font-size:13px;line-height:1.4;width:100%;min-width:0;box-sizing:border-box;border:1px solid transparent;border-radius:6px;padding:5px 6px;background:transparent;color:var(--ink)}
-.sp-cell:hover{border-color:var(--line);background:#fff}textarea.sp-wrap{resize:none;overflow:hidden;display:block;white-space:pre-wrap;word-break:break-word}.sp-edit td.c,.sp-edit td.amt{padding-top:10px}.sp-edit td.n .sp-cell{text-align:center}
+.sp-edit{overflow-x:auto}.sp-edit table{table-layout:fixed;width:2024px}.sp-edit th{white-space:normal;vertical-align:bottom;line-height:1.3;padding:10px 6px}.sp-edit td{vertical-align:top;padding:6px 5px}.sp-edit .c{text-align:center}.sp-edit td.c:first-child{color:var(--muted);padding-top:11px}.sp-edit .r{text-align:right}.sp-edit td.c .sp-cell{text-align:center}.sp-edit td.r .sp-cell{text-align:right}.sp-edit .sp-cell{width:100%;min-width:0;box-sizing:border-box;line-height:1.4}.sp-edit select.sp-prio{text-align:center;text-align-last:center}.sp-edit td.amt{font-variant-numeric:tabular-nums;white-space:nowrap;padding-top:11px;padding-right:10px;font-weight:600}.sp-edit .tag{font-size:12px;color:var(--muted)}.sp-edit td.act{white-space:nowrap;text-align:center}.sp-move{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:6px;background:#fff;width:34px;padding:3px}
+.sp-zone td{background:var(--blush);padding:8px 10px!important}.sp-zone-in{display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;left:10px;width:max-content}.sp-zname{font:inherit;font-weight:600;color:var(--rak);border:1px solid transparent;background:transparent;border-radius:6px;padding:4px 6px;min-width:320px}.sp-zname:hover,.sp-zname:focus{border-color:var(--blush-2);background:#fff}.sp-ztot{font-weight:600;font-size:13px}.sp-btn.sm{font-size:12px;padding:4px 10px}.sp-edit tfoot td{padding:10px 8px;border-top:2px solid var(--line)}.sp-edit td{padding:4px 4px;vertical-align:top}.sp-cell{font:inherit;font-size:13px;line-height:1.4;width:100%;min-width:0;box-sizing:border-box;border:1px solid transparent;border-radius:6px;padding:5px 6px;background:transparent;color:var(--ink)}
+.sp-cell:hover{border-color:var(--line);background:#fff}textarea.sp-wrap{resize:none;overflow:hidden;display:block;white-space:pre-wrap;word-break:break-word}
 .sp-saved{display:block;font-size:12.5px;color:var(--muted);margin-top:6px}.sp-link{all:unset;color:var(--rak);cursor:pointer;text-decoration:underline}
 @media (max-width:760px){.sp-bar{grid-template-columns:1fr 1fr;position:static}.sp-bar label:nth-child(3){grid-column:span 2}.sp-form{grid-template-columns:1fr 1fr}}`;
 
