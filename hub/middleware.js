@@ -99,6 +99,24 @@ code{background:var(--blush);color:var(--rak);border-radius:4px;padding:1px 6px}
 const LOCK = `<span class="ic"><svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.6" fill="#ffd9d9"/><rect x="5" y="10.5" width="14" height="10" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10.3" cy="14.6" r=".9" fill="currentColor"/><circle cx="13.7" cy="14.6" r=".9" fill="currentColor"/><path d="M10.4 17a2.2 2.2 0 0 0 3.2 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>`;
 const KEY = `<span class="ic"><svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8.5" cy="12" r="4.5" fill="#ffd9d9"/><circle cx="8.5" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M13 12h8m-2.5 0v3m-3-3v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.3" cy="11.4" r=".8" fill="currentColor"/><circle cx="9.7" cy="11.4" r=".8" fill="currentColor"/></svg></span>`;
 const EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+$/;
+
+// Menus that can be granted per user. Keep ids in sync with MODULES in index.html and "module" in registry.json.
+// A tool folder /customers/<customer>/<project>/<tool>/ belongs to the menu whose id the folder name starts with
+// (e.g. spare-part-list → spare-part). A tool folder that matches no menu is admin-only.
+const MENUS = [
+  { id: 'site-expense', name: 'Site Expense' },
+  { id: 'spare-part', name: 'Spare Part' },
+  { id: 'punch-list', name: 'Punch List' },
+];
+const MENU_IDS = MENUS.map((m) => m.id);
+function menuOfPath(path) {
+  const m = path.match(/^\/customers\/[^/]+\/[^/]+\/([^/]+)/);
+  if (!m) return null; // not a tool page
+  return MENU_IDS.find((id) => m[1].startsWith(id)) || '__admin';
+}
+// modules === null means "every menu" (the default for new accounts).
+const effectiveMenus = (prof) => (prof.role === 'admin' || !Array.isArray(prof.modules) ? MENU_IDS.slice() : prof.modules.filter((id) => MENU_IDS.includes(id)));
+const canOpen = (prof, menu) => menu === null || prof.role === 'admin' || (menu !== '__admin' && effectiveMenus(prof).includes(menu));
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
 function signInPage(cfg, next, { status = 401, heading = 'เข้าสู่ระบบ SSM Work', msg, error, notice, email = '', headers } = {}) {
@@ -157,11 +175,12 @@ function profileOf(cfg, user) {
   const email = String(user.email || '').toLowerCase();
   const meta = user.user_metadata || {};
   const role = email === cfg.superAdmin ? 'admin' : (user.app_metadata && user.app_metadata.role) === 'admin' ? 'admin' : 'user';
-  return { email, name: meta.full_name || email.split('@')[0], role, mustChange: meta.must_change_password === true };
+  const mods = user.app_metadata && user.app_metadata.modules;
+  return { id: user.id, email, name: meta.full_name || email.split('@')[0], role, modules: Array.isArray(mods) ? mods : null, mustChange: meta.must_change_password === true };
 }
 
 async function startSession(cfg, prof, next) {
-  const token = await makeToken(cfg.secret, { email: prof.email, name: prof.name, role: prof.role, exp: Math.floor(Date.now() / 1000) + SESSION_HOURS * 3600 });
+  const token = await makeToken(cfg.secret, { id: prof.id, email: prof.email, name: prof.name, role: prof.role, modules: prof.modules, exp: Math.floor(Date.now() / 1000) + SESSION_HOURS * 3600 });
   const h = new Headers({ location: cfg.app + safeNext(next), 'cache-control': 'no-store' });
   h.append('set-cookie', setCookie(SESSION, token, SESSION_HOURS * 3600));
   h.append('set-cookie', setCookie(PENDING, '', 0));
@@ -174,6 +193,16 @@ function checkNewPassword(cfg, pw, confirm, email) {
   if (pw === cfg.defaultPassword) return 'ห้ามใช้รหัสผ่านเริ่มต้น กรุณาตั้งรหัสใหม่';
   if (pw.toLowerCase() === email.split('@')[0]) return 'อย่าใช้ชื่ออีเมลเป็นรหัสผ่าน';
   return null;
+}
+
+// Re-read the account from Supabase so bans, deletions and permission changes apply right away.
+async function liveProfile(cfg, sess) {
+  if (!sess.id) return null;
+  const r = await call(cfg, `/auth/v1/admin/users/${sess.id}`, { method: 'GET', admin: true });
+  if (!r.ok) return r.status >= 500 ? sess : null; // keep working through a Supabase outage, but not for a removed account
+  if (r.data.banned_until && new Date(r.data.banned_until) > new Date()) return null;
+  const p = profileOf(cfg, r.data);
+  return p.email === String(sess.email).toLowerCase() ? p : null;
 }
 
 // ---------- admin ----------
@@ -194,7 +223,7 @@ async function adminApi(cfg, req, path) {
     const users = await listUsers(cfg);
     return json(users.map((u) => {
       const p = profileOf(cfg, u);
-      return { id: u.id, email: p.email, name: p.name, role: p.role, mustChange: p.mustChange, banned: !!(u.banned_until && new Date(u.banned_until) > new Date()), lastSignIn: u.last_sign_in_at || null, superAdmin: p.email === cfg.superAdmin };
+      return { id: u.id, email: p.email, name: p.name, role: p.role, modules: effectiveMenus(p), allMenus: p.modules === null, mustChange: p.mustChange, banned: !!(u.banned_until && new Date(u.banned_until) > new Date()), lastSignIn: u.last_sign_in_at || null, superAdmin: p.email === cfg.superAdmin };
     }).sort((a, b) => a.email.localeCompare(b.email)));
   }
   if (req.method !== 'POST') return json({ error: 'method' }, 405);
@@ -240,6 +269,12 @@ async function adminApi(cfg, req, path) {
     const r = await call(cfg, `/auth/v1/admin/users/${id}`, { method: 'PUT', admin: true, body: { app_metadata: { role: body.role === 'admin' ? 'admin' : 'user' } } });
     return json({ ok: r.ok }, r.ok ? 200 : 502);
   }
+  if (path === '/admin/api/modules') {
+    if (isSuper) return json({ error: 'super admin' }, 400);
+    const list = Array.isArray(body.modules) ? [...new Set(body.modules.filter((id) => MENU_IDS.includes(id)))] : [];
+    const r = await call(cfg, `/auth/v1/admin/users/${id}`, { method: 'PUT', admin: true, body: { app_metadata: { modules: list } } });
+    return json({ ok: r.ok }, r.ok ? 200 : 502);
+  }
   if (path === '/admin/api/ban') {
     if (isSuper) return json({ error: 'super admin' }, 400);
     const r = await call(cfg, `/auth/v1/admin/users/${id}`, { method: 'PUT', admin: true, body: { ban_duration: body.ban ? '876000h' : 'none' } });
@@ -276,14 +311,15 @@ input[type=search]{border:1px solid #dce1e8;border-radius:8px;padding:7px 12px;f
 .tbl{background:#fff;border:1px solid var(--line);border-radius:12px;overflow-x:auto}
 table{border-collapse:collapse;width:100%;min-width:820px;font-size:13px}th{font-size:11px;font-weight:500;color:#8390a1;background:#f7f8fa;padding:10px 14px;text-align:left;border-bottom:1px solid var(--line)}
 td{padding:10px 14px;border-bottom:1px solid #edf0f4;vertical-align:middle}tr:last-child td{border-bottom:0}
-.pill{display:inline-block;font-size:11px;border-radius:999px;padding:1px 9px;font-weight:500}
+.pill{display:inline-block;white-space:nowrap;font-size:11px;border-radius:999px;padding:1px 9px;font-weight:500}
 .p-admin{background:var(--blush);color:var(--rak)}.p-user{background:#f1f3f6;color:#5d6673}.p-wait{background:var(--amber-soft);color:var(--amber)}.p-ok{background:var(--green-soft);color:var(--green)}.p-ban{background:#2a2a2a;color:#fff}
+.menus{display:flex;flex-direction:column;gap:2px}.chk{display:flex;align-items:center;gap:6px;font-size:12.5px;cursor:pointer;white-space:nowrap}.chk input{accent-color:var(--rak);width:15px;height:15px}
 .acts{display:flex;gap:6px;flex-wrap:wrap}.msg{font-size:13px;border-radius:8px;padding:8px 12px;background:var(--green-soft);color:var(--green)}.msg.err{background:var(--blush);color:var(--rak)}
 .muted{color:var(--muted);font-size:12px}
 </style></head><body>
 <header class="bar"><div class="in"><img src="/assets/rak-logo.svg" alt="RAK Engineering"><span class="ws">SSM WORK · ผู้ดูแลระบบ</span><a href="/">← กลับหน้า SSM Work</a></div></header>
 <main>
-<div><h1>ผู้ใช้งาน</h1><p class="sub">เข้าระบบในชื่อ ${esc(me.email)} · บัญชีใหม่และบัญชีที่รีเซ็ตจะใช้รหัสเริ่มต้น และต้องตั้งรหัสใหม่ตอนเข้าครั้งแรก</p></div>
+<div><h1>ผู้ใช้งาน</h1><p class="sub">เข้าระบบในชื่อ ${esc(me.email)} · บัญชีใหม่และบัญชีที่รีเซ็ตจะใช้รหัสเริ่มต้น และต้องตั้งรหัสใหม่ตอนเข้าครั้งแรก · บัญชีใหม่เข้าได้ทุกเมนู ติ๊กออกเพื่อจำกัดสิทธิ์ (มีผลทันที)</p></div>
 <div class="cards" id="stats"></div>
 <section class="panel"><h2>นำเข้ารายชื่อจาก Excel</h2>
 <p class="muted">ไฟล์ต้องมีคอลัมน์อีเมล (หัวคอลัมน์มีคำว่า "อีเมล" หรือ "email") และจะใช้คอลัมน์ "ชื่อ" กับ "Role" ถ้ามี · อีเมลที่ซ้ำกันจะรวมเป็นบัญชีเดียว · บัญชีที่มีอยู่แล้วจะอัปเดตชื่อและ role เท่านั้น ไม่แตะรหัสผ่าน</p>
@@ -293,16 +329,21 @@ td{padding:10px 14px;border-bottom:1px solid #edf0f4;vertical-align:middle}tr:la
 <div class="row"><input type="search" id="nEmail" placeholder="name@${esc(cfg.domain)}"><input type="search" id="nName" placeholder="ชื่อ (ชื่อเล่น)"><button class="btn primary" id="addOne">เพิ่ม</button></div></section>
 <div class="row"><input type="search" id="q" placeholder="ค้นหาอีเมลหรือชื่อ…"><span class="muted" id="count"></span></div>
 <div id="msg"></div>
-<div class="tbl"><table><thead><tr><th>อีเมล</th><th>ชื่อ</th><th>สิทธิ์</th><th>สถานะ</th><th>เข้าล่าสุด</th><th></th></tr></thead><tbody id="rows"><tr><td colspan="6" class="muted">กำลังโหลด…</td></tr></tbody></table></div>
+<div class="tbl"><table><thead><tr><th>อีเมล</th><th>ชื่อ</th><th>สิทธิ์</th><th>เมนูที่เข้าได้</th><th>สถานะ</th><th>เข้าล่าสุด</th><th></th></tr></thead><tbody id="rows"><tr><td colspan="7" class="muted">กำลังโหลด…</td></tr></tbody></table></div>
 </main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 "use strict";
 const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 let USERS=[],PENDING_ROWS=[];
+const MENUS=${JSON.stringify(MENUS)};
 const post=(p,b)=>fetch(p,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b)}).then(r=>r.json().then(d=>({ok:r.ok,d})));
 function say(t,err,el="msg"){document.getElementById(el).innerHTML=t?'<div class="msg'+(err?' err':'')+'">'+t+'</div>':"";}
 async function load(){const r=await fetch("/admin/api/users",{cache:"no-store"});if(!r.ok){say("โหลดรายชื่อไม่สำเร็จ ("+r.status+")",1);return;}USERS=await r.json();draw();}
+function menusCell(u){
+  if(u.role==="admin")return '<span class="muted">ทุกเมนู (ผู้ดูแล)</span>';
+  return '<div class="menus">'+MENUS.map(m=>'<label class="chk"><input type="checkbox" data-u="'+u.id+'" value="'+m.id+'"'+(u.modules.includes(m.id)?" checked":"")+'> '+esc(m.name)+'</label>').join("")+'</div>';
+}
 function draw(){
   const q=document.getElementById("q").value.trim().toLowerCase();
   const list=USERS.filter(u=>!q||(u.email+" "+u.name).toLowerCase().includes(q));
@@ -313,14 +354,22 @@ function draw(){
     const st=u.banned?'<span class="pill p-ban">ปิดใช้งาน</span>':u.mustChange?'<span class="pill p-wait">รอตั้งรหัสครั้งแรก</span>':'<span class="pill p-ok">ใช้งานได้</span>';
     const last=u.lastSignIn?new Date(u.lastSignIn).toLocaleString("th-TH",{dateStyle:"medium",timeStyle:"short"}):"—";
     const dis=u.superAdmin?" disabled":"";
-    return '<tr><td><b style="font-weight:600">'+esc(u.email)+'</b>'+(u.superAdmin?' <span class="pill p-admin">Super admin</span>':'')+'</td><td>'+esc(u.name)+'</td><td><span class="pill '+(u.role==="admin"?"p-admin":"p-user")+'">'+(u.role==="admin"?"ผู้ดูแล":"ผู้ใช้")+'</span></td><td>'+st+'</td><td class="muted">'+last+'</td><td><div class="acts">'
+    return '<tr><td><b style="font-weight:600">'+esc(u.email)+'</b>'+(u.superAdmin?' <span class="pill p-admin">Super admin</span>':'')+'</td><td>'+esc(u.name)+'</td><td><span class="pill '+(u.role==="admin"?"p-admin":"p-user")+'">'+(u.role==="admin"?"ผู้ดูแล":"ผู้ใช้")+'</span></td><td>'+menusCell(u)+'</td><td>'+st+'</td><td class="muted">'+last+'</td><td><div class="acts">'
       +'<button class="btn" data-a="reset" data-id="'+u.id+'">รีเซ็ตรหัส</button>'
       +'<button class="btn" data-a="role" data-id="'+u.id+'" data-v="'+(u.role==="admin"?"user":"admin")+'"'+dis+'>'+(u.role==="admin"?"ถอดผู้ดูแล":"ตั้งเป็นผู้ดูแล")+'</button>'
       +'<button class="btn" data-a="ban" data-id="'+u.id+'" data-v="'+(u.banned?"0":"1")+'"'+dis+'>'+(u.banned?"เปิดใช้งาน":"ปิดใช้งาน")+'</button>'
       +'<button class="btn" data-a="delete" data-id="'+u.id+'"'+dis+'>ลบ</button></div></td></tr>';
-  }).join("")||'<tr><td colspan="6" class="muted">ยังไม่มีผู้ใช้ นำเข้าจาก Excel ด้านบนได้เลย</td></tr>';
+  }).join("")||'<tr><td colspan="7" class="muted">ยังไม่มีผู้ใช้ นำเข้าจาก Excel ด้านบนได้เลย</td></tr>';
 }
 document.getElementById("q").addEventListener("input",draw);
+document.getElementById("rows").addEventListener("change",async e=>{
+  const c=e.target.closest("input[data-u]");if(!c)return;
+  const id=c.dataset.u,u=USERS.find(x=>x.id===id);
+  const mods=[...document.querySelectorAll('input[data-u="'+id+'"]')].filter(x=>x.checked).map(x=>x.value);
+  document.querySelectorAll('input[data-u="'+id+'"]').forEach(x=>x.disabled=true);
+  const r=await post("/admin/api/modules",{id,modules:mods});
+  say(r.ok?"บันทึกสิทธิ์เมนูของ "+esc(u.email)+" แล้ว":"บันทึกสิทธิ์ไม่สำเร็จ: "+esc(u.email),!r.ok);await load();
+});
 document.getElementById("rows").addEventListener("click",async e=>{
   const b=e.target.closest("button[data-a]");if(!b)return;const u=USERS.find(x=>x.id===b.dataset.id);const a=b.dataset.a;
   const ask={reset:"รีเซ็ตรหัสของ "+u.email+" กลับเป็นรหัสเริ่มต้น และบังคับตั้งใหม่ตอนเข้าครั้งถัดไป?",delete:"ลบบัญชี "+u.email+" ถาวร? ย้อนกลับไม่ได้",ban:(b.dataset.v==="1"?"ปิด":"เปิด")+"การใช้งานบัญชี "+u.email+"?",role:(b.dataset.v==="admin"?"ตั้ง ":"ถอด ")+u.email+(b.dataset.v==="admin"?" เป็นผู้ดูแล?":" ออกจากผู้ดูแล?")}[a];
@@ -443,24 +492,47 @@ export default async function middleware(req) {
       const t = errText(u.data);
       return passwordPage(cfg, { first, status: 400, error: t.includes('different') ? 'รหัสใหม่ต้องไม่ซ้ำรหัสเดิม' : t.includes('weak') || t.includes('characters') ? 'รหัสผ่านง่ายเกินไป ลองใส่ตัวเลขและตัวอักษรผสมกัน' : 'บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง' });
     }
-    const prof = { email: who.email, name: who.name, role: who.role };
+    const prof = { id: who.id, email: who.email, name: who.name, role: who.role, modules: who.modules };
     return startSession(cfg, prof, first ? pending.next : '/');
   }
 
+  const signedOut = (msg) => {
+    const h = new Headers();
+    h.append('set-cookie', setCookie(SESSION, '', 0));
+    return signInPage(cfg, path + url.search, { error: msg, headers: h });
+  };
+
   if (path === '/auth/me') {
-    return json(signedIn ? { email: user.email, name: user.name, role: user.role } : {}, signedIn ? 200 : 401);
+    if (!signedIn) return json({}, 401);
+    const live = await liveProfile(cfg, user);
+    if (!live) return json({}, 401);
+    return json({ email: live.email, name: live.name, role: live.role, modules: effectiveMenus(live) });
   }
 
   if (path === '/admin' || path.startsWith('/admin/')) {
     if (!signedIn) return signInPage(cfg, '/admin');
-    if (user.role !== 'admin' && user.email !== cfg.superAdmin) return page({ status: 403, title: 'ไม่มีสิทธิ์', body: `${LOCK}<h1>หน้านี้สำหรับผู้ดูแลระบบ</h1><p>บัญชี ${esc(user.email)} ไม่มีสิทธิ์จัดการผู้ใช้</p><div class="links"><a href="/">← กลับหน้า SSM Work</a></div>` });
+    const live = await liveProfile(cfg, user);
+    if (!live) return signedOut('บัญชีนี้ถูกปิดใช้งานหรือถูกลบ ติดต่อผู้ดูแลระบบ');
+    if (live.role !== 'admin') return page({ status: 403, title: 'ไม่มีสิทธิ์', body: `${LOCK}<h1>หน้านี้สำหรับผู้ดูแลระบบ</h1><p>บัญชี ${esc(user.email)} ไม่มีสิทธิ์จัดการผู้ใช้</p><div class="links"><a href="/">← กลับหน้า SSM Work</a></div>` });
     if (path.startsWith('/admin/api/')) {
       try { return await adminApi(cfg, req, path); } catch { return json({ error: 'supabase' }, 502); }
     }
-    return adminPage(cfg, user);
+    return adminPage(cfg, live);
   }
 
-  if (signedIn) return; // continue to the static file
+  if (signedIn) {
+    const menu = menuOfPath(path);
+    const navigating = req.headers.get('sec-fetch-mode') === 'navigate' || (req.headers.get('accept') || '').includes('text/html');
+    let prof = user;
+    if (navigating || menu !== null) { // tool files always check the live account
+      prof = await liveProfile(cfg, user);
+      if (!prof) return navigating ? signedOut('บัญชีนี้ถูกปิดใช้งานหรือถูกลบ ติดต่อผู้ดูแลระบบ') : json({ error: 'login required' }, 401);
+    }
+    if (canOpen(prof, menu)) return; // continue to the static file
+    if (!navigating) return json({ error: 'no access' }, 403);
+    const name = (MENUS.find((m) => m.id === menu) || { name: 'เครื่องมือนี้' }).name;
+    return page({ status: 403, title: 'ไม่มีสิทธิ์', body: `${LOCK}<h1>ยังไม่มีสิทธิ์เข้าเมนู ${esc(name)}</h1><p>บัญชี ${esc(prof.email)} ยังไม่ได้รับสิทธิ์เมนูนี้ ขอสิทธิ์ได้จากผู้ดูแลระบบ</p><div class="links"><a href="/">← กลับหน้า SSM Work</a></div>` });
+  }
 
   const navigating = req.headers.get('sec-fetch-mode') === 'navigate' || (req.headers.get('accept') || '').includes('text/html');
   if (!navigating) return json({ error: 'login required' }, 401);
