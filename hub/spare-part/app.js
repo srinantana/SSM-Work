@@ -1,5 +1,5 @@
 /* SSM Work · Spare Part module.
-   Routes (inside the hub): #spare-part          → project list + search bar + "Add new project"
+   Routes (inside the hub): #spare-part          → project list + "Create new project" button + search bar
                             #spare-part/<id>     → one spare part project (editable, export CSV)
    Data:  /spare-part/data/sources.json  – jobs (Job Order header + scope, P&ID refs, aux equipment from Project Pipeline)
           /api/spare-part/projects       – saved spare part projects (Supabase via middleware);
@@ -82,13 +82,13 @@
       <label><span>Job No.</span><input data-q="jo" value="${esc(Q.jo)}" placeholder="เช่น 04202026" inputmode="numeric"></label>
       <label><span>Customer</span><input data-q="customer" value="${esc(Q.customer)}" placeholder="เช่น HAM-LET"></label>
       <label><span>Project name</span><input data-q="name" value="${esc(Q.name)}" placeholder="เช่น EP Line"></label>
-      <button class="sp-btn primary" data-act="new">＋ Add new project</button></div>`;
+      </div>`;
   }
   const matches = p => has(p.jo, Q.jo) && has((p.customer || "") + " " + (p.customerShort || ""), Q.customer) && has(p.name, Q.name);
 
   function listTable() {
     const rows = PROJECTS.filter(matches);
-    if (!PROJECTS.length) return `<div class="empty">ยังไม่มีโปรเจค Spare Part · กด <b>Add new project</b> เพื่อเลือก Job แล้วระบบจะดึงข้อมูลจาก Job Order, Aux list และ P&ID ให้</div>`;
+    if (!PROJECTS.length) return `<div class="empty">ยังไม่มีโปรเจค Spare Part · กด <b>Create new project</b> เพื่อเลือก Job แล้วระบบจะดึงข้อมูลจาก Job Order, Aux list และ P&ID ให้</div>`;
     if (!rows.length) return `<div class="empty">ไม่พบโปรเจคที่ตรงกับคำค้น</div>`;
     return `<div class="tbl"><table><thead><tr><th>Job No.</th><th>Customer</th><th>Project name</th><th>รายการอะไหล่</th><th>สถานะ</th><th>อัปเดต</th><th></th></tr></thead><tbody>${rows.map(p => `
       <tr><td><span class="jo">${esc(p.jo)}</span></td><td>${esc(p.customerShort || p.customer)}<div class="sub">${esc(p.site || "")}</div></td>
@@ -98,12 +98,13 @@
 
   function pageList() {
     const banner = MODE === "local" ? `<div class="sp-note">⚠️ ยังไม่ได้เชื่อมฐานข้อมูล Spare Part · โปรเจคที่สร้างจะเก็บไว้ในเบราว์เซอร์นี้เท่านั้น (ผู้ดูแลรันไฟล์ <code>database/spare_part_projects.sql</code> ใน Supabase แล้วจะบันทึกส่วนกลาง)</div>` : "";
-    ROOT.innerHTML = topBar() + banner + `<div id="spList">${listTable()}</div>`
+    const create = `<div class="sp-create"><button class="sp-btn primary big" data-act="new">＋ Create new project</button><span class="sub">เลือก Job → ดึงข้อมูลจาก Job Order, Aux list และ P&ID → ได้ Draft รายการอะไหล่</span></div>`;
+    ROOT.innerHTML = create + topBar() + banner + `<div id="spList">${listTable()}</div>`
       + `<p class="sp-src">แหล่งข้อมูล: Job Order ใน <a href="${esc(SRC.sources?.drive)}" target="_blank" rel="noopener">RAK Project 2026</a> (เฉพาะ job ตั้งแต่ ต.ค. 2026) · Aux/Equipment จาก <a href="${esc(SRC.sources?.pipeline)}" target="_blank" rel="noopener">Project Pipeline</a> · P&ID ในโฟลเดอร์ job · อัปเดตข้อมูล ${esc(SRC.updated || "")}</p>`;
     ROOT.querySelectorAll("[data-q]").forEach(i => i.addEventListener("input", () => { Q[i.dataset.q] = i.value.trim(); ROOT.querySelector("#spList").innerHTML = listTable(); }));
   }
 
-  /* --- Add new project wizard --- */
+  /* --- Create new project wizard --- */
   let WIZ = null;
   function openWizard() { WIZ = { step: 1, q: "", job: null, head: null, eqSel: null }; drawWizard(); }
   function closeWizard() { WIZ = null; document.getElementById("spModal")?.remove(); }
@@ -138,8 +139,8 @@
     if (WIZ.step > 1) foot += `<button class="sp-btn" data-w="back">← ย้อนกลับ</button>`;
     if (WIZ.step === 2) foot += `<button class="sp-btn primary" data-w="next">ถัดไป: Equipment →</button>`;
     if (WIZ.step === 3) foot += `<button class="sp-btn primary" data-w="create">สร้าง Draft</button>`;
-    m.innerHTML = `<div class="sp-dlg" role="dialog" aria-modal="true" aria-label="Add new project">
-      <div class="sp-dlg-h"><b>Add new project</b><span class="sp-steps">${["เลือก Job", "ข้อมูลโปรเจค", "Equipment & P&ID"].map((s, i) => `<i class="${WIZ.step === i + 1 ? "on" : ""}">${i + 1}. ${s}</i>`).join("")}</span><button class="sp-x" data-w="close" aria-label="ปิด">✕</button></div>
+    m.innerHTML = `<div class="sp-dlg" role="dialog" aria-modal="true" aria-label="Create new project">
+      <div class="sp-dlg-h"><b>Create new project</b><span class="sp-steps">${["เลือก Job", "ข้อมูลโปรเจค", "Equipment & P&ID"].map((s, i) => `<i class="${WIZ.step === i + 1 ? "on" : ""}">${i + 1}. ${s}</i>`).join("")}</span><button class="sp-x" data-w="close" aria-label="ปิด">✕</button></div>
       <div class="sp-dlg-b">${body}</div><div class="sp-dlg-f">${foot}</div></div>`;
     m.onclick = e => { if (e.target === m) closeWizard(); };
     m.querySelectorAll("[data-w]").forEach(b => b.onclick = () => wizAct(b.dataset.w));
@@ -209,12 +210,13 @@
   /* ---------- mount ---------- */
   const CSS = `
 .main,.content,#spRoot{min-width:0;max-width:100%}.sp-bar>*,.sp-form>*{min-width:0}
-.sp-bar{display:grid;grid-template-columns:1fr 1.3fr 1.6fr auto;gap:10px;align-items:end;background:var(--paper,#fff);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:0 0 16px;position:sticky;top:8px;z-index:3;box-shadow:0 10px 24px -22px rgba(0,0,0,.5)}
+.sp-bar{display:grid;grid-template-columns:1fr 1.3fr 1.6fr;gap:10px;align-items:end;background:var(--paper,#fff);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin:0 0 16px;position:sticky;top:8px;z-index:3;box-shadow:0 10px 24px -22px rgba(0,0,0,.5)}
 .sp-bar label,.sp-form label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
 .sp-bar input,.sp-in,.sp-form input{font:inherit;font-size:14px;color:var(--ink);border:1px solid var(--line);border-radius:9px;padding:8px 10px;background:#fff;width:100%}
 .sp-bar input:focus,.sp-in:focus,.sp-form input:focus,.sp-cell:focus{outline:2px solid var(--blush-2);border-color:var(--rak)}
 .sp-btn{font:inherit;font-size:13.5px;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:9px;padding:8px 14px;cursor:pointer;white-space:nowrap}
 .sp-btn.primary{background:var(--rak);border-color:var(--rak);color:#fff;font-weight:600}.sp-btn.primary:hover{background:var(--rak-dark)}
+.sp-create{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 14px}.sp-btn.big{font-size:15px;padding:11px 20px;border-radius:11px}
 .sp-note{background:var(--amber-soft,#fff6e0);border:1px solid #f1d38a;border-radius:10px;padding:10px 12px;margin:0 0 14px;font-size:13px}
 .sp-src{color:var(--muted);font-size:12.5px;margin-top:14px}.sp-src a{color:var(--rak)}
 .sp-modal{position:fixed;inset:0;background:rgba(18,18,18,.45);display:grid;place-items:center;z-index:50;padding:16px}
@@ -236,7 +238,7 @@
 .sp-edit{overflow-x:auto}.sp-edit table{min-width:1500px}.sp-edit td{padding:4px 5px;vertical-align:middle}.sp-edit select.sp-cell{min-width:128px}.sp-cell{font:inherit;font-size:13px;width:100%;min-width:70px;border:1px solid transparent;border-radius:6px;padding:5px 6px;background:transparent;color:var(--ink)}
 .sp-cell:hover{border-color:var(--line);background:#fff}.sp-edit td.w2 .sp-cell{min-width:230px}.sp-edit td.n .sp-cell{min-width:48px;width:56px}
 .sp-saved{display:block;font-size:12.5px;color:var(--muted);margin-top:6px}.sp-link{all:unset;color:var(--rak);cursor:pointer;text-decoration:underline}
-@media (max-width:760px){.sp-bar{grid-template-columns:1fr 1fr;position:static}.sp-bar .sp-btn{grid-column:span 2}.sp-bar label:nth-child(3){grid-column:span 2}.sp-form{grid-template-columns:1fr 1fr}}`;
+@media (max-width:760px){.sp-bar{grid-template-columns:1fr 1fr;position:static}.sp-bar label:nth-child(3){grid-column:span 2}.sp-form{grid-template-columns:1fr 1fr}}`;
 
   async function mount(el, sub) {
     ROOT = el;
