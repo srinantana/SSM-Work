@@ -227,7 +227,7 @@
         <div class="sub">${esc(p.customer)} · ${esc(p.site || "")} · ผู้ติดต่อ ${esc(p.contact || "-")} ${esc(p.tel || "")} · QO ${esc(p.qo || "-")} · PO ${esc(p.po || "-")} · ส่งมอบ ${esc(p.delivery || "-")}</div>
         <div class="sp-links">${links}</div></div>
         <div class="sp-actions"><select class="sp-in" id="spStatus">${Object.keys(STATUS).map(s => `<option value="${s}" ${p.status === s ? "selected" : ""}>${STATUS[s][0]}</option>`).join("")}</select>
-          <button class="sp-btn" data-a="zone">＋ เพิ่มโซน</button><button class="sp-btn" data-a="csv" title="ไฟล์ CSV สำหรับส่งลูกค้า: ไม่มี Remarks และเฉพาะรายการที่ใส่ Unit price แล้ว">Export for customer</button><button class="sp-btn primary" data-a="save">บันทึก</button>${isAdmin() ? `<button class="sp-btn danger" data-a="delete">ลบโปรเจค</button>` : ""}</div></div>
+          <button class="sp-btn" data-a="zone">＋ เพิ่มโซน</button><button class="sp-btn" data-a="import">⬆ Import from template</button><button class="sp-btn" data-a="csv" title="ไฟล์ CSV สำหรับส่งลูกค้า: ไม่มี Remarks และเฉพาะรายการที่ใส่ Unit price แล้ว">Export for customer</button><button class="sp-btn primary" data-a="save">บันทึก</button>${isAdmin() ? `<button class="sp-btn danger" data-a="delete">ลบโปรเจค</button>` : ""}</div></div>
       <div class="tbl sp-edit"><table><thead><tr>${COLS.map(c => `<th>${c}</th>`).join("")}<th></th></tr></thead><tbody>${body || `<tr><td colspan="${COLS.length + 1}" class="sub">ยังไม่มีรายการ · กด ＋ เพิ่มโซน</td></tr>`}</tbody>
         <tfoot><tr><td colspan="12" class="r"><b>Total (excl. VAT)</b></td><td class="r"><b id="spGrand"></b></td><td colspan="2"></td></tr></tfoot></table></div>
       <p class="sp-src">อะไหล่ที่ระบบเสนอเป็นค่าเริ่มต้นตามประเภทอุปกรณ์ · ใส่ Part No. และ Unit price (ราคาขาย) ก่อนส่งลูกค้า · Lead time เริ่มต้นจาก Project Pipeline</p>
@@ -256,11 +256,120 @@
       const a = b.dataset.a;
       if (a === "zone") { const n = prompt("ชื่อโซนใหม่ (Process tank หรือ System)", "Zone " + String.fromCharCode(65 + zones.length) + " – "); if (n && n.trim()) { p.zones = [...(p.zones || []), n.trim()]; p.lines.push(blank(n.trim())); redraw(); } }
       if (a === "csv") exportCsv(p);
+      if (a === "import") openImport(p, (n, how) => { redraw(); ROOT.querySelector("#spSaved").textContent = `นำเข้า ${n} รายการ (${how === "replace" ? "แทนที่" : "เพิ่มต่อท้าย"}) · กด บันทึก เพื่อเก็บ`; });
       if (a === "save") { p.zones = zonesOf(p); await save(p); ROOT.querySelector("#spSaved").textContent = "บันทึกแล้ว " + new Date().toLocaleTimeString("th-TH") + (MODE === "local" ? " (ในเบราว์เซอร์นี้)" : ""); }
       if (a === "delete" && isAdmin() && confirm("ลบโปรเจค Spare Part " + p.jo + " – " + p.name + " ?\nลบแล้วกู้คืนไม่ได้ (ถ้าแค่เลิกใช้ ให้เปลี่ยนสถานะเป็น Inactive)")) {
         const ok = await remove(p.id); if (ok) location.hash = "#spare-part"; else ROOT.querySelector("#spSaved").textContent = "ลบไม่สำเร็จ (ต้องเป็น admin)"; }
     });
   }
+  /* --- Excel / spreadsheet template: download + import --- */
+  const XLSX_SRC = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
+  const XLSX_SRI = "sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT";
+  let xlsxP = null;
+  const loadXLSX = () => xlsxP || (xlsxP = new Promise((ok, no) => {
+    if (window.XLSX) return ok(window.XLSX);
+    const s = document.createElement("script"); s.src = XLSX_SRC; s.integrity = XLSX_SRI; s.crossOrigin = "anonymous";
+    s.onload = () => ok(window.XLSX); s.onerror = () => { xlsxP = null; no(new Error("โหลดตัวอ่าน Excel ไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่")); };
+    document.head.appendChild(s);
+  }));
+  const TPL_COLS = ["Zone", ...COLS];
+  async function downloadTemplate(p) {
+    const X = await loadXLSX(); migrate(p);
+    const meta = [["Recommended Spare Part List – import template"], ["Customer", p.customer], ["Project", p.name], ["Job No.", p.jo],
+      ["วิธีใช้: แก้/เพิ่มแถวใต้หัวตาราง · คอลัมน์ Zone ใส่ชื่อ Process tank หรือ System · แถวที่ไม่มี Part description จะถูกข้าม · Amount คำนวณเอง (ไม่ต้องกรอก)"], []];
+    const head = meta.length;
+    const rows = (p.lines || []).map((l, i) => [l.zone, i + 1, [l.equip, l.tag].filter(Boolean).join(" / "), l.part, l.partNo, l.maker, l.spec, l.installed === "" ? null : num(l.installed), num(l.qty), l.unit, l.prio,
+      l.leadWeeks === "" ? null : num(l.leadWeeks), l.unitPrice === "" ? null : num(l.unitPrice), null, l.remark]);
+    if (!rows.length) rows.push(["Zone A – EP Tank T101 (ตัวอย่าง)", 1, "Serfilco vertical pump / P101A1", "Impeller", "", "Serfilco / EO1KV3-D.75", "PVDF/Viton", 2, 1, "pc", "Recommended", 9, 12500, null, ""]);
+    const ws = X.utils.aoa_to_sheet([...meta, TPL_COLS, ...rows]);
+    rows.forEach((_, i) => { const r = head + 2 + i; ws["N" + r] = { t: "n", f: `IF(M${r}="","",I${r}*M${r})` }; });
+    ws["!cols"] = [28, 6, 40, 34, 22, 30, 36, 10, 12, 8, 13, 10, 12, 14, 34].map(w => ({ wch: w }));
+    const lists = X.utils.aoa_to_sheet([["Priority"], ["Critical"], ["Recommended"], ["Consumable"]]);
+    const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, "Spare Part"); X.utils.book_append_sheet(wb, lists, "Lists");
+    X.writeFile(wb, `SparePart_${p.jo}_template.xlsx`);
+  }
+  const hkey = s => norm(s).replace(/[^a-z0-9ก-๙]/g, "");
+  const HEADS = { zone: ["zone", "โซน", "processtank", "system"], no: ["no"], equipTag: ["equipmenttag"], equip: ["equipment"], tag: ["tag", "tagno"],
+    part: ["partdescription", "description", "sparepart", "part"], partNo: ["partnodrawingref", "partno", "partnumber", "drawingref"],
+    maker: ["manufacturermodel", "manufacturer", "maker", "brand"], spec: ["specificationmaterial", "specification", "material", "spec"],
+    installed: ["installedqty", "installed"], qty: ["recommendedspareqty", "recommendedqty", "spareqty", "qty", "quantity"], unit: ["unit", "uom"],
+    prio: ["priority"], leadWeeks: ["leadtimeweeks", "leadtime"], unitPrice: ["unitprice", "price"], amount: ["amount"], remark: ["remarks", "remark", "note", "notes"] };
+  function parseSheet(aoa) {
+    let hr = -1, map = {};
+    for (let r = 0; r < Math.min(aoa.length, 40) && hr < 0; r++) {
+      const keys = (aoa[r] || []).map(hkey);
+      if (keys.some(k => k === "partdescription" || k === "description" || k === "sparepart")) {
+        hr = r;
+        keys.forEach((k, c) => { for (const [f, al] of Object.entries(HEADS)) if (map[f] === undefined && al.includes(k)) { map[f] = c; break; } });
+      }
+    }
+    if (hr < 0 || map.part === undefined) throw new Error("ไม่พบหัวตาราง (ต้องมีคอลัมน์ Part description)");
+    const lines = []; let zone = "Zone A", skipped = 0;
+    const g = (row, f) => map[f] === undefined ? "" : String(row[map[f]] ?? "").trim();
+    for (let r = hr + 1; r < aoa.length; r++) {
+      const row = aoa[r] || []; const filled = row.map(v => String(v ?? "").trim()).filter(Boolean);
+      if (!filled.length) continue;
+      const part = g(row, "part");
+      if (!part) { // zone header row (grouped layout) or subtotal / total / note row
+        if (map.zone === undefined && filled.length === 1 && !/total|subtotal|ช่องเหลือง|unit price/i.test(filled[0])) zone = filled[0]; else skipped++;
+        continue;
+      }
+      if (/^(sub)?total/i.test(part)) { skipped++; continue; }
+      let equip = g(row, "equip"), tag = g(row, "tag");
+      if (map.equipTag !== undefined) { const v = g(row, "equipTag"), i = v.lastIndexOf(" / "), last = i > 0 ? v.slice(i + 3) : "";
+        if (last && !/\s/.test(last) && /\d/.test(last)) { equip = v.slice(0, i); tag = last; } else equip = v; }
+      const pr = g(row, "prio").toLowerCase();
+      const n = v => { const x = num(v); return v === "" ? "" : x; };
+      lines.push({ id: uid(), zone: g(row, "zone") || zone, equip, tag, part, partNo: g(row, "partNo"), maker: g(row, "maker"), spec: g(row, "spec"),
+        installed: n(g(row, "installed")), qty: n(g(row, "qty")) || 1, unit: g(row, "unit") || "pc",
+        prio: pr.startsWith("c") && pr.includes("crit") ? "Critical" : pr.startsWith("con") ? "Consumable" : "Recommended",
+        leadWeeks: n(g(row, "leadWeeks")), unitPrice: n(g(row, "unitPrice")), source: "Import", remark: g(row, "remark") });
+    }
+    return { lines, skipped };
+  }
+  async function readFile(file) {
+    const X = await loadXLSX();
+    const wb = X.read(await file.arrayBuffer(), { type: "array" });
+    for (const name of wb.SheetNames) {
+      if (/^lists$|^readme$/i.test(name)) continue;
+      try { const res = parseSheet(X.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: "" })); if (res.lines.length) return { ...res, sheet: name }; } catch (e) { if (wb.SheetNames.length === 1) throw e; }
+    }
+    throw new Error("ไม่พบรายการในไฟล์ (ต้องมีหัวตาราง Part description และอย่างน้อย 1 แถว)");
+  }
+  function openImport(p, done) {
+    const m = document.createElement("div"); m.className = "sp-modal"; m.id = "spImport"; document.body.appendChild(m);
+    let res = null;
+    const draw = (msg = "") => {
+      m.innerHTML = `<div class="sp-dlg" role="dialog" aria-modal="true" aria-label="Import from template" style="width:min(640px,100%)">
+        <div class="sp-dlg-h"><b>Import from template</b><span class="sp-steps"></span><button class="sp-x" data-i="close" aria-label="ปิด">✕</button></div>
+        <div class="sp-dlg-b">
+          <p class="sp-sub">นำเข้ารายการอะไหล่จากไฟล์ Excel (.xlsx, .xls) หรือ CSV · จาก Google Sheets ให้กด File → Download → Microsoft Excel (.xlsx) ก่อน</p>
+          <p><button class="sp-btn" data-i="tpl">⬇ Download template (.xlsx)</button> <span class="sub">template มีรายการปัจจุบันของโปรเจคนี้อยู่แล้ว แก้แล้ว import กลับได้</span></p>
+          <label class="sp-drop"><input type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden>
+            <b>เลือกไฟล์</b> หรือลากไฟล์มาวางที่นี่</label>
+          ${msg ? `<div class="sp-note">${msg}</div>` : ""}
+          ${res ? `<div class="sp-preview"><b>พบ ${res.lines.length} รายการ</b> ใน ${[...new Set(res.lines.map(l => l.zone))].length} โซน (sheet "${esc(res.sheet)}")${res.skipped ? ` · ข้าม ${res.skipped} แถว (หัวโซน/ยอดรวม/หมายเหตุ)` : ""}
+            <ul class="sp-scope">${[...new Set(res.lines.map(l => l.zone))].map(z => `<li>${esc(z)} – ${res.lines.filter(l => l.zone === z).length} รายการ</li>`).join("")}</ul></div>` : ""}
+        </div>
+        <div class="sp-dlg-f">${res ? `<button class="sp-btn" data-i="append">เพิ่มต่อท้ายรายการเดิม</button><button class="sp-btn primary" data-i="replace">แทนที่รายการเดิมทั้งหมด (${(p.lines || []).length})</button>` : `<button class="sp-btn" data-i="close">ยกเลิก</button>`}</div></div>`;
+      const fi = m.querySelector("input[type=file]"), drop = m.querySelector(".sp-drop");
+      const take = async f => { if (!f) return; draw("กำลังอ่าน " + esc(f.name) + " …"); try { res = await readFile(f); draw(); } catch (e) { res = null; draw("⚠️ " + esc(e.message || e)); } };
+      fi.onchange = () => take(fi.files[0]);
+      drop.ondragover = e => { e.preventDefault(); drop.classList.add("on"); }; drop.ondragleave = () => drop.classList.remove("on");
+      drop.ondrop = e => { e.preventDefault(); take(e.dataTransfer.files[0]); };
+      m.querySelectorAll("[data-i]").forEach(b => b.onclick = async () => {
+        const a = b.dataset.i;
+        if (a === "close") return m.remove();
+        if (a === "tpl") { try { await downloadTemplate(p); } catch (e) { draw("⚠️ " + esc(e.message || e)); } return; }
+        if (a === "replace" && (p.lines || []).length && !confirm(`แทนที่ ${p.lines.length} รายการเดิมด้วย ${res.lines.length} รายการจากไฟล์?`)) return;
+        p.lines = a === "replace" ? res.lines : [...(p.lines || []), ...res.lines];
+        m.remove(); done(res.lines.length, a);
+      });
+    };
+    m.onclick = e => { if (e.target === m) m.remove(); };
+    draw();
+  }
+
   function exportCsv(p) { // customer copy: no Remarks column, only lines that have a Unit price
     migrate(p);
     const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -293,6 +402,7 @@
 .sp-btn.primary{background:var(--rak);border-color:var(--rak);color:#fff;font-weight:600}.sp-btn.primary:hover{background:var(--rak-dark)}
 .sp-create{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 14px}.sp-btn.big{font-size:15px;padding:11px 20px;border-radius:11px}
 .sp-btn.danger{color:var(--rak);border-color:var(--blush-2)}.sp-btn.danger:hover{background:var(--rak);color:#fff}.badge.off{background:#eceef1;color:#6d7582}tr.sp-off td{opacity:.55}
+.sp-drop{display:block;border:2px dashed var(--line);border-radius:12px;padding:22px;text-align:center;cursor:pointer;color:var(--muted);margin:12px 0}.sp-drop:hover,.sp-drop.on{border-color:var(--rak);background:var(--blush);color:var(--rak)}.sp-preview{background:var(--bg);border-radius:10px;padding:10px 12px;margin-top:10px}
 .sp-note{background:var(--amber-soft,#fff6e0);border:1px solid #f1d38a;border-radius:10px;padding:10px 12px;margin:0 0 14px;font-size:13px}
 .sp-src{color:var(--muted);font-size:12.5px;margin-top:14px}.sp-src a{color:var(--rak)}
 .sp-modal{position:fixed;inset:0;background:rgba(18,18,18,.45);display:grid;place-items:center;z-index:50;padding:16px}
