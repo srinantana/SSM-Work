@@ -87,6 +87,7 @@ h2.sec{font-size:15px;font-weight:600;margin:4px 0 -6px;display:flex;align-items
 .badge{justify-self:start;display:inline-block;font-size:10.5px;padding:2px 9px;border-radius:999px;font-weight:500}
 .badge.live{background:var(--green-soft);color:var(--green)}
 .badge.soon{background:var(--amber-soft);color:var(--amber)}
+.badge.beta,.nav .soon.beta{background:#e6eefc;color:#2c4a7a}
 
 .search-wrap{position:relative}
 .search-wrap .ic{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#a0a8b4;width:18px;height:18px}
@@ -213,7 +214,7 @@ const icon = (id, cls="ic") => `<svg class="${cls}" aria-hidden="true"><use href
 /* Menu. Add a module here, then tag its tools in registry.json with "module": "<id>". */
 const MODULES = [
   {id:"home",        icon:"i-home",    name:"Home",         th:"ภาพรวม",                  desc:"ลูกค้า โปรเจค และเครื่องมือทั้งหมดของ SSM"},
-  {id:"site-expense",icon:"i-expense", name:"Site Expense", th:"ประเมินค่าใช้จ่ายหน้างาน",  desc:"Dashboard Budget vs Actual · Estimate จาก SOW → Budgetary · บันทึก Actual รายวันจากหน้างาน",
+  {id:"site-expense",icon:"i-expense", beta:true, name:"Site Expense", th:"ประเมินค่าใช้จ่ายหน้างาน",  desc:"Dashboard Budget vs Actual · Estimate จาก SOW → Budgetary · บันทึก Actual รายวันจากหน้างาน",
      plan:["Dashboard: Budget vs Actual ค้นหาด้วย Project no.","Estimate จาก Scope of Work → อนุมัติ → เปิด Job → Budgetary","Actual record: ทีมหน้างานบันทึกค่าใช้จ่ายรายวัน"]},
   {id:"spare-part",  icon:"i-gear",    live:true, name:"Spare Part",   th:"รายการอะไหล่แนะนำ",        desc:"รายการอะไหล่แนะนำให้ลูกค้า แยกตามระบบ อ้างอิง P&ID และ Aux list",
      plan:["สร้างรายการอะไหล่จาก P&ID + Aux list + BOM","จุดใช้งานตาม P&ID และข้อมูลผู้ผลิต","Export Excel ตามแบบฟอร์มลูกค้า"]},
@@ -239,7 +240,7 @@ function renderNav(){
   const cur = route();
   document.getElementById("nav").innerHTML = visibleModules().map(m => {
     const n = toolsOf(m.id).length;
-    const tail = m.id === "home" || m.live ? "" : (n ? `<span class="cnt">${n}</span>` : `<span class="soon">เร็วๆ นี้</span>`);
+    const tail = m.beta ? `<span class="soon beta">ทดลอง</span>` : m.id === "home" || m.live ? "" : (n ? `<span class="cnt">${n}</span>` : `<span class="soon">เร็วๆ นี้</span>`);
     return `<li><a href="#${m.id}" ${m.id===cur?'aria-current="page"':""}><span class="tile">${icon(m.icon)}</span>${esc(m.name)}${tail}</a></li>`;
   }).join("");
   document.getElementById("sideFoot").textContent = REG.updated ? "อัปเดตรายการ " + REG.updated : "พร้อมใช้งาน";
@@ -286,7 +287,7 @@ function pageHome(){
     <blockquote>“มุ่งมั่นผลิตสินค้าที่มีคุณภาพ ส่งมอบตรงเวลา และมีประสิทธิภาพในการบริการ เพื่อสร้างความพึงพอใจให้กับลูกค้า”</blockquote></figure>`;
   const mods = mine.map(m => {
     const n = toolsOf(m.id).length;
-    return `<a class="mod" href="#${m.id}"><span class="tile">${icon(m.icon)}</span><span class="m-name">${esc(m.name)}</span><span class="m-desc">${esc(m.th)}</span><span class="badge ${n||m.live?"live":"soon"}">${n ? "ใช้งานได้ · " + n + " รายการ" : m.live ? "ใช้งานได้" : "กำลังพัฒนา"}</span></a>`;
+    return `<a class="mod" href="#${m.id}"><span class="tile">${icon(m.icon)}</span><span class="m-name">${esc(m.name)}</span><span class="m-desc">${esc(m.th)}</span><span class="badge ${m.beta?"beta":n||m.live?"live":"soon"}">${m.beta ? "ทดลองใช้งาน" : n ? "ใช้งานได้ · " + n + " รายการ" : m.live ? "ใช้งานได้" : "กำลังพัฒนา"}</span></a>`;
   }).join("");
   const menus = ME === null ? `<div class="empty">กำลังโหลดเมนู…</div>`
     : mods ? `<div class="modules">${mods}</div>`
