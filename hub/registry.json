@@ -16,6 +16,7 @@
           "tools": [
             {
               "id": "spare-part-list",
+              "module": "spare-part",
               "name": "Spare Part List",
               "th": "รายการอะไหล่แนะนำให้ลูกค้า",
               "desc": "อะไหล่แนะนำแยกตามระบบ (EP, Wash, Hot RO, Storage, RYC, Pneumatic, ไฟฟ้า, PLC) พร้อมจุดใช้งานตาม P&ID และ Export Excel",
