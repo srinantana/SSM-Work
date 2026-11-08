@@ -10,8 +10,24 @@
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const LIVE = { dashboard: false, estimate: false, actual: false };
 
-  // Expense categories shared by Estimate, Budgetary and Actual so all three compare line by line.
-  const CATS = ["ค่าแรง (Manday)", "เบี้ยเลี้ยง", "ที่พัก", "ค่าเดินทาง / รถ", "วัสดุสิ้นเปลือง / เครื่องมือ", "อื่นๆ"];
+  // Expense category groups shared by Estimate, Budgetary and Actual so all three compare line by line.
+  // Codes match public.site_expense_categories in database/site_expense.sql.
+  const svg = d => `<svg class="se-ci" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+  const CATS = [
+    { code: "manpower", name: "Manpower", th: "ค่าแรง / Manday",
+      ic: svg('<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19.5c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><path d="M15.5 5.2a3 3 0 0 1 0 5.6M17.5 14.8c1.7.6 2.8 2.2 3 4.7"/>') },
+    { code: "subcontract", name: "Subcontract", th: "ผู้รับเหมาช่วง",
+      ic: svg('<path d="M14.7 6.3a4 4 0 0 0-5.3 5.3l-5.6 5.6a1.8 1.8 0 0 0 2.6 2.6l5.6-5.6a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.4-.2-.2-2.4z"/>') },
+    { code: "transportation", name: "Transportation", th: "ขนส่ง / รถ",
+      ic: svg('<path d="M2.5 6.5h11v9.5h-11zM13.5 9.5h4l3 3.2V16h-7"/><circle cx="6.5" cy="17.2" r="1.8"/><circle cx="16.8" cy="17.2" r="1.8"/>') },
+    { code: "accommodation", name: "Accommodation", th: "ที่พัก",
+      ic: svg('<rect x="5.5" y="3.5" width="13" height="17" rx="1.5"/><path d="M9 7.5h1.5M13.5 7.5H15M9 11h1.5M13.5 11H15M10.5 20.5V16h3v4.5"/>') },
+    { code: "travel", name: "Travel & Air Ticket", th: "เดินทาง / ตั๋วเครื่องบิน",
+      ic: svg('<path d="M10.2 13.8 4 12.5l-1.2 1.2 5.2 2.6 2.6 5.2 1.2-1.2-1.3-6.2 4.3-4.3 3.8 6.6 1.3-1.3-1.6-8.2 2.6-2.6a1.6 1.6 0 0 0-2.3-2.3l-2.6 2.6-8.2-1.6L5.5 4.3l6.6 3.8z"/>') },
+    { code: "site_expense", name: "Site Expense", th: "ค่าใช้จ่ายหน้างาน",
+      ic: svg('<path d="M5.5 3.5h13v17l-2.2-1.4-2.1 1.4-2.2-1.4-2.2 1.4-2.1-1.4-2.2 1.4z"/><path d="M12 7.5v8M14.3 9a2 2 0 0 0-2.1-1.3c-1.2 0-2.2.7-2.2 1.7 0 2.3 4.4 1.3 4.4 3.6 0 1-1 1.7-2.2 1.7a2.2 2.2 0 0 1-2.2-1.4"/>') },
+  ];
+  const catCell = c => `<span class="se-cat">${c.ic}<span>${esc(c.name)}<small>${esc(c.th)}</small></span></span>`;
 
   const SECTIONS = [
     { id: "dashboard", no: "1", name: "Dashboard", th: "Budget vs Actual", ic: "📊",
@@ -45,7 +61,7 @@
       <div class="se-bar">${field("ค้นหา Project no. / JO", "เช่น JO202603023, ชื่อลูกค้า, ชื่อโปรเจค", "wide")}${field("ลูกค้า", "ทั้งหมด")}${field("สถานะ", "ทั้งหมด")}</div>
       <div class="se-kpis">${kpi("Budget (อนุมัติ)", "บาท")}${kpi("Actual (ใช้จริง)", "บาท")}${kpi("คงเหลือ", "บาท")}${kpi("ใช้ไป", "% ของงบ")}</div>
       <div class="tbl"><table><thead><tr><th>หมวดค่าใช้จ่าย</th><th class="r">Budget</th><th class="r">Actual</th><th class="r">คงเหลือ</th><th>% ใช้ไป</th></tr></thead>
-        <tbody>${CATS.map(c => `<tr><td>${esc(c)}</td><td class="r">–</td><td class="r">–</td><td class="r">–</td><td><span class="se-meter"><i></i></span></td></tr>`).join("")}</tbody>
+        <tbody>${CATS.map(c => `<tr><td>${catCell(c)}</td><td class="r">–</td><td class="r">–</td><td class="r">–</td><td><span class="se-meter"><i></i></span></td></tr>`).join("")}</tbody>
         <tfoot><tr><td><b>รวม</b></td><td class="r">–</td><td class="r">–</td><td class="r">–</td><td></td></tr></tfoot></table></div>
       <div class="se-other">
         <div class="se-box"><b>⏳ รออนุมัติ</b><span>Estimate ที่ส่งแล้ว รอ SSM / MD</span></div>
@@ -68,7 +84,7 @@
   function previewActual() {
     return `
       <div class="se-gate">🔒 บันทึกได้เมื่อโปรเจคมี <b>JO</b> และ <b>Budgetary</b> ที่ล็อกแล้ว</div>
-      <div class="se-form">${field("Project no. / JO", "เลือกโปรเจคที่มีงบแล้ว", "wide")}${field("วันที่", "วว/ดด/ปปปป")}${field("หมวด", CATS[1])}${field("รายการ", "เช่น ค่าที่พัก 2 ห้อง", "wide")}${field("จำนวนเงิน (บาท)", "0.00")}${field("ใบเสร็จ", "แนบรูป")}</div>
+      <div class="se-form">${field("Project no. / JO", "เลือกโปรเจคที่มีงบแล้ว", "wide")}${field("วันที่", "วว/ดด/ปปปป")}${field("หมวด", CATS[5].name)}${field("รายการ", "เช่น ค่าที่พัก 2 ห้อง", "wide")}${field("จำนวนเงิน (บาท)", "0.00")}${field("ใบเสร็จ", "แนบรูป")}</div>
       <div class="se-actions"><button class="sp-btn primary" ${off}>＋ บันทึกรายการ</button><span class="se-left">งบคงเหลือหมวดนี้: <b>–</b></span></div>
       <div class="tbl"><table><thead><tr><th>วันที่</th><th>หมวด</th><th>รายการ</th><th class="r">จำนวนเงิน</th><th>ใบเสร็จ</th><th>ผู้บันทึก</th><th>สถานะ</th></tr></thead>
         <tbody>${emptyRows(7)}</tbody></table></div>`;
@@ -80,6 +96,12 @@
 .se-flow .st{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:9px;background:#fafbfc;border:1px solid var(--line);font-size:12.5px;line-height:1.3}
 .se-flow .st span{font-size:18px}.se-flow .st small{display:block;color:var(--muted);font-size:11px}
 .se-flow .ar{color:#c3c8d0}
+.se-ci{width:20px;height:20px;flex:none;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.se-cat{display:inline-flex;align-items:center;gap:10px;color:#3d4450;line-height:1.3}.se-cat small{display:block;color:var(--muted);font-size:11px}
+.se-cats{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:10px}
+.se-cats h4{margin:0;font-size:13px;font-weight:600;color:#424a57}
+.se-cats ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
+.se-cats li{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#fafbfc;font-size:13px}
 .se-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .se-tab{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;align-items:center;text-decoration:none;background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
 .se-tab:hover{border-color:#f0b9b9}
@@ -111,7 +133,8 @@
 .se-gate{border:1px solid var(--line);background:#f7f8fa;border-radius:10px;padding:9px 14px;font-size:13px}
 .se-sec td.r,.se-sec th.r{text-align:right}.se-sec td.c,.se-sec th.c{text-align:center}
 .se-sec .plan{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px}
-@media (max-width:860px){.se-tabs{grid-template-columns:1fr}.se-bar,.se-form,.se-kpis{grid-template-columns:1fr 1fr}.se-other,.se-sec .plan{grid-template-columns:1fr}}
+@media (max-width:1100px){.se-cats ul{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:860px){.se-cats ul{grid-template-columns:1fr 1fr}.se-tabs{grid-template-columns:1fr}.se-bar,.se-form,.se-kpis{grid-template-columns:1fr 1fr}.se-other,.se-sec .plan{grid-template-columns:1fr}}
 @media (max-width:520px){.se-f.wide{grid-column:1/-1}.se-flow .ar{display:none}}`;
 
   function mount(el, sub) {
@@ -124,6 +147,7 @@
       <div style="display:grid;gap:16px">
         <div class="se-off">🚧 <span><b>วางโครงสร้างไว้แล้ว · ยังไม่เปิดใช้งาน</b> — หน้าจอด้านล่างเป็นตัวอย่างโครงสร้าง ยังกรอกหรือบันทึกข้อมูลไม่ได้</span></div>
         <div class="se-flow" aria-label="ลำดับงาน Site Expense">${flow}</div>
+        <div class="se-cats"><h4>กลุ่มหมวดค่าใช้จ่าย · ใช้ร่วมกันทั้ง Estimate, Budgetary และ Actual</h4><ul>${CATS.map(c => `<li>${catCell(c)}</li>`).join("")}</ul></div>
         <nav class="se-tabs" aria-label="ส่วนของ Site Expense">${tabs}</nav>
         <section class="se-sec" aria-labelledby="seH">
           <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><h3 id="seH">${cur.ic} ${cur.no}. ${esc(cur.name)} · ${esc(cur.th)}</h3><span class="badge ${LIVE[cur.id] ? "live" : "soon"}">${LIVE[cur.id] ? "ใช้งานได้" : "ยังไม่เปิดใช้งาน"}</span></div>
