@@ -239,7 +239,7 @@
         <form class="sp-docform" id="spDocForm" hidden><input class="sp-in" name="title" placeholder="ชื่อเอกสาร เช่น Datasheet Serfilco EO1, Quotation PE"><input class="sp-in" name="url" type="url" required placeholder="https://… (Google Drive, SharePoint, เว็บผู้ผลิต)">
           <button class="sp-btn primary sm" type="submit">เพิ่ม</button><button class="sp-btn sm" type="button" data-a="canceldoc">ยกเลิก</button><span class="sp-docerr" id="spDocErr"></span></form></div>
         <div class="sp-actions"><select class="sp-in" id="spStatus">${Object.keys(STATUS).map(s => `<option value="${s}" ${p.status === s ? "selected" : ""}>${STATUS[s][0]}</option>`).join("")}</select>
-          <button class="sp-btn" data-a="zone">＋ เพิ่มโซน</button><button class="sp-btn" data-a="import">⬆ Import from template</button><button class="sp-btn" data-a="csv" title="ไฟล์ CSV สำหรับส่งลูกค้า: ไม่มี Remarks และเฉพาะรายการที่ใส่ Unit price แล้ว">Export for customer</button><button class="sp-btn primary" data-a="save">บันทึก</button>${isAdmin() ? `<button class="sp-btn danger" data-a="delete">ลบโปรเจค</button>` : ""}</div></div>
+          <button class="sp-btn" data-a="zone">＋ เพิ่มโซน</button><button class="sp-btn" data-a="import">⬆ Import from template</button><button class="sp-btn" data-a="csv" title="ไฟล์ CSV สำหรับส่งลูกค้า: ไม่มี Remarks และเฉพาะรายการที่ใส่ Unit price แล้ว">Export for customer</button><button class="sp-btn primary" data-a="save">บันทึก</button>${isAdmin() ? `<button class="sp-btn" data-a="edithead">✎ แก้ไขรายละเอียด</button><button class="sp-btn danger" data-a="delete">ลบโปรเจค</button>` : ""}</div></div>
       <div class="tbl sp-edit"><table><colgroup>${COL_W.map(w => `<col style="width:${w}px">`).join("")}</colgroup><thead><tr>${COLS.map((c, i) => `<th class="${COL_AL[i]}">${c}</th>`).join("")}<th></th></tr></thead><tbody>${body || `<tr><td colspan="${COLS.length + 1}" class="sub">ยังไม่มีรายการ · กด ＋ เพิ่มโซน</td></tr>`}</tbody>
         <tfoot><tr><td colspan="12" class="r"><b>Total (excl. VAT)</b></td><td class="r"><b id="spGrand"></b></td><td colspan="2"></td></tr></tfoot></table></div>
       <p class="sp-src">อะไหล่ที่ระบบเสนอเป็นค่าเริ่มต้นตามประเภทอุปกรณ์ · ใส่ Part No. และ Unit price (ราคาขาย) ก่อนส่งลูกค้า · Lead time เริ่มต้นจาก Project Pipeline</p>
@@ -282,6 +282,7 @@
       if (a === "zone") { const n = prompt("ชื่อโซนใหม่ (Process tank หรือ System)", "Zone " + String.fromCharCode(65 + zones.length) + " – "); if (n && n.trim()) { p.zones = [...(p.zones || []), n.trim()]; p.lines.push(blank(n.trim())); redraw(); } }
       if (a === "adddoc") { df.hidden = false; df.title.focus(); }
       if (a === "canceldoc") { df.hidden = true; df.reset(); ROOT.querySelector("#spDocErr").textContent = ""; }
+      if (a === "edithead" && isAdmin()) editHead(p, async () => { await save(p); pageProject(p); ROOT.querySelector("#spSaved").textContent = "บันทึกรายละเอียดโปรเจคแล้ว " + new Date().toLocaleTimeString("th-TH"); });
       if (a === "csv") exportCsv(p);
       if (a === "import") openImport(p, (n, how) => { redraw(); ROOT.querySelector("#spSaved").textContent = `นำเข้า ${n} รายการ (${how === "replace" ? "แทนที่" : "เพิ่มต่อท้าย"}) · กด บันทึก เพื่อเก็บ`; });
       if (a === "save") { p.zones = zonesOf(p); await save(p); ROOT.querySelector("#spSaved").textContent = "บันทึกแล้ว " + new Date().toLocaleTimeString("th-TH") + (MODE === "local" ? " (ในเบราว์เซอร์นี้)" : ""); }
@@ -397,6 +398,25 @@
     draw();
   }
 
+  const HEAD_FIELDS = [["jo", "Job No."], ["customerShort", "Customer (ย่อ)"], ["customer", "Customer", 1], ["name", "Project name", 1], ["site", "สถานที่"], ["contact", "ผู้ติดต่อลูกค้า"],
+    ["tel", "โทร"], ["qo", "QO No."], ["po", "PO No."], ["delivery", "กำหนดส่งมอบ"], ["pm", "หัวหน้าโครงการ"], ["coordinator", "ผู้ประสานงาน"]];
+  function editHead(p, done) { // admin only: header details taken from the Job Order
+    const m = document.createElement("div"); m.className = "sp-modal"; document.body.appendChild(m);
+    m.innerHTML = `<div class="sp-dlg" role="dialog" aria-modal="true" aria-label="แก้ไขรายละเอียดโปรเจค" style="width:min(820px,100%)">
+      <div class="sp-dlg-h"><b>แก้ไขรายละเอียดโปรเจค</b><span class="sp-steps"><i class="on">Admin</i></span><button class="sp-x" data-h="close" aria-label="ปิด">✕</button></div>
+      <div class="sp-dlg-b"><div class="sp-form">${HEAD_FIELDS.map(([k, label, wide]) => `<label class="${wide ? "wide" : ""}"><span>${label}</span><input data-f="${k}" value="${esc(p[k])}"></label>`).join("")}</div>
+        <p class="sub" style="margin-top:12px">ข้อมูลตั้งต้นมาจาก Job Order · การแก้ไขที่นี่ไม่ได้แก้ไฟล์ Job Order ใน Drive</p></div>
+      <div class="sp-dlg-f"><button class="sp-btn" data-h="close">ยกเลิก</button><button class="sp-btn primary" data-h="ok">บันทึกรายละเอียด</button></div></div>`;
+    const close = () => m.remove();
+    m.onclick = e => { if (e.target === m) close(); };
+    m.querySelectorAll('[data-h="close"]').forEach(b => b.onclick = close);
+    m.querySelector('[data-h="ok"]').onclick = () => {
+      const v = {}; m.querySelectorAll("[data-f]").forEach(i => { v[i.dataset.f] = i.value.trim(); });
+      if (!v.jo || !v.name) { alert("ต้องมี Job No. และ Project name"); return; }
+      Object.assign(p, v); close(); done();
+    };
+    m.querySelector("[data-f]").focus();
+  }
   function exportCsv(p) { // customer copy: no Remarks column, only lines that have a Unit price
     migrate(p);
     const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;

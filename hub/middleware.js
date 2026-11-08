@@ -141,6 +141,13 @@ async function sparePartApi(cfg, req, url, prof) {
   if (!p || typeof p !== 'object' || !/^[\w-]{3,64}$/.test(String(p.id || ''))) return json({ error: 'id' }, 400);
   const body = JSON.stringify(p);
   if (body.length > 900000) return json({ error: 'too large' }, 413);
+  // Only admins may change project details (header taken from the Job Order); other users keep the stored values.
+  const HEAD = ['jo', 'customer', 'customerShort', 'name', 'site', 'contact', 'tel', 'qo', 'po', 'delivery', 'pm', 'coordinator'];
+  if (prof.role !== 'admin') {
+    const cur = await rest('?select=data&id=eq.' + encodeURIComponent(p.id), { method: 'GET' });
+    const old = cur.ok && Array.isArray(cur.data) && cur.data[0] && cur.data[0].data;
+    if (old) HEAD.forEach((k) => { p[k] = old[k]; });
+  }
   const now = new Date().toISOString();
   p.updated = now; p.updatedBy = prof.email;
   if (!p.createdBy) p.createdBy = prof.email;
