@@ -233,7 +233,11 @@
     ROOT.innerHTML = `<a class="open" href="#spare-part">← รายการโปรเจค</a>
       <div class="sp-head"><div><span class="jo">JO ${esc(p.jo)}</span> ${pill(p.status)}<h2>${esc(p.name)}</h2>
         <div class="sub">${esc(p.customer)} · ${esc(p.site || "")} · ผู้ติดต่อ ${esc(p.contact || "-")} ${esc(p.tel || "")} · QO ${esc(p.qo || "-")} · PO ${esc(p.po || "-")} · ส่งมอบ ${esc(p.delivery || "-")}</div>
-        <div class="sp-links">${links}</div></div>
+        <div class="sp-links">${links}</div>
+        <div class="sp-docs">${(p.docs || []).map((d, i) => `<span class="sp-doc"><a href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">🔗 ${esc(d.title || d.url)}</a><button class="sp-x" data-deldoc="${i}" title="เอาลิงก์ออก" aria-label="เอาลิงก์ออก">✕</button></span>`).join("")}
+          <button class="sp-btn sm" data-a="adddoc">＋ แนบลิงก์เอกสาร</button></div>
+        <form class="sp-docform" id="spDocForm" hidden><input class="sp-in" name="title" placeholder="ชื่อเอกสาร เช่น Datasheet Serfilco EO1, Quotation PE"><input class="sp-in" name="url" type="url" required placeholder="https://… (Google Drive, SharePoint, เว็บผู้ผลิต)">
+          <button class="sp-btn primary sm" type="submit">เพิ่ม</button><button class="sp-btn sm" type="button" data-a="canceldoc">ยกเลิก</button><span class="sp-docerr" id="spDocErr"></span></form></div>
         <div class="sp-actions"><select class="sp-in" id="spStatus">${Object.keys(STATUS).map(s => `<option value="${s}" ${p.status === s ? "selected" : ""}>${STATUS[s][0]}</option>`).join("")}</select>
           <button class="sp-btn" data-a="zone">＋ เพิ่มโซน</button><button class="sp-btn" data-a="import">⬆ Import from template</button><button class="sp-btn" data-a="csv" title="ไฟล์ CSV สำหรับส่งลูกค้า: ไม่มี Remarks และเฉพาะรายการที่ใส่ Unit price แล้ว">Export for customer</button><button class="sp-btn primary" data-a="save">บันทึก</button>${isAdmin() ? `<button class="sp-btn danger" data-a="delete">ลบโปรเจค</button>` : ""}</div></div>
       <div class="tbl sp-edit"><table><colgroup>${COL_W.map(w => `<col style="width:${w}px">`).join("")}</colgroup><thead><tr>${COLS.map((c, i) => `<th class="${COL_AL[i]}">${c}</th>`).join("")}<th></th></tr></thead><tbody>${body || `<tr><td colspan="${COLS.length + 1}" class="sub">ยังไม่มีรายการ · กด ＋ เพิ่มโซน</td></tr>`}</tbody>
@@ -261,11 +265,23 @@
     });
     ROOT.querySelectorAll("[data-addin]").forEach(b => b.onclick = () => { p.lines.push(blank(zones[+b.dataset.addin])); redraw(); });
     ROOT.querySelectorAll("[data-move]").forEach(s => s.onchange = () => { if (s.value === "") return; p.lines.find(x => x.id === s.dataset.move).zone = zones[+s.value]; redraw(); });
+    const df = ROOT.querySelector("#spDocForm");
+    df.onsubmit = e => {
+      e.preventDefault();
+      const url = df.url.value.trim(), title = df.title.value.trim();
+      let ok = false; try { ok = /^https?:$/.test(new URL(url).protocol); } catch {}
+      if (!ok) { ROOT.querySelector("#spDocErr").textContent = "ลิงก์ต้องขึ้นต้นด้วย http:// หรือ https://"; return; }
+      p.docs = [...(p.docs || []), { title: title || url, url, by: (window.SSM_ME && window.SSM_ME.email) || "", at: new Date().toISOString() }];
+      redraw();
+    };
+    ROOT.querySelectorAll("[data-deldoc]").forEach(b => b.onclick = () => { const d = p.docs[+b.dataset.deldoc]; if (confirm("เอาลิงก์ \"" + (d.title || d.url) + "\" ออก?")) { p.docs.splice(+b.dataset.deldoc, 1); redraw(); } });
     ROOT.querySelector("#spStatus").onchange = e => { p.status = e.target.value; mark(); };
     ROOT.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { p.lines = p.lines.filter(x => x.id !== b.dataset.del); redraw(); });
     ROOT.querySelectorAll("[data-a]").forEach(b => b.onclick = async () => {
       const a = b.dataset.a;
       if (a === "zone") { const n = prompt("ชื่อโซนใหม่ (Process tank หรือ System)", "Zone " + String.fromCharCode(65 + zones.length) + " – "); if (n && n.trim()) { p.zones = [...(p.zones || []), n.trim()]; p.lines.push(blank(n.trim())); redraw(); } }
+      if (a === "adddoc") { df.hidden = false; df.title.focus(); }
+      if (a === "canceldoc") { df.hidden = true; df.reset(); ROOT.querySelector("#spDocErr").textContent = ""; }
       if (a === "csv") exportCsv(p);
       if (a === "import") openImport(p, (n, how) => { redraw(); ROOT.querySelector("#spSaved").textContent = `นำเข้า ${n} รายการ (${how === "replace" ? "แทนที่" : "เพิ่มต่อท้าย"}) · กด บันทึก เพื่อเก็บ`; });
       if (a === "save") { p.zones = zonesOf(p); await save(p); ROOT.querySelector("#spSaved").textContent = "บันทึกแล้ว " + new Date().toLocaleTimeString("th-TH") + (MODE === "local" ? " (ในเบราว์เซอร์นี้)" : ""); }
@@ -436,6 +452,8 @@ option.p-critical,option.p-recommended,option.p-consumable{font-weight:600}
 .sp-h{margin:16px 0 6px;font-size:14px}.sp-scope{margin:0;padding-left:18px;display:grid;gap:3px}.sp-scope a{color:var(--rak)}
 .sp-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap;margin:10px 0 14px}.sp-head h2{margin:6px 0 4px;font-size:20px;font-weight:600}
 .sp-links{margin-top:6px;font-size:13px}.sp-links a{color:var(--rak)}
+.sp-docs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}.sp-doc{display:inline-flex;align-items:center;gap:2px;background:var(--bg);border:1px solid var(--line);border-radius:20px;padding:2px 4px 2px 10px;font-size:13px}.sp-doc a{color:var(--ink);text-decoration:none;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sp-doc a:hover{color:var(--rak);text-decoration:underline}.sp-doc .sp-x{font-size:11px;padding:2px 5px}
+.sp-docform{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}.sp-docform .sp-in{width:auto;font-size:13px;padding:6px 9px}.sp-docform .sp-in[name=title]{flex:1 1 220px}.sp-docform .sp-in[name=url]{flex:2 1 320px}.sp-docerr{color:var(--rak);font-size:12.5px}.sp-docform[hidden]{display:none}
 .sp-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sp-actions .sp-in{width:auto}
 .sp-edit{overflow-x:auto}.sp-edit table{table-layout:fixed;width:2024px}.sp-edit th{white-space:normal;vertical-align:bottom;line-height:1.3;padding:10px 6px}.sp-edit td{vertical-align:top;padding:6px 5px}.sp-edit .c{text-align:center}.sp-edit td.c:first-child{color:var(--muted);padding-top:11px}.sp-edit .r{text-align:right}.sp-edit td.c .sp-cell{text-align:center}.sp-edit td.r .sp-cell{text-align:right}.sp-edit .sp-cell{width:100%;min-width:0;box-sizing:border-box;line-height:1.4}.sp-edit select.sp-prio{text-align:center;text-align-last:center}.sp-edit td.amt{font-variant-numeric:tabular-nums;white-space:nowrap;padding-top:11px;padding-right:10px;font-weight:600}.sp-edit .tag{font-size:12px;color:var(--muted)}.sp-edit td.act{white-space:nowrap;text-align:center}.sp-move{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:6px;background:#fff;width:34px;padding:3px}
 .sp-zone td{background:var(--blush);padding:8px 10px!important}.sp-zone-in{display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;left:10px;width:max-content}.sp-zname{font:inherit;font-weight:600;color:var(--rak);border:1px solid transparent;background:transparent;border-radius:6px;padding:4px 6px;min-width:320px}.sp-zname:hover,.sp-zname:focus{border-color:var(--blush-2);background:#fff}.sp-ztot{font-weight:600;font-size:13px}.sp-btn.sm{font-size:12px;padding:4px 10px}.sp-edit tfoot td{padding:10px 8px;border-top:2px solid var(--line)}.sp-edit td{padding:4px 4px;vertical-align:top}.sp-cell{font:inherit;font-size:13px;line-height:1.4;width:100%;min-width:0;box-sizing:border-box;border:1px solid transparent;border-radius:6px;padding:5px 6px;background:transparent;color:var(--ink)}
