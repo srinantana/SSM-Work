@@ -339,11 +339,11 @@ fetch("/auth/me", {cache:"no-store"}).then(r => r.ok ? r.json() : null).then(u =
   if (!u || !u.email) return;
   ME = u; window.SSM_ME = u; render();
   document.getElementById("who").textContent = "👋 " + (u.name || u.email);
-  document.getElementById("who").title = u.email;
+  document.getElementById("who").title = u.username || u.email;
   document.getElementById("acct").hidden = false;
   if (u.role === "admin") document.getElementById("admin").hidden = false;
   document.getElementById("saName").textContent = u.name || u.email;
-  document.getElementById("saEmail").textContent = u.email;
+  document.getElementById("saEmail").textContent = u.username ? "ชื่อผู้ใช้ " + u.username : u.email;
   document.getElementById("sideAcct").hidden = false;
   if (u.role === "admin") document.getElementById("saAdmin").hidden = false;
 }).catch(() => {});

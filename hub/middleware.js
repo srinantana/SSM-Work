@@ -1,6 +1,10 @@
-// SSM Work login gate — Vercel Routing Middleware + Supabase Auth (email + password).
-// Accounts are created by the super admin at /admin from the company email list. New accounts get
-// DEFAULT_PASSWORD and must set their own password at first sign-in. Only ALLOWED_DOMAIN addresses can sign in.
+// SSM Work login gate — Vercel Routing Middleware + Supabase Auth (username + password).
+// Everyone signs in with a username: first 3 letters of the English first name + "." + first letter of the
+// English surname (nan.s). When two people would share one, the later employee code gets more surname letters
+// (pat.s / pat.sa). Accounts are created by the super admin at /admin from the RAK employee Excel file.
+// Supabase still needs an email per account: a real company address when one is matched (nantana.s@rak.co.th),
+// otherwise an internal placeholder <username>@ssm.<ALLOWED_DOMAIN> that never receives mail (shared mailboxes).
+// New accounts get DEFAULT_PASSWORD and must set their own password at first sign-in.
 // Env vars (Vercel → Project ssmwork → Settings → Environment Variables):
 //   SUPABASE_URL, SUPABASE_ANON_KEY  – Supabase project URL and publishable (anon) key. Not secret.
 //   SUPABASE_SERVICE_ROLE_KEY        – secret key (sb_secret_… or legacy service_role); /admin only. Never expose it.
@@ -82,8 +86,8 @@ h1{margin:0;font-size:21px;font-weight:600;line-height:1.35}p{margin:0;color:var
 .btn:hover{background:var(--rak-dark)}.btn .g{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#fff}
 .note{font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px;width:100%}
 form{display:grid;gap:10px;width:100%}
-input[type=email],input[type=password]{width:100%;font:inherit;border:1px solid #dce1e8;border-radius:10px;padding:11px 14px;color:var(--ink)}
-input[type=email]:focus,input[type=password]:focus{outline:3px solid #f3c2c2;border-color:var(--rak)}
+input[type=email],input[type=text],input[type=password]{width:100%;font:inherit;border:1px solid #dce1e8;border-radius:10px;padding:11px 14px;color:var(--ink)}
+input[type=email]:focus,input[type=text]:focus,input[type=password]:focus{outline:3px solid #f3c2c2;border-color:var(--rak)}
 button.btn{border:0;cursor:pointer;font:inherit;justify-content:center}
 .ok{color:#188764;background:#e9f7f0;border-radius:8px;padding:8px 12px;font-size:13px;width:100%}
 label.f{display:grid;gap:4px;font-size:12.5px;color:var(--muted)}
@@ -99,6 +103,10 @@ code{background:var(--blush);color:var(--rak);border-radius:4px;padding:1px 6px}
 const LOCK = `<span class="ic"><svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.6" fill="#ffd9d9"/><rect x="5" y="10.5" width="14" height="10" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10.3" cy="14.6" r=".9" fill="currentColor"/><circle cx="13.7" cy="14.6" r=".9" fill="currentColor"/><path d="M10.4 17a2.2 2.2 0 0 0 3.2 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>`;
 const KEY = `<span class="ic"><svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8.5" cy="12" r="4.5" fill="#ffd9d9"/><circle cx="8.5" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M13 12h8m-2.5 0v3m-3-3v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.3" cy="11.4" r=".8" fill="currentColor"/><circle cx="9.7" cy="11.4" r=".8" fill="currentColor"/></svg></span>`;
 const EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+$/;
+const USER_RE = /^[a-z]{1,3}\.[a-z]{1,6}[0-9]?$/;
+const letters = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z]/g, '');
+const inDomain = (cfg, email) => { const e = String(email || '').toLowerCase(); return e.endsWith('@' + cfg.domain) || e.endsWith('.' + cfg.domain); };
+const internalEmail = (cfg, username) => `${username}@ssm.${cfg.domain}`;
 
 // Menus that can be granted per user. Keep ids in sync with MODULES in index.html and "module" in registry.json.
 // A tool folder /customers/<customer>/<project>/<tool>/ belongs to the menu whose id the folder name starts with
@@ -165,11 +173,11 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), { status
 function signInPage(cfg, next, { status = 401, heading = 'เข้าสู่ระบบ SSM Work', msg, error, notice, email = '', headers } = {}) {
   return page({
     status, title: 'เข้าสู่ระบบ', headers,
-    body: `${LOCK}<h1>${esc(heading)}</h1><p>${msg || `สำหรับพนักงาน RAK Engineering ใช้อีเมล <b>@${esc(cfg.domain)}</b> ของคุณ`}</p>
+    body: `${LOCK}<h1>${esc(heading)}</h1><p>${msg || `สำหรับพนักงาน RAK Engineering · ชื่อผู้ใช้ = ชื่อภาษาอังกฤษ 3 ตัวแรก <b>.</b> นามสกุล 1 ตัวแรก`}</p>
 ${notice ? `<div class="ok">${notice}</div>` : ''}${error ? `<div class="err">${error}</div>` : ''}
 <form method="post" action="${esc(cfg.app)}/auth/login">
 <input type="hidden" name="next" value="${esc(next)}">
-<label class="f">อีเมลบริษัท<input type="email" name="email" required autocomplete="username" inputmode="email" placeholder="name@${esc(cfg.domain)}" value="${esc(email)}"></label>
+<label class="f">ชื่อผู้ใช้<input type="text" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="เช่น nan.s" value="${esc(email)}"></label>
 <label class="f">รหัสผ่าน<input type="password" name="password" required autocomplete="current-password"></label>
 <button class="btn" type="submit">เข้าสู่ระบบ →</button>
 </form>
@@ -219,11 +227,11 @@ function profileOf(cfg, user) {
   const meta = user.user_metadata || {};
   const role = email === cfg.superAdmin ? 'admin' : (user.app_metadata && user.app_metadata.role) === 'admin' ? 'admin' : 'user';
   const mods = user.app_metadata && user.app_metadata.modules;
-  return { id: user.id, email, name: meta.full_name || email.split('@')[0], role, modules: Array.isArray(mods) ? mods : null, mustChange: meta.must_change_password === true };
+  return { id: user.id, email, username: String(meta.username || ''), name: meta.full_name || meta.username || email.split('@')[0], role, modules: Array.isArray(mods) ? mods : null, mustChange: meta.must_change_password === true };
 }
 
 async function startSession(cfg, prof, next) {
-  const token = await makeToken(cfg.secret, { id: prof.id, email: prof.email, name: prof.name, role: prof.role, modules: prof.modules, exp: Math.floor(Date.now() / 1000) + SESSION_HOURS * 3600 });
+  const token = await makeToken(cfg.secret, { id: prof.id, email: prof.email, username: prof.username, name: prof.name, role: prof.role, modules: prof.modules, exp: Math.floor(Date.now() / 1000) + SESSION_HOURS * 3600 });
   const h = new Headers({ location: cfg.app + safeNext(next), 'cache-control': 'no-store' });
   h.append('set-cookie', setCookie(SESSION, token, SESSION_HOURS * 3600));
   h.append('set-cookie', setCookie(PENDING, '', 0));
@@ -234,7 +242,7 @@ function checkNewPassword(cfg, pw, confirm, email) {
   if (pw.length < 8) return 'รหัสผ่านต้องมีอย่างน้อย 8 ตัวอักษร';
   if (pw !== confirm) return 'รหัสผ่านใหม่ทั้งสองช่องไม่ตรงกัน';
   if (pw === cfg.defaultPassword) return 'ห้ามใช้รหัสผ่านเริ่มต้น กรุณาตั้งรหัสใหม่';
-  if (pw.toLowerCase() === email.split('@')[0]) return 'อย่าใช้ชื่ออีเมลเป็นรหัสผ่าน';
+  if (pw.toLowerCase() === email.split('@')[0]) return 'อย่าใช้ชื่อผู้ใช้เป็นรหัสผ่าน';
   return null;
 }
 
@@ -272,35 +280,70 @@ async function adminApi(cfg, req, path) {
     const users = await listUsers(cfg);
     return json(users.map((u) => {
       const p = profileOf(cfg, u);
-      return { id: u.id, email: p.email, name: p.name, role: p.role, modules: effectiveMenus(p), mustChange: p.mustChange, banned: !!(u.banned_until && new Date(u.banned_until) > new Date()), lastSignIn: u.last_sign_in_at || null, superAdmin: p.email === cfg.superAdmin };
-    }).sort((a, b) => a.email.localeCompare(b.email)));
+      const md = u.user_metadata || {};
+      return { id: u.id, email: p.email, username: p.username, code: md.employee_code || '', nameTh: md.name_th || '', internal: p.email.endsWith('@ssm.' + cfg.domain), name: p.name, role: p.role, modules: effectiveMenus(p), mustChange: p.mustChange, banned: !!(u.banned_until && new Date(u.banned_until) > new Date()), lastSignIn: u.last_sign_in_at || null, superAdmin: p.email === cfg.superAdmin };
+    }).sort((a, b) => (a.username || '~' + a.email).localeCompare(b.username || '~' + b.email)));
   }
   if (req.method !== 'POST') return json({ error: 'method' }, 405);
   const body = await req.json().catch(() => ({}));
 
   if (path === '/admin/api/import') {
-    const merged = new Map();
-    for (const row of Array.isArray(body.rows) ? body.rows.slice(0, 2000) : []) {
-      const email = String(row.email || '').trim().toLowerCase();
-      if (!EMAIL_RE.test(email) || !email.endsWith('@' + cfg.domain)) continue;
-      const m = merged.get(email) || { email, names: [], role: 'user' };
-      const name = String(row.name || '').trim();
-      if (name && !m.names.includes(name)) m.names.push(name);
-      if (String(row.role || '').trim().toLowerCase() === 'admin') m.role = 'admin';
-      merged.set(email, m);
+    const users = await listUsers(cfg);
+    const metaOf = (u) => u.user_metadata || {};
+    const byCode = new Map(), byUser = new Map(), byEmail = new Map();
+    for (const u of users) {
+      const m = metaOf(u);
+      if (m.employee_code) byCode.set(String(m.employee_code).toUpperCase(), u);
+      if (m.username) byUser.set(String(m.username).toLowerCase(), u);
+      byEmail.set(String(u.email).toLowerCase(), u);
     }
-    const existing = new Map((await listUsers(cfg)).map((u) => [String(u.email).toLowerCase(), u]));
-    const out = { created: [], updated: [], failed: [] };
-    for (const m of merged.values()) {
-      const full_name = m.names.join(' / ') || m.email.split('@')[0];
-      const role = m.email === cfg.superAdmin ? 'admin' : m.role;
-      const u = existing.get(m.email);
-      const r = u
-        ? await call(cfg, `/auth/v1/admin/users/${u.id}`, { method: 'PUT', admin: true, body: { user_metadata: { full_name }, app_metadata: { role } } })
-        : await call(cfg, '/auth/v1/admin/users', { admin: true, body: { email: m.email, password: cfg.defaultPassword, email_confirm: true, user_metadata: { full_name, must_change_password: true }, app_metadata: { role } } });
-      (r.ok ? (u ? out.updated : out.created) : out.failed).push(r.ok ? m.email : `${m.email} (${errText(r.data) || r.status})`);
+    // Rows from the RAK employee file ({code, first, last, nick, th}) or the older email list ({email, name, role}).
+    const rows = (Array.isArray(body.rows) ? body.rows.slice(0, 2000) : []).map((r) => ({
+      code: String(r.code || '').trim().toUpperCase(), first: letters(r.first), last: letters(r.last),
+      nick: String(r.nick || r.name || '').trim(), th: String(r.th || '').trim(), en: [r.first, r.last].map((x) => String(x || '').trim()).filter(Boolean).join(' '),
+      email: String(r.email || '').trim().toLowerCase(), role: String(r.role || '').trim().toLowerCase() === 'admin' ? 'admin' : 'user',
+      username: String(r.username || '').trim().toLowerCase(),
+    })).filter((r) => (r.first && r.last) || EMAIL_RE.test(r.email));
+    rows.sort((x, y) => (x.code || '~').localeCompare(y.code || '~')); // earlier employee code keeps the short username
+    const out = { created: [], updated: [], failed: [], extended: [] };
+    const taken = new Set(byUser.keys());
+    for (const r of rows) {
+      // Link to an existing account: same employee code → same username → company email (first.l@domain or given).
+      const conv = r.first && r.last ? `${r.first}.${r.last[0]}@${cfg.domain}` : '';
+      let u = (r.code && byCode.get(r.code)) || (r.email && byEmail.get(r.email)) || (conv && byEmail.get(conv)) || (r.username && byUser.get(r.username)) || null;
+      let username = u && metaOf(u).username ? String(metaOf(u).username).toLowerCase() : r.username;
+      if (!username) {
+        if (!(r.first && r.last)) { out.failed.push(`${r.email || r.nick} (ไม่มีชื่อ-นามสกุลภาษาอังกฤษ)`); continue; }
+        const f3 = r.first.slice(0, 3);
+        for (let n = 1; n <= r.last.length && n <= 6 && !username; n++) { const c = `${f3}.${r.last.slice(0, n)}`; if (!taken.has(c)) username = c; }
+        for (let d = 2; !username && d < 10; d++) { const c = `${f3}.${r.last[0]}${d}`; if (!taken.has(c)) username = c; }
+        if (username !== `${f3}.${r.last[0]}`) out.extended.push(`${r.nick || r.en} → ${username}`);
+      }
+      if (!USER_RE.test(username)) { out.failed.push(`${r.nick || r.en} (ชื่อผู้ใช้ ${username} ไม่ถูกรูปแบบ)`); continue; }
+      taken.add(username);
+      const meta = { username };
+      if (r.nick) meta.full_name = r.nick;
+      if (r.code) meta.employee_code = r.code;
+      if (r.th) meta.name_th = r.th;
+      if (r.en) meta.name_en = r.en;
+      const email = u ? String(u.email).toLowerCase() : (r.email && inDomain(cfg, r.email) && !byEmail.has(r.email) ? r.email : internalEmail(cfg, username));
+      const role = email === cfg.superAdmin ? 'admin' : (u && u.app_metadata && u.app_metadata.role === 'admin') ? 'admin' : r.role;
+      const res = u
+        ? await call(cfg, `/auth/v1/admin/users/${u.id}`, { method: 'PUT', admin: true, body: { user_metadata: meta, app_metadata: { role } } })
+        : await call(cfg, '/auth/v1/admin/users', { admin: true, body: { email, password: cfg.defaultPassword, email_confirm: true, user_metadata: { ...meta, full_name: meta.full_name || username, must_change_password: true }, app_metadata: { role } } });
+      if (res.ok && !u) { byEmail.set(email, res.data); byUser.set(username, res.data); }
+      (res.ok ? (u ? out.updated : out.created) : out.failed).push(res.ok ? `${username} (${r.nick || r.en || email})` : `${username} (${errText(res.data) || res.status})`);
     }
     return json(out);
+  }
+
+  if (path === '/admin/api/username') {
+    const id = String(body.id || ''), username = String(body.username || '').trim().toLowerCase();
+    if (!/^[0-9a-f-]{36}$/i.test(id) || !USER_RE.test(username)) return json({ error: 'bad username' }, 400);
+    const clash = (await listUsers(cfg)).find((u) => u.id !== id && String((u.user_metadata || {}).username || '').toLowerCase() === username);
+    if (clash) return json({ error: 'taken' }, 409);
+    const r = await call(cfg, `/auth/v1/admin/users/${id}`, { method: 'PUT', admin: true, body: { user_metadata: { username } } });
+    return json({ ok: r.ok }, r.ok ? 200 : 502);
   }
 
   const id = String(body.id || '');
@@ -368,17 +411,17 @@ td{padding:10px 14px;border-bottom:1px solid #edf0f4;vertical-align:middle}tr:la
 </style></head><body>
 <header class="bar"><div class="in"><img src="/assets/rak-logo.svg" alt="RAK Engineering"><span class="ws">SSM WORK · ผู้ดูแลระบบ</span><a href="/">← กลับหน้า SSM Work</a></div></header>
 <main>
-<div><h1>ผู้ใช้งาน</h1><p class="sub">เข้าระบบในชื่อ ${esc(me.email)} · บัญชีใหม่และบัญชีที่รีเซ็ตจะใช้รหัสเริ่มต้น และต้องตั้งรหัสใหม่ตอนเข้าครั้งแรก · บัญชีใหม่ยังเข้าเมนูไม่ได้ ติ๊กเมนูที่ให้สิทธิ์ (มีผลทันที)</p></div>
+<div><h1>ผู้ใช้งาน</h1><p class="sub">เข้าระบบในชื่อ ${esc(me.username || me.email)} · บัญชีใหม่และบัญชีที่รีเซ็ตจะใช้รหัสเริ่มต้น และต้องตั้งรหัสใหม่ตอนเข้าครั้งแรก · บัญชีใหม่ยังเข้าเมนูไม่ได้ ติ๊กเมนูที่ให้สิทธิ์ (มีผลทันที)</p></div>
 <div class="cards" id="stats"></div>
 <section class="panel"><h2>นำเข้ารายชื่อจาก Excel</h2>
-<p class="muted">ไฟล์ต้องมีคอลัมน์อีเมล (หัวคอลัมน์มีคำว่า "อีเมล" หรือ "email") และจะใช้คอลัมน์ "ชื่อ" กับ "Role" ถ้ามี · อีเมลที่ซ้ำกันจะรวมเป็นบัญชีเดียว · บัญชีที่มีอยู่แล้วจะอัปเดตชื่อและ role เท่านั้น ไม่แตะรหัสผ่าน</p>
+<p class="muted">ใช้ไฟล์รายชื่อพนักงาน RAK (คอลัมน์ รหัส, ชื่อ, นามสกุล, ชื่อเล่น, ชื่อ (EN), นามสกุล (EN)) · ระบบสร้างชื่อผู้ใช้ = ชื่อ EN 3 ตัวแรก . นามสกุล EN 1 ตัวแรก ถ้าซ้ำกัน คนที่รหัสพนักงานใหม่กว่าจะได้ตัวอักษรนามสกุลเพิ่ม · นำเข้าซ้ำได้ บัญชีเดิมจะอัปเดตชื่อโดยไม่เปลี่ยนรหัสผ่าน · บัญชีใหม่ใช้รหัสเริ่มต้นและต้องตั้งรหัสใหม่ตอนเข้าครั้งแรก</p>
 <div class="row"><input type="file" id="file" accept=".xlsx,.xls,.csv"><button class="btn primary" id="doImport" disabled>นำเข้า</button><span class="muted" id="preview"></span></div>
 <div id="importMsg"></div></section>
 <section class="panel"><h2>เพิ่มผู้ใช้ทีละคน</h2>
-<div class="row"><input type="search" id="nEmail" placeholder="name@${esc(cfg.domain)}"><input type="search" id="nName" placeholder="ชื่อ (ชื่อเล่น)"><button class="btn primary" id="addOne">เพิ่ม</button></div></section>
-<div class="row"><input type="search" id="q" placeholder="ค้นหาอีเมลหรือชื่อ…"><span class="muted" id="count"></span></div>
+<div class="row"><input type="search" id="nFirst" placeholder="ชื่อ (EN) เช่น Nantana"><input type="search" id="nLast" placeholder="นามสกุล (EN) เช่น Sriskultiew"><input type="search" id="nName" placeholder="ชื่อเล่น เช่น ดิว"><button class="btn primary" id="addOne">เพิ่ม</button><span class="muted" id="nPreview"></span></div></section>
+<div class="row"><input type="search" id="q" placeholder="ค้นหาชื่อผู้ใช้ ชื่อ หรือรหัสพนักงาน…"><span class="muted" id="count"></span></div>
 <div id="msg"></div>
-<div class="tbl"><table><thead><tr><th>อีเมล</th><th>ชื่อ</th><th>สิทธิ์</th><th>เมนูที่เข้าได้</th><th>สถานะ</th><th>เข้าล่าสุด</th><th></th></tr></thead><tbody id="rows"><tr><td colspan="7" class="muted">กำลังโหลด…</td></tr></tbody></table></div>
+<div class="tbl"><table><thead><tr><th>ชื่อผู้ใช้</th><th>ชื่อ</th><th>สิทธิ์</th><th>เมนูที่เข้าได้</th><th>สถานะ</th><th>เข้าล่าสุด</th><th></th></tr></thead><tbody id="rows"><tr><td colspan="7" class="muted">กำลังโหลด…</td></tr></tbody></table></div>
 </main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
@@ -395,7 +438,7 @@ function menusCell(u){
 }
 function draw(){
   const q=document.getElementById("q").value.trim().toLowerCase();
-  const list=USERS.filter(u=>!q||(u.email+" "+u.name).toLowerCase().includes(q));
+  const list=USERS.filter(u=>!q||(u.username+" "+u.email+" "+u.name+" "+u.nameTh+" "+u.code).toLowerCase().includes(q));
   const n=k=>USERS.filter(k).length;
   document.getElementById("stats").innerHTML=[["ทั้งหมด",USERS.length],["รอตั้งรหัสครั้งแรก",n(u=>u.mustChange&&!u.banned)],["ตั้งรหัสแล้ว",n(u=>!u.mustChange&&!u.banned)],["ปิดใช้งาน",n(u=>u.banned)],["ผู้ดูแล",n(u=>u.role==="admin")]].map(([l,v])=>'<div class="stat"><b>'+v+'</b><span>'+l+'</span></div>').join("");
   document.getElementById("count").textContent=list.length+" บัญชี";
@@ -403,7 +446,7 @@ function draw(){
     const st=u.banned?'<span class="pill p-ban">ปิดใช้งาน</span>':u.mustChange?'<span class="pill p-wait">รอตั้งรหัสครั้งแรก</span>':'<span class="pill p-ok">ใช้งานได้</span>';
     const last=u.lastSignIn?new Date(u.lastSignIn).toLocaleString("th-TH",{dateStyle:"medium",timeStyle:"short"}):"—";
     const dis=u.superAdmin?" disabled":"";
-    return '<tr><td><b style="font-weight:600">'+esc(u.email)+'</b>'+(u.superAdmin?' <span class="pill p-admin">Super admin</span>':'')+'</td><td>'+esc(u.name)+'</td><td><span class="pill '+(u.role==="admin"?"p-admin":"p-user")+'">'+(u.role==="admin"?"ผู้ดูแล":"ผู้ใช้")+'</span></td><td>'+menusCell(u)+'</td><td>'+st+'</td><td class="muted">'+last+'</td><td><div class="acts">'
+    return '<tr><td>'+(u.username?'<b style="font-weight:600;font-size:14px">'+esc(u.username)+'</b>':'<span class="pill p-wait">ยังไม่มีชื่อผู้ใช้</span>')+(u.superAdmin?' <span class="pill p-admin">Super admin</span>':'')+' <button class="btn" style="padding:1px 7px" data-a="username" data-id="'+u.id+'" title="แก้ชื่อผู้ใช้">✎</button><div class="muted">'+(u.internal?'ใช้อีเมลกลาง / ไม่มีอีเมล':esc(u.email))+'</div></td><td>'+esc(u.name)+(u.nameTh?'<div class="muted">'+esc(u.nameTh)+(u.code?' · '+esc(u.code):'')+'</div>':'')+'</td><td><span class="pill '+(u.role==="admin"?"p-admin":"p-user")+'">'+(u.role==="admin"?"ผู้ดูแล":"ผู้ใช้")+'</span></td><td>'+menusCell(u)+'</td><td>'+st+'</td><td class="muted">'+last+'</td><td><div class="acts">'
       +'<button class="btn" data-a="reset" data-id="'+u.id+'">รีเซ็ตรหัส</button>'
       +'<button class="btn" data-a="role" data-id="'+u.id+'" data-v="'+(u.role==="admin"?"user":"admin")+'"'+dis+'>'+(u.role==="admin"?"ถอดผู้ดูแล":"ตั้งเป็นผู้ดูแล")+'</button>'
       +'<button class="btn" data-a="ban" data-id="'+u.id+'" data-v="'+(u.banned?"0":"1")+'"'+dis+'>'+(u.banned?"เปิดใช้งาน":"ปิดใช้งาน")+'</button>'
@@ -421,34 +464,51 @@ document.getElementById("rows").addEventListener("change",async e=>{
 });
 document.getElementById("rows").addEventListener("click",async e=>{
   const b=e.target.closest("button[data-a]");if(!b)return;const u=USERS.find(x=>x.id===b.dataset.id);const a=b.dataset.a;
-  const ask={reset:"รีเซ็ตรหัสของ "+u.email+" กลับเป็นรหัสเริ่มต้น และบังคับตั้งใหม่ตอนเข้าครั้งถัดไป?",delete:"ลบบัญชี "+u.email+" ถาวร? ย้อนกลับไม่ได้",ban:(b.dataset.v==="1"?"ปิด":"เปิด")+"การใช้งานบัญชี "+u.email+"?",role:(b.dataset.v==="admin"?"ตั้ง ":"ถอด ")+u.email+(b.dataset.v==="admin"?" เป็นผู้ดูแล?":" ออกจากผู้ดูแล?")}[a];
+  if(a==="username"){const v=prompt("ชื่อผู้ใช้ใหม่ของ "+(u.name||u.email)+" (เช่น nan.s)",u.username||"");if(v===null)return;const r=await post("/admin/api/username",{id:u.id,username:v.trim().toLowerCase()});say(r.ok?"เปลี่ยนชื่อผู้ใช้เป็น "+esc(v.trim().toLowerCase())+" แล้ว":r.d&&r.d.error==="taken"?"ชื่อผู้ใช้นี้มีคนใช้แล้ว":"ชื่อผู้ใช้ไม่ถูกรูปแบบ (ตัวอย่าง nan.s)",!r.ok);await load();return;}
+  const who=u.username||u.email;const ask={reset:"รีเซ็ตรหัสของ "+who+" กลับเป็นรหัสเริ่มต้น และบังคับตั้งใหม่ตอนเข้าครั้งถัดไป?",delete:"ลบบัญชี "+who+" ถาวร? ย้อนกลับไม่ได้",ban:(b.dataset.v==="1"?"ปิด":"เปิด")+"การใช้งานบัญชี "+u.email+"?",role:(b.dataset.v==="admin"?"ตั้ง ":"ถอด ")+u.email+(b.dataset.v==="admin"?" เป็นผู้ดูแล?":" ออกจากผู้ดูแล?")}[a];
   if(!confirm(ask))return;b.disabled=true;
   const r=await post("/admin/api/"+a,{id:u.id,ban:b.dataset.v==="1",role:b.dataset.v});
   say(r.ok?"เรียบร้อย: "+esc(u.email):"ทำไม่สำเร็จ: "+esc(u.email),!r.ok);await load();
 });
+const norm=x=>String(x).toLowerCase().split(" ").join("");
+const genUser=(f,l)=>{f=String(f).toLowerCase().replace(/[^a-z]/g,"");l=String(l).toLowerCase().replace(/[^a-z]/g,"");return f&&l?f.slice(0,3)+"."+l[0]:"";};
 document.getElementById("file").addEventListener("change",async e=>{
   const f=e.target.files[0];PENDING_ROWS=[];document.getElementById("doImport").disabled=true;if(!f)return;
   const wb=XLSX.read(await f.arrayBuffer());const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:""});
-  const h=(rows[0]||[]).map(x=>String(x).toLowerCase());
-  const ci=k=>h.findIndex(x=>k.some(w=>x.includes(w)));
-  const ie=ci(["อีเมล","email","e-mail"]),inm=ci(["ชื่อ","name"]),ir=ci(["role","สิทธิ์"]);
-  if(ie<0){document.getElementById("preview").textContent="ไม่พบคอลัมน์อีเมลในแถวแรก";return;}
-  PENDING_ROWS=rows.slice(1).map(r=>({email:String(r[ie]).trim(),name:inm>=0?String(r[inm]).trim():"",role:ir>=0?String(r[ir]).trim():""})).filter(r=>r.email.includes("@"));
-  const uniq=new Set(PENDING_ROWS.map(r=>r.email.toLowerCase()));
-  document.getElementById("preview").textContent=PENDING_ROWS.length+" แถว → "+uniq.size+" บัญชี (อีเมลซ้ำรวมเป็นบัญชีเดียว)";
+  const h=(rows[0]||[]).map(norm);
+  const at=(...k)=>h.findIndex(x=>k.includes(x));
+  const iFe=at("ชื่อ(en)","firstname(en)","firstname"),iLe=at("นามสกุล(en)","lastname(en)","lastname","surname");
+  if(iFe>=0&&iLe>=0){ // RAK employee file
+    const iC=at("รหัส","รหัสพนักงาน","code"),iN=at("ชื่อเล่น"),iF=at("ชื่อ"),iL=at("นามสกุล"),iP=at("คำนำหน้า"),iE=at("อีเมล","email","e-mail");
+    PENDING_ROWS=rows.slice(1).map(r=>({code:iC>=0?String(r[iC]).trim():"",first:String(r[iFe]).trim(),last:String(r[iLe]).trim(),nick:iN>=0?String(r[iN]).trim():"",
+      th:[iF,iL].filter(i=>i>=0).map(i=>String(r[i]).trim()).filter(Boolean).join(" "),email:iE>=0?String(r[iE]).trim():""})).filter(r=>r.first&&r.last);
+    const c={};PENDING_ROWS.forEach(r=>{const u=genUser(r.first,r.last);c[u]=(c[u]||0)+1;});
+    const dup=Object.entries(c).filter(([,n])=>n>1).map(([u])=>u);
+    document.getElementById("preview").textContent=PENDING_ROWS.length+" คน"+(dup.length?" · ชื่อผู้ใช้ซ้ำ "+dup.length+" ชุด ("+dup.join(", ")+") คนรหัสใหม่กว่าจะได้ตัวอักษรนามสกุลเพิ่ม":"");
+  } else {
+    const ci=k=>h.findIndex(x=>k.some(w=>x.includes(w)));
+    const ie=ci(["อีเมล","email","e-mail"]),inm=ci(["ชื่อ","name"]),ir=ci(["role","สิทธิ์"]);
+    if(ie<0){document.getElementById("preview").textContent="ไม่พบคอลัมน์ ชื่อ (EN) / นามสกุล (EN) ในแถวแรก";return;}
+    PENDING_ROWS=rows.slice(1).map(r=>({email:String(r[ie]).trim(),name:inm>=0?String(r[inm]).trim():"",role:ir>=0?String(r[ir]).trim():""})).filter(r=>r.email.includes("@"));
+    document.getElementById("preview").textContent=PENDING_ROWS.length+" แถว (ไฟล์แบบอีเมล · ต้องตั้งชื่อผู้ใช้เองภายหลัง)";
+  }
   document.getElementById("doImport").disabled=!PENDING_ROWS.length;
 });
+const report=d=>"สร้างใหม่ "+d.created.length+" · อัปเดต "+d.updated.length+(d.extended&&d.extended.length?"<br>ชื่อผู้ใช้ที่เพิ่มตัวอักษรเพราะซ้ำ: "+esc(d.extended.join(", ")):"")+(d.failed.length?"<br>ไม่สำเร็จ "+d.failed.length+": "+esc(d.failed.join(", ")):"");
 document.getElementById("doImport").addEventListener("click",async e=>{
-  e.target.disabled=true;say("กำลังนำเข้า…",0,"importMsg");
+  e.target.disabled=true;say("กำลังนำเข้า… (ประมาณ 1 นาทีสำหรับ 100 คน)",0,"importMsg");
   const r=await post("/admin/api/import",{rows:PENDING_ROWS});
-  if(!r.ok){say("นำเข้าไม่สำเร็จ",1,"importMsg");return;}
-  const d=r.d;say("สร้างใหม่ "+d.created.length+" · อัปเดต "+d.updated.length+(d.failed.length?" · ไม่สำเร็จ "+d.failed.length+": "+esc(d.failed.join(", ")):""),d.failed.length>0,"importMsg");await load();
+  if(!r.ok){say("นำเข้าไม่สำเร็จ",1,"importMsg");e.target.disabled=false;return;}
+  say(report(r.d),r.d.failed.length>0,"importMsg");await load();
 });
+const nPrev=()=>{const u=genUser(document.getElementById("nFirst").value,document.getElementById("nLast").value);document.getElementById("nPreview").textContent=u?"ชื่อผู้ใช้: "+u+(USERS.some(x=>x.username===u)?" (ซ้ำ ระบบจะเพิ่มตัวอักษรนามสกุล)":""):"";};
+["nFirst","nLast"].forEach(id=>document.getElementById(id).addEventListener("input",nPrev));
 document.getElementById("addOne").addEventListener("click",async e=>{
-  const email=document.getElementById("nEmail").value.trim(),name=document.getElementById("nName").value.trim();if(!email)return;
-  e.target.disabled=true;const r=await post("/admin/api/import",{rows:[{email,name}]});e.target.disabled=false;
-  const d=r.d||{};say(r.ok&&(d.created||[]).length?"เพิ่ม "+esc(email)+" แล้ว":r.ok&&(d.updated||[]).length?"มีบัญชีนี้อยู่แล้ว อัปเดตชื่อให้":"เพิ่มไม่สำเร็จ (ต้องเป็นอีเมล @${esc(cfg.domain)})",!(r.ok&&((d.created||[]).length||(d.updated||[]).length)));
-  document.getElementById("nEmail").value="";document.getElementById("nName").value="";await load();
+  const first=document.getElementById("nFirst").value.trim(),last=document.getElementById("nLast").value.trim(),nick=document.getElementById("nName").value.trim();
+  if(!genUser(first,last)){say("กรอกชื่อและนามสกุลภาษาอังกฤษ",1);return;}
+  e.target.disabled=true;const r=await post("/admin/api/import",{rows:[{first,last,nick}]});e.target.disabled=false;
+  say(r.ok?report(r.d):"เพิ่มไม่สำเร็จ",!r.ok||(r.d.failed||[]).length>0);
+  ["nFirst","nLast","nName"].forEach(id=>document.getElementById(id).value="");nPrev();await load();
 });
 load();
 </script></body></html>`;
@@ -484,11 +544,22 @@ export default async function middleware(req) {
   if (path === '/auth/login') {
     if (req.method !== 'POST') return Response.redirect(cfg.app + '/', 302);
     const form = await req.formData().catch(() => null);
-    const email = String(form?.get('email') || '').trim().toLowerCase();
+    const login = String(form?.get('username') || form?.get('email') || '').trim().toLowerCase();
     const password = String(form?.get('password') || '');
     const next = safeNext(String(form?.get('next') || '/'));
-    const fail = (error, status = 401) => signInPage(cfg, next, { status, email, error });
-    if (!EMAIL_RE.test(email) || !email.endsWith('@' + cfg.domain)) return fail(`ใช้ได้เฉพาะอีเมล <b>@${esc(cfg.domain)}</b> เท่านั้น`, 403);
+    const fail = (error, status = 401) => signInPage(cfg, next, { status, email: login, error });
+    let email = '';
+    if (login.includes('@')) { // fallback: company email (also how the super admin bootstraps the very first account)
+      if (!EMAIL_RE.test(login) || !inDomain(cfg, login)) return fail('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
+      email = login;
+    } else {
+      if (!USER_RE.test(login)) return fail('ชื่อผู้ใช้ไม่ถูกรูปแบบ · ชื่อภาษาอังกฤษ 3 ตัวแรก . นามสกุล 1 ตัวแรก เช่น nan.s', 400);
+      const users = await listUsers(cfg).catch(() => null);
+      if (!users) return fail('ระบบไม่พร้อมชั่วคราว ลองใหม่อีกครั้ง', 503);
+      const u = users.find((x) => String((x.user_metadata || {}).username || '').toLowerCase() === login);
+      if (!u) return fail('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
+      email = String(u.email).toLowerCase();
+    }
 
     let r = await call(cfg, '/auth/v1/token?grant_type=password', { body: { email, password } });
     // First run: the super admin account is created on its first sign-in with the default password.
@@ -499,10 +570,10 @@ export default async function middleware(req) {
     if (!r.ok) {
       if (r.status === 429) return fail('ลองเข้าระบบถี่เกินไป รอสักครู่แล้วลองใหม่', 429);
       if (errText(r.data).includes('banned')) return fail('บัญชีนี้ถูกปิดใช้งาน ติดต่อผู้ดูแลระบบ', 403);
-      return fail('อีเมลหรือรหัสผ่านไม่ถูกต้อง');
+      return fail('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
     }
     const prof = profileOf(cfg, r.data.user || {});
-    if (!prof.email.endsWith('@' + cfg.domain)) return fail(`ใช้ได้เฉพาะอีเมล <b>@${esc(cfg.domain)}</b> เท่านั้น`, 403);
+    if (!inDomain(cfg, prof.email)) return fail('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', 403);
     if (prof.mustChange || password === cfg.defaultPassword) {
       const pending = await makeToken(cfg.secret, { ...prof, at: r.data.access_token, next, exp: Math.floor(Date.now() / 1000) + 15 * 60 });
       return passwordPage(cfg, { first: true, headers: { 'set-cookie': setCookie(PENDING, pending, 15 * 60) } });
@@ -519,7 +590,7 @@ export default async function middleware(req) {
 
   const pending = await readToken(cfg.secret, getCookie(req, PENDING));
   const user = await readToken(cfg.secret, getCookie(req, SESSION));
-  const signedIn = user && String(user.email).endsWith('@' + cfg.domain);
+  const signedIn = user && inDomain(cfg, user.email);
 
   if (path === '/auth/password') {
     if (!pending && !signedIn) return signInPage(cfg, '/auth/password', { error: 'กรุณาเข้าสู่ระบบก่อน' });
@@ -528,7 +599,7 @@ export default async function middleware(req) {
     const form = await req.formData().catch(() => null);
     const pw = String(form?.get('password') || ''), confirm = String(form?.get('confirm') || '');
     const who = first ? pending : user;
-    const bad = checkNewPassword(cfg, pw, confirm, who.email);
+    const bad = checkNewPassword(cfg, pw, confirm, who.username ? who.username + '@' : who.email);
     if (bad) return passwordPage(cfg, { first, error: bad, status: 400 });
     let at = first ? pending.at : null;
     if (!first) {
@@ -541,7 +612,7 @@ export default async function middleware(req) {
       const t = errText(u.data);
       return passwordPage(cfg, { first, status: 400, error: t.includes('different') ? 'รหัสใหม่ต้องไม่ซ้ำรหัสเดิม' : t.includes('weak') || t.includes('characters') ? 'รหัสผ่านง่ายเกินไป ลองใส่ตัวเลขและตัวอักษรผสมกัน' : 'บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง' });
     }
-    const prof = { id: who.id, email: who.email, name: who.name, role: who.role, modules: who.modules };
+    const prof = { id: who.id, email: who.email, username: who.username, name: who.name, role: who.role, modules: who.modules };
     return startSession(cfg, prof, first ? pending.next : '/');
   }
 
@@ -555,14 +626,14 @@ export default async function middleware(req) {
     if (!signedIn) return json({}, 401);
     const live = await liveProfile(cfg, user);
     if (!live) return json({}, 401);
-    return json({ email: live.email, name: live.name, role: live.role, modules: effectiveMenus(live) });
+    return json({ email: live.email, username: live.username, name: live.name, role: live.role, modules: effectiveMenus(live) });
   }
 
   if (path === '/admin' || path.startsWith('/admin/')) {
     if (!signedIn) return signInPage(cfg, '/admin');
     const live = await liveProfile(cfg, user);
     if (!live) return signedOut('บัญชีนี้ถูกปิดใช้งานหรือถูกลบ ติดต่อผู้ดูแลระบบ');
-    if (live.role !== 'admin') return page({ status: 403, title: 'ไม่มีสิทธิ์', body: `${LOCK}<h1>หน้านี้สำหรับผู้ดูแลระบบ</h1><p>บัญชี ${esc(user.email)} ไม่มีสิทธิ์จัดการผู้ใช้</p><div class="links"><a href="/">← กลับหน้า SSM Work</a></div>` });
+    if (live.role !== 'admin') return page({ status: 403, title: 'ไม่มีสิทธิ์', body: `${LOCK}<h1>หน้านี้สำหรับผู้ดูแลระบบ</h1><p>บัญชี ${esc(user.username || user.email)} ไม่มีสิทธิ์จัดการผู้ใช้</p><div class="links"><a href="/">← กลับหน้า SSM Work</a></div>` });
     if (path.startsWith('/admin/api/')) {
       try { return await adminApi(cfg, req, path); } catch { return json({ error: 'supabase' }, 502); }
     }
@@ -588,7 +659,7 @@ export default async function middleware(req) {
     if (canOpen(prof, menu)) return; // continue to the static file
     if (!navigating) return json({ error: 'no access' }, 403);
     const name = (MENUS.find((m) => m.id === menu) || { name: 'เครื่องมือนี้' }).name;
-    return page({ status: 403, title: 'ไม่มีสิทธิ์', body: `${LOCK}<h1>ยังไม่มีสิทธิ์เข้าเมนู ${esc(name)}</h1><p>บัญชี ${esc(prof.email)} ยังไม่ได้รับสิทธิ์เมนูนี้ ขอสิทธิ์ได้จากผู้ดูแลระบบ</p><div class="links"><a href="/">← กลับหน้า SSM Work</a></div>` });
+    return page({ status: 403, title: 'ไม่มีสิทธิ์', body: `${LOCK}<h1>ยังไม่มีสิทธิ์เข้าเมนู ${esc(name)}</h1><p>บัญชี ${esc(prof.username || prof.email)} ยังไม่ได้รับสิทธิ์เมนูนี้ ขอสิทธิ์ได้จากผู้ดูแลระบบ</p><div class="links"><a href="/">← กลับหน้า SSM Work</a></div>` });
   }
 
   const navigating = req.headers.get('sec-fetch-mode') === 'navigate' || (req.headers.get('accept') || '').includes('text/html');

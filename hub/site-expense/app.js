@@ -152,7 +152,7 @@
   };
   const FILTERS = [["all", "All", null], ["draft", "Draft", ["draft"]], ["requested", "Requested", ["requested", "reviewed"]], ["approved", "Approved", ["approved", "locked"]], ["revise", "Revise", ["revise"]]];
   // RAK Site & Service team. Only SSM may Get Award and adjust the Budget control.
-  const PEOPLE = [["dew", "ดิว", "ssm"], ["spy", "สปาย", "sc"], ["art", "อาร์ต", "sc"], ["num", "หนุ่ม", "sc"], ["bee", "บี", "md"]];
+  const PEOPLE = [["dew", "ดิว", "ssm", "nan.s"], ["spy", "สปาย", "sc", "pra.pu"], ["art", "อาร์ต", "sc", "sak.c"], ["num", "หนุ่ม", "sc", "tee.h"], ["bee", "บี", "md", "cha.s"]];
   const ROLE_TH = { sc: "SC", ssm: "SSM", md: "MD" };
   const namesOf = r => PEOPLE.filter(x => x[2] === r).map(x => x[1]).join(" / ");
 
@@ -221,7 +221,7 @@
       <span class="se-role-n">ข้อมูลเก็บในเบราว์เซอร์นี้เท่านั้น · rate เป็นค่าตัวอย่าง</span><button class="se-link" data-reset>ล้างข้อมูลทดลอง</button></div>`;
   }
   function wireRole(el, redraw) {
-    el.querySelectorAll("[data-user]").forEach(b => b.onclick = () => { DB.user = b.dataset.user; save(); redraw(); });
+    el.querySelectorAll("[data-user]").forEach(b => b.onclick = () => { DB.user = b.dataset.user; DB.picked = true; save(); redraw(); });
     const r = el.querySelector("[data-reset]");
     if (r) r.onclick = () => { if (confirm("ล้างข้อมูลทดลองทั้งหมดแล้วเริ่มใหม่จากตัวอย่าง?")) { DB = seed(); save(); location.hash = "#site-expense"; redraw(); } };
   }
@@ -661,7 +661,11 @@ td.neg,.neg{color:var(--rak);font-weight:600}
   function mount(el, sub) {
     if (!document.getElementById("seCss")) { const s = document.createElement("style"); s.id = "seCss"; s.textContent = CSS + CSS2 + CSS3; document.head.appendChild(s); }
     document.querySelectorAll(".se-modal").forEach(m => m.remove());
-    if (!DB) DB = load();
+    if (!DB) {
+      DB = load();
+      const signed = PEOPLE.find(x => x[3] === ((window.SSM_ME || {}).username || ""));
+      if (signed && !DB.picked) DB.user = signed[0]; // start as the signed-in person until someone switches in the test bar
+    }
     const [pid, sec] = (sub || "").split("/").map(decodeURIComponent);
     if (!pid) return overview(el);
     const p = DB.projects.find(x => x.id === pid);
