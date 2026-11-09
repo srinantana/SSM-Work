@@ -356,7 +356,7 @@
           <div style="min-width:0"><div class="se-id"><b>${esc(p.ij)}</b>${p.jo ? `<span class="se-jo">Job ${esc(p.jo)}</span>` : `<span class="se-jo none">ยังไม่มี Job no.</span>`}<span class="se-st ${st.cls}">${st.th}</span><span class="se-wait">${st.wait}</span></div>
             <h2>${esc(p.name)}</h2><div class="se-cu">${esc(p.customer)}${p.city ? " · " + esc(p.city) : ""} · ${fmtD(p.start)} – ${fmtD(p.end)}</div></div>
           <div class="se-ph-r"><span><small>ระยะเวลา</small><b>${daysOf(p)} days</b></span><span><small>คน</small><b>${peopleOf(p)}</b></span><span><small>${p.budget ? "Budget" : "Planned"}</small><b>${baht(plannedOf(p))}</b></span></div>
-          ${p.award ? `<div class="se-award"><span class="se-aw-ic">🏆</span><span><b>Awarded</b> · ${esc(p.ij)} → <b class="se-jo">Job ${esc(p.jo)}</b> · ${fmtD(p.award.date)}${p.award.value ? ` · มูลค่างาน ${baht(p.award.value)}` : ""}${p.award.by ? ` · เปิด Job โดย ${esc(p.award.by)}` : ""}${p.award.note ? `<small>${esc(p.award.note)}</small>` : ""}</span><span class="se-aw-b">Budget control ${baht(plannedOf(p))} 🔒</span></div>` : ""}
+          ${p.award ? `<div class="se-award"><span class="se-aw-ic">🏆</span><span><b>Awarded</b> · ${esc(p.ij)} → <b class="se-jo">Job ${esc(p.jo)}</b> · ${fmtD(p.award.date)}${p.award.value ? ` · มูลค่างาน ${baht(p.award.value)}` : ""}${p.award.by ? ` · เปิด Job โดย ${esc(p.award.by)}` : ""}${p.award.note || p.award.source ? `<small>${[p.award.note, p.award.source].filter(Boolean).map(esc).join(" · ")}${p.award.estimate && Math.round(Object.values(p.award.estimate).reduce((x, y) => x + y, 0)) !== Math.round(plannedOf(p)) ? ` · ปรับจาก Estimate ${baht(Object.values(p.award.estimate).reduce((x, y) => x + y, 0))}` : ""}</small>` : ""}</span><span class="se-aw-b">Budget control ${baht(plannedOf(p))} 🔒</span></div>` : ""}
           <div class="se-ph-a">${p.status === "approved" && p.list === "active" ? (role() === "md" ? `<span class="se-hint" style="margin-right:auto">รอผู้เปิด Job กด Get Award · สลับเป็น SC / SSM เพื่อทดสอบ</span>` : `<button class="se-btn award" data-award>🏆 Get Award</button>`) : ""}${editable(p) ? `<button class="se-btn" data-edit>${IC.edit}แก้ไขข้อมูล</button>` : ""}${p.list === "active" ? `<button class="se-btn" data-arch>${IC.box}Archive</button><button class="se-btn danger" data-trash>${IC.trash}Trash</button>` : ""}</div>
         </div>
         <div class="se-steps">${stepper}</div>
@@ -378,10 +378,10 @@
 
   /* ---------- Get Award: link IJ → Job no. and lock the Estimate as Budget control ---------- */
   function getAward(p) {
-    const by = sumByCat(p), total = totalOf(p);
+    const est = sumByCat(p), estTotal = totalOf(p);
     const me = (window.SSM_ME && (window.SSM_ME.name || window.SSM_ME.email)) || "";
     const m = modal("🏆 Get Award · " + p.ij, `
-      <p class="se-hint" style="margin:0">ใส่ Job no. ที่เปิดใหม่ ระบบจะผูก ${esc(p.ij)} กับ Job นี้ และล็อกยอด Estimate ที่ MD อนุมัติเป็น Budget control · ทีมหน้างานบันทึก Actual ได้ทันที</p>
+      <p class="se-hint" style="margin:0">ใส่ Job no. ที่เปิดใหม่ ระบบจะผูก ${esc(p.ij)} กับ Job นี้ และล็อก Budget control ตามตัวเลขด้านล่าง · ทีมหน้างานบันทึก Actual ได้ทันที</p>
       <div class="se-fgrid">
         <label>Job no. *<input id="awJo" placeholder="เช่น 04002026" inputmode="numeric" value="${esc(p.jo)}" autocomplete="off"></label>
         <label>วันที่ได้งาน / เปิด Job *<input id="awDate" type="date" value="${today()}"></label>
@@ -389,10 +389,13 @@
         <label class="w2">ผู้เปิด Job<input id="awBy" value="${esc(me)}" placeholder="ชื่อผู้เปิด Job"></label>
         <label>อ้างอิง PO / เอกสาร<input id="awRef" placeholder="เช่น PO-12345"></label>
       </div>
-      <div class="tbl"><table style="min-width:0"><thead><tr><th>Budget control ที่จะล็อก</th><th class="r">จำนวนเงิน</th></tr></thead>
-        <tbody>${CATS.map(c => `<tr><td>${catCell(c)}</td><td class="r">${by[c.code] ? money(by[c.code]) : "–"}</td></tr>`).join("")}</tbody>
-        <tfoot><tr><td><b>รวม Budget control</b></td><td class="r"><b>${money(total)}</b></td></tr></tfoot></table></div>
-      <p class="se-hint" style="margin:0">🔒 หลังกดยืนยัน จะแก้ Estimate ไม่ได้อีก</p>`,
+      <div class="se-aw-h"><b>Budget control ที่จะล็อก</b><span class="se-hint">ตั้งต้นจาก Estimate ที่ MD อนุมัติ · แก้เป็นตัวเลขจากฝ่ายบริหารโครงการได้</span><button class="se-link" type="button" data-awreset>ใช้ตัวเลข Estimate ทั้งหมด</button></div>
+      <div class="tbl"><table class="se-awt"><thead><tr><th>หมวด</th><th class="r">Estimate</th><th class="r">Budget control (บาท)</th><th class="r">ต่าง</th></tr></thead>
+        <tbody>${CATS.map(c => `<tr data-c="${c.code}"><td>${catCell(c)}</td><td class="r se-muted">${est[c.code] ? money(est[c.code]) : "–"}</td>
+          <td class="r"><input class="se-in r se-awin" data-bud="${c.code}" inputmode="decimal" value="${est[c.code] ? money(est[c.code]) : ""}" placeholder="0" aria-label="Budget control ${esc(c.name)}"></td><td class="r se-diff" data-diff></td></tr>`).join("")}</tbody>
+        <tfoot><tr><td><b>รวม</b></td><td class="r se-muted">${money(estTotal)}</td><td class="r"><b id="awTot"></b></td><td class="r se-diff" id="awDiff"></td></tr></tfoot></table></div>
+      <label class="se-f">ที่มา / หมายเหตุการปรับงบ<input id="awSrc" placeholder="เช่น ตามใบอนุมัติงบโครงการ ฝ่ายบริหารโครงการ 9 Nov 2026"></label>
+      <p class="se-hint" style="margin:0">🔒 หลังกดยืนยัน Budget control และ Estimate จะแก้ไม่ได้อีก</p>`,
       mm => {
         const g = id => mm.querySelector(id).value.trim();
         const jo = g("#awJo").replace(/\s+/g, "").toUpperCase(), date = g("#awDate");
@@ -401,13 +404,34 @@
         if (!date) return "ใส่วันที่ได้งาน";
         const dup = DB.projects.find(x => x !== p && x.jo && x.jo.toUpperCase() === jo && x.list !== "trash");
         if (dup) return `Job ${jo} ผูกกับ ${dup.ij} อยู่แล้ว`;
-        p.jo = jo; p.budget = by; p.lockedAt = new Date().toISOString(); p.status = "locked";
-        p.award = { date, value: num(g("#awVal")) || 0, by: g("#awBy"), note: g("#awRef"), at: new Date().toISOString() };
-        p.history.push({ at: p.award.at, role: role(), action: "award", note: jo + (p.award.note ? " · " + p.award.note : "") });
-        save(); toast(`Get Award แล้ว · ${p.ij} → Job ${jo} · ล็อก Budget control`);
+        const bud = readBud();
+        if (Object.values(bud).some(v => v < 0)) return "Budget control ต้องไม่ติดลบ";
+        const total = Object.values(bud).reduce((a, b) => a + b, 0);
+        if (total <= 0) return "ใส่ Budget control อย่างน้อย 1 หมวด";
+        const changed = CATS.some(c => Math.round(bud[c.code]) !== Math.round(est[c.code]));
+        if (changed && !g("#awSrc")) return "ตัวเลขต่างจาก Estimate · ใส่ที่มา / หมายเหตุการปรับงบ";
+        p.jo = jo; p.budget = bud; p.lockedAt = new Date().toISOString(); p.status = "locked";
+        p.award = { date, value: num(g("#awVal")) || 0, by: g("#awBy"), note: g("#awRef"), source: g("#awSrc"), estimate: est, at: new Date().toISOString() };
+        p.history.push({ at: p.award.at, role: role(), action: "award", note: `Job ${jo} · Budget ${baht(total)}${changed ? ` (Estimate ${baht(estTotal)})` : ""}${p.award.source ? " · " + p.award.source : ""}` });
+        save(); toast(`Get Award แล้ว · ${p.ij} → Job ${jo} · ล็อก Budget control ${baht(total)}`);
         location.hash = "#site-expense/" + encodeURIComponent(p.id);
         window.dispatchEvent(new HashChangeEvent("hashchange"));
       }, "ยืนยัน Get Award");
+    const readBud = () => { const o = {}; m.querySelectorAll("[data-bud]").forEach(i => o[i.dataset.bud] = num(i.value)); return o; };
+    const sign = d => Math.round(d) === 0 ? "" : (d > 0 ? "+" : "−") + money(Math.abs(d));
+    const recalc = () => {
+      const b = readBud(); let t = 0;
+      m.querySelectorAll("tr[data-c]").forEach(tr => { const c = tr.dataset.c, d = b[c] - est[c]; t += b[c]; const x = tr.querySelector("[data-diff]"); x.textContent = sign(d); x.className = "r se-diff " + (d > 0 ? "up" : d < 0 ? "down" : ""); tr.classList.toggle("chg", Math.round(d) !== 0); });
+      m.querySelector("#awTot").textContent = money(t);
+      const dd = t - estTotal, x = m.querySelector("#awDiff"); x.textContent = sign(dd); x.className = "r se-diff " + (dd > 0 ? "up" : dd < 0 ? "down" : "");
+    };
+    m.querySelectorAll("[data-bud]").forEach(i => {
+      i.oninput = recalc;
+      i.onfocus = () => { i.value = i.value.replace(/,/g, ""); i.select(); };
+      i.onblur = () => { i.value = i.value.trim() === "" ? "" : money(num(i.value)); };
+    });
+    m.querySelector("[data-awreset]").onclick = () => { m.querySelectorAll("[data-bud]").forEach(i => i.value = est[i.dataset.bud] ? money(est[i.dataset.bud]) : ""); recalc(); };
+    recalc();
     return m;
   }
 
@@ -618,6 +642,11 @@ td.neg,.neg{color:var(--rak);font-weight:600}
 .se-btn.award{background:#1d7a4f;border-color:#1d7a4f;color:#fff;font-weight:600;margin-right:auto}.se-btn.award:hover{background:#166340}
 .se-award{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;width:100%;background:#eefaf3;border:1px solid #bfe3d3;border-radius:10px;padding:9px 14px;font-size:13.5px}
 .se-award small{display:block;color:var(--muted);font-size:12px}.se-aw-ic{font-size:20px}.se-aw-b{margin-left:auto;font-weight:600;color:#1d7a4f;white-space:nowrap}
+.se-aw-h{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline}.se-aw-h b{font-size:13.5px}.se-aw-h .se-link{margin-left:auto}
+.se-awt{min-width:0}.se-awt td{padding:6px 12px}.se-awin{width:140px;background:#fff;border-color:var(--line)}
+.se-awt tr.chg td{background:#fffaf0}
+.se-dlg .tbl{max-height:none;overflow:visible}.se-dlg-b>*,.se-fgrid label{min-width:0}.se-dlg-b{overflow-x:hidden}.se-awt{width:100%}
+@media (max-width:560px){.se-awt th:nth-child(4),.se-awt td:nth-child(4){display:none}.se-awt td{padding:6px 8px}.se-awt .se-cat small{display:none}.se-awt .se-cat .se-ci{display:none}.se-awin{width:100%;min-width:0;padding:5px 6px}.se-awt td:nth-child(3){width:46%}.se-awt th,.se-awt td{white-space:normal}.se-awt{table-layout:fixed}.se-awt th:nth-child(2),.se-awt td:nth-child(2){font-size:12px}.se-dlg-f{flex-wrap:wrap}.se-err{flex-basis:100%}}.se-diff{font-size:12.5px;white-space:nowrap}.se-diff.up{color:var(--rak)}.se-diff.down{color:#1d7a4f}
 #seToast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);opacity:0;background:#22252b;color:#fff;border-radius:10px;padding:10px 18px;font-size:13.5px;z-index:70;transition:.2s;pointer-events:none}
 #seToast.on{opacity:1;transform:translate(-50%,0)}
 @media (max-width:1000px){.se-sum{grid-template-columns:repeat(3,minmax(0,1fr))}}
