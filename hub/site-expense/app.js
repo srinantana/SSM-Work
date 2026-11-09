@@ -144,8 +144,8 @@
 
   const STATUS = {
     draft:     { th: "Draft",         cls: "s-draft", wait: "SC กำลังร่าง" },
-    requested: { th: "Requested",     cls: "s-req",   wait: "รอ SSM ตรวจ" },
-    reviewed:  { th: "SSM reviewed",  cls: "s-req",   wait: "รอ MD อนุมัติ" },
+    requested: { th: "Requested",     cls: "s-req",   wait: "รออนุมัติ (ดิว หรือ บี)" },
+    reviewed:  { th: "Requested",     cls: "s-req",   wait: "รออนุมัติ (ดิว หรือ บี)" }, // old two-step data: same as requested
     approved:  { th: "Approved",      cls: "s-ok",    wait: "รอ Get Award (Job no.)" },
     revise:    { th: "Revise",        cls: "s-rev",   wait: "ส่งกลับให้ SC แก้" },
     locked:    { th: "Budget locked", cls: "s-lock",  wait: "บันทึก Actual ได้" },
@@ -156,13 +156,12 @@
   const PEOPLE = [["dew", "ดิว", "nantana.s", "SSM"], ["bee", "บี", "chayanun.s", "MD"], ["spy", "สปาย", "prakaikaew.p", "SC"], ["art", "อาร์ต", "sakkamon.c", "SC"], ["num", "หนุ่ม", "teedanai.h", "SC"], ["ning", "นิ้ง", "chalunda.w", "ดู"], ["new", "นิว", "suwitcha.b", "ดู"]];
   const PERMS = {
     create:  ["teedanai.h", "prakaikaew.p", "sakkamon.c", "nantana.s"],
-    review:  ["nantana.s"],
-    approve: ["chayanun.s"],
+    approve: ["nantana.s", "chayanun.s"],   // either one approves (one step)
     award:   ["nantana.s"],
     actual:  ["teedanai.h", "prakaikaew.p", "sakkamon.c", "nantana.s"],
     check:   ["nantana.s"],
   };
-  const ROLE_TH = { sc: "SC", ssm: "SSM", md: "MD", create: "ผู้สร้าง", review: "SSM", approve: "MD", award: "SSM" };
+  const ROLE_TH = { sc: "SC", ssm: "SSM", md: "MD", create: "ผู้สร้าง", review: "SSM", approve: "อนุมัติ", award: "SSM" };
   const namesWith = k => PEOPLE.filter(x => PERMS[k].includes(x[2])).map(x => x[1]).join(" / ");
 
   const L = d => `<svg class="se-ci" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
@@ -264,8 +263,8 @@
         ${roleBar()}
         <div class="se-wf"><span class="se-wf-t">${IC.flow}<b>Workflow</b></span>
           <span class="se-pill p-red">${IC.plus}SC creates new project</span><span class="ar">→</span>
-          <span class="se-pill p-amb">${IC.eye}Sent to SSM review</span><span class="ar">→</span>
-          <span class="se-pill p-grn">${IC.check}Sent to MD approve</span><span class="ar">→</span>
+          <span class="se-pill p-amb">${IC.eye}Sent for approval</span><span class="ar">→</span>
+          <span class="se-pill p-grn">${IC.check}ดิว หรือ บี approve</span><span class="ar">→</span>
           <span class="se-pill p-blu">${IC.lock}Open Job → Budgetary</span></div>
         <div class="se-ks">
           ${kpi(CATS[0].ic, "Active Projects", act.length)}
@@ -356,9 +355,9 @@
     const cur = SECS.find(s => s.id === secId) || SECS[0];
     const st = STATUS[p.status];
     const href = s => `#site-expense/${encodeURIComponent(p.id)}${s === "dashboard" ? "" : "/" + s}`;
-    const steps = [["draft", "SC ร่าง"], ["requested", "SSM ตรวจ"], ["reviewed", "MD อนุมัติ"], ["approved", "Get Award (Job no.)"], ["locked", "Budgetary 🔒"]];
-    const order = ["draft", "requested", "reviewed", "approved", "locked"];
-    const at = p.status === "revise" ? 0 : order.indexOf(p.status);
+    const steps = [["draft", "SC ร่าง"], ["requested", "อนุมัติ (ดิว / บี)"], ["approved", "Get Award (Job no.)"], ["locked", "Budgetary 🔒"]];
+    const order = ["draft", "requested", "approved", "locked"];
+    const at = p.status === "revise" ? 0 : p.status === "reviewed" ? 1 : order.indexOf(p.status);
     const stepper = steps.map(([k, t], i) => `<span class="se-step ${i < at ? "done" : i === at ? "now" : ""}"><i>${i < at ? "✓" : i + 1}</i>${t}</span>`).join('<span class="se-arr">→</span>');
     const listNote = p.list !== "active" ? `<div class="se-off">${p.list === "trash" ? "🗑️ โปรเจคนี้อยู่ใน Trash" : "📦 โปรเจคนี้ถูก Archive"} · <button class="se-link" data-restore>กู้คืนเป็น Active</button></div>` : "";
     el.innerHTML = `
@@ -403,7 +402,7 @@
         <label class="w2">ผู้เปิด Job<input id="awBy" value="${esc(opener)}" placeholder="ชื่อผู้เปิด Job"></label>
         <label>อ้างอิง PO / เอกสาร<input id="awRef" placeholder="เช่น PO-12345"></label>
       </div>
-      <div class="se-aw-h"><b>Budget control ที่จะล็อก</b><span class="se-hint">ตั้งต้นจาก Estimate ที่ MD อนุมัติ · แก้เป็นตัวเลขจากฝ่ายบริหารโครงการได้</span><button class="se-link" type="button" data-awreset>ใช้ตัวเลข Estimate ทั้งหมด</button></div>
+      <div class="se-aw-h"><b>Budget control ที่จะล็อก</b><span class="se-hint">ตั้งต้นจาก Estimate ที่อนุมัติแล้ว · แก้เป็นตัวเลขจากฝ่ายบริหารโครงการได้</span><button class="se-link" type="button" data-awreset>ใช้ตัวเลข Estimate ทั้งหมด</button></div>
       <div class="tbl"><table class="se-awt"><thead><tr><th>หมวด</th><th class="r">Estimate</th><th class="r">Budget control (บาท)</th><th class="r">ต่าง</th></tr></thead>
         <tbody>${CATS.map(c => `<tr data-c="${c.code}"><td>${catCell(c)}</td><td class="r se-muted">${est[c.code] ? money(est[c.code]) : "–"}</td>
           <td class="r"><input class="se-in r se-awin" data-bud="${c.code}" inputmode="decimal" value="${est[c.code] ? money(est[c.code]) : ""}" placeholder="0" aria-label="Budget control ${esc(c.name)}"></td><td class="r se-diff" data-diff></td></tr>`).join("")}</tbody>
@@ -460,7 +459,7 @@
     const kpi = (l, v, s, c = "") => `<div class="se-kpi ${c}"><span>${l}</span><b>${v}</b><small>${s}</small></div>`;
     sec.innerHTML = `
       <div class="se-sec-h"><h3>📊 Dashboard · Budget vs Actual</h3>${bud ? `<span class="badge live">งบล็อกแล้ว</span>` : `<span class="badge soon">ยังไม่มี Budgetary</span>`}</div>
-      ${bud ? "" : `<div class="se-gate">${IC.lock} ยังไม่มีงบ Budgetary — แสดงยอด Estimate ไว้ให้ดูก่อน เมื่อ MD อนุมัติและ Get Award (ได้ Job no.) แล้ว จะเทียบ Budget กับ Actual ได้</div>`}
+      ${bud ? "" : `<div class="se-gate">${IC.lock} ยังไม่มีงบ Budgetary — แสดงยอด Estimate ไว้ให้ดูก่อน เมื่ออนุมัติและ Get Award (ได้ Job no.) แล้ว จะเทียบ Budget กับ Actual ได้</div>`}
       <div class="se-kpis">
         ${kpi(bud ? "Budget (ล็อกแล้ว)" : "Estimate", baht(bud ? B : totalOf(p)), "บาท")}
         ${kpi("Actual (ใช้จริง)", baht(A), pend.length ? `รวมรายการรอตรวจ ${pend.length} รายการ` : "บาท")}
@@ -498,12 +497,11 @@
     const by = sumByCat(p);
     const actions = [];
     if (p.list === "active") {
-      if ((p.status === "draft" || p.status === "revise") && can("create")) actions.push(`<button class="se-btn primary" data-act="submit">ส่งให้ SSM ตรวจ →</button>`);
-      if (p.status === "requested" && can("review")) actions.push(`<button class="se-btn" data-act="back">↩ ส่งกลับให้ SC แก้</button><button class="se-btn primary" data-act="approve">✓ ผ่าน ส่งให้ MD</button>`);
-      if (p.status === "reviewed" && can("approve")) actions.push(`<button class="se-btn" data-act="back">↩ ส่งกลับให้ SC แก้</button><button class="se-btn primary" data-act="approve">✓ อนุมัติงบ</button>`);
+      if ((p.status === "draft" || p.status === "revise") && can("create")) actions.push(`<button class="se-btn primary" data-act="submit">ส่งขออนุมัติ →</button>`);
+      if ((p.status === "requested" || p.status === "reviewed") && can("approve")) actions.push(`<button class="se-btn" data-act="back">↩ ส่งกลับให้ SC แก้</button><button class="se-btn primary" data-act="approve">✓ อนุมัติงบ</button>`);
       if (p.status === "approved" && can("award")) actions.push(`<button class="se-btn award" data-act="award">🏆 Get Award · ผูก Job no. &amp; ล็อก Budget control</button>`);
     }
-    const owner = { draft: "create", revise: "create", requested: "review", reviewed: "approve", approved: "award" }[p.status];
+    const owner = { draft: "create", revise: "create", requested: "approve", reviewed: "approve", approved: "award" }[p.status];
     const waitMsg = p.list === "active" && owner && !actions.length ? `<span class="se-hint">ขั้นตอนนี้เป็นของ ${namesWith(owner)} · สลับคนด้านบนเพื่อทดสอบ</span>` : "";
     const hist = p.history.slice().reverse();
     const ACT = { submit: "ส่งตรวจ", approve: "ผ่าน / อนุมัติ", back: "ส่งกลับแก้", lock: "เปิด Job & ล็อกงบ", award: "Get Award · ผูก Job no. & ล็อก Budget control" };
@@ -535,14 +533,14 @@
     });
     const add = sec.querySelector("[data-add]");
     if (add) add.onclick = () => { p.lines.push({ id: uid(), cat: "manpower", scope: "", people: "", days: "", qty: "", unit: "manday", rate: "", remark: "" }); save(); redraw(); const ins = sec.querySelectorAll('input[data-k="scope"]'); if (ins.length) ins[ins.length - 1].focus(); };
-    const log = (action, note = "") => p.history.push({ at: new Date().toISOString(), role: { submit: "create", lock: "award", award: "award" }[action] || (p.status === "reviewed" ? "approve" : "review"), by: who(), action, note });
+    const log = (action, note = "") => p.history.push({ at: new Date().toISOString(), role: { submit: "create", lock: "award", award: "award" }[action] || "approve", by: who(), action, note });
     sec.querySelectorAll("[data-act]").forEach(b => b.onclick = () => {
       const a = b.dataset.act;
       if (a === "submit") {
         if (!p.lines.length || totalOf(p) <= 0) return toast("ใส่รายการ Estimate และจำนวนเงินก่อนส่งตรวจ");
-        log("submit"); p.status = "requested"; save(); toast("ส่งให้ SSM ตรวจแล้ว"); redraw();
+        log("submit"); p.status = "requested"; save(); toast("ส่งขออนุมัติแล้ว · รอดิวหรือบีอนุมัติ"); redraw();
       } else if (a === "approve") {
-        log("approve"); p.status = p.status === "requested" ? "reviewed" : "approved"; save(); toast(p.status === "reviewed" ? "ผ่าน ส่งต่อให้ MD แล้ว" : "MD อนุมัติงบแล้ว · รอเปิด Job"); redraw();
+        log("approve"); p.status = "approved"; save(); toast(`${who()} อนุมัติงบแล้ว · รอ Get Award`); redraw();
       } else if (a === "back") {
         modal("ส่งกลับให้ SC แก้", `<label class="se-f">เหตุผล / สิ่งที่ต้องแก้ *<textarea id="seNote" rows="3"></textarea></label>`, mm => {
           const n = mm.querySelector("#seNote").value.trim(); if (!n) return "ใส่เหตุผลก่อนส่งกลับ";

@@ -171,8 +171,7 @@ async function sparePartApi(cfg, req, url, prof) {
 const SITE_EXPENSE = {
   view:    ['teedanai.h', 'prakaikaew.p', 'sakkamon.c', 'nantana.s', 'chayanun.s', 'chalunda.w', 'suwitcha.b'],
   create:  ['teedanai.h', 'prakaikaew.p', 'sakkamon.c', 'nantana.s'],   // new project, Estimate, send for review
-  review:  ['nantana.s'],                                               // approval step 1 (SSM)
-  approve: ['chayanun.s'],                                              // approval step 2 (MD)
+  approve: ['nantana.s', 'chayanun.s'],                                // one-step approval: ดิว or บี
   award:   ['nantana.s'],                                               // Get Award + adjust Budget control
   actual:  ['teedanai.h', 'prakaikaew.p', 'sakkamon.c', 'nantana.s'],   // record site expenses
   check:   ['nantana.s'],                                               // check recorded actuals
