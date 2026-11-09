@@ -40,6 +40,7 @@ create table if not exists public.site_expense_projects (
   award_value  numeric,                                -- contract / PO value (optional)
   award_by     text,                                   -- person who opened the Job
   award_ref    text,                                   -- PO / document reference
+  budget_source text,                                  -- where the Budget control figures came from (project management), required when they differ from the Estimate
   created_by   text,
   created_at   timestamptz not null default now(),
   updated_at   timestamptz not null default now()
@@ -76,11 +77,12 @@ create table if not exists public.site_expense_approvals (
 );
 create index if not exists site_expense_approvals_project_idx on public.site_expense_approvals (project_id, at);
 
--- 5. Budgetary: approved totals per category, written once when the Job is opened and then locked
+-- 5. Budget control per category, written once at Get Award (figures from project management, default = Estimate) and then locked
 create table if not exists public.site_expense_budget_lines (
   project_id  text not null references public.site_expense_projects(id) on delete cascade,
   category    text not null references public.site_expense_categories(code),
-  amount      numeric not null default 0,
+  amount      numeric not null default 0,               -- Budget control (may be adjusted at Get Award)
+  estimate_amount numeric not null default 0,           -- Estimate approved by MD, kept for comparison
   locked_at   timestamptz not null default now(),
   locked_by   text,
   primary key (project_id, category)
