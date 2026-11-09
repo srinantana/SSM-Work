@@ -338,6 +338,22 @@ async function adminApi(cfg, req, path) {
     return json(out);
   }
 
+  if (path === '/admin/api/delete-legacy') {
+    // Remove old email-only accounts: no username yet and not the super admin. Refuses until the employee file
+    // has been imported (at least one account besides the super admin has a username).
+    const users = await listUsers(cfg);
+    const hasUser = (u) => !!(u.user_metadata || {}).username;
+    if (!users.some((u) => hasUser(u) && String(u.email).toLowerCase() !== cfg.superAdmin)) return json({ error: 'import first' }, 409);
+    const want = new Set(Array.isArray(body.ids) ? body.ids.map(String) : []);
+    const out = { deleted: [], failed: [] };
+    for (const u of users) {
+      if (!want.has(u.id) || hasUser(u) || String(u.email).toLowerCase() === cfg.superAdmin) continue;
+      const r = await call(cfg, `/auth/v1/admin/users/${u.id}`, { method: 'DELETE', admin: true });
+      (r.ok ? out.deleted : out.failed).push(String(u.email));
+    }
+    return json(out);
+  }
+
   if (path === '/admin/api/username') {
     const id = String(body.id || ''), username = String(body.username || '').trim().toLowerCase();
     if (!/^[0-9a-f-]{36}$/i.test(id) || !USER_RE.test(username)) return json({ error: 'bad username' }, 400);
@@ -420,6 +436,7 @@ td{padding:10px 14px;border-bottom:1px solid #edf0f4;vertical-align:middle}tr:la
 <div id="importMsg"></div></section>
 <section class="panel"><h2>เพิ่มผู้ใช้ทีละคน</h2>
 <div class="row"><input type="search" id="nFirst" placeholder="ชื่อ (EN) เช่น Nantana"><input type="search" id="nLast" placeholder="นามสกุล (EN) เช่น Sriskultiew"><input type="search" id="nName" placeholder="ชื่อเล่น เช่น ดิว"><button class="btn primary" id="addOne">เพิ่ม</button><span class="muted" id="nPreview"></span></div></section>
+<section class="panel" id="legacy" hidden><h2>บัญชีอีเมลเก่า (ยังไม่มีชื่อผู้ใช้)</h2><p class="muted">บัญชีที่เคยนำเข้าด้วยอีเมลและไม่ตรงกับรายชื่อพนักงาน · Super admin ไม่ถูกลบ · ลบแล้วย้อนกลับไม่ได้</p><div class="row"><span id="legacyList" class="muted"></span></div><div class="row"><button class="btn primary" id="delLegacy">ลบบัญชีอีเมลเก่าทั้งหมด</button><span class="muted" id="legacyNote"></span></div><div id="legacyMsg"></div></section>
 <div class="row"><input type="search" id="q" placeholder="ค้นหาชื่อผู้ใช้ ชื่อ หรือรหัสพนักงาน…"><span class="muted" id="count"></span></div>
 <div id="msg"></div>
 <div class="tbl"><table><thead><tr><th>ชื่อผู้ใช้</th><th>ชื่อ</th><th>สิทธิ์</th><th>เมนูที่เข้าได้</th><th>สถานะ</th><th>เข้าล่าสุด</th><th></th></tr></thead><tbody id="rows"><tr><td colspan="7" class="muted">กำลังโหลด…</td></tr></tbody></table></div>
@@ -437,7 +454,21 @@ function menusCell(u){
   if(u.role==="admin")return '<span class="muted">ทุกเมนู (ผู้ดูแล)</span>';
   return '<div class="menus">'+MENUS.map(m=>'<label class="chk"><input type="checkbox" data-u="'+u.id+'" value="'+m.id+'"'+(u.modules.includes(m.id)?" checked":"")+'> '+esc(m.name)+'</label>').join("")+'</div>';
 }
+function drawLegacy(){
+  const old=USERS.filter(u=>!u.username&&!u.superAdmin),ready=USERS.some(u=>u.username&&!u.superAdmin);
+  document.getElementById("legacy").hidden=!old.length;
+  document.getElementById("legacyList").textContent=old.length+" บัญชี: "+old.map(u=>u.email).join(", ");
+  document.getElementById("delLegacy").disabled=!ready;
+  document.getElementById("legacyNote").textContent=ready?"":"นำเข้าไฟล์พนักงานก่อน เพื่อให้บัญชีที่ตรงกับพนักงาน (เช่น บี) ได้ชื่อผู้ใช้และไม่ถูกลบ";
+}
+document.getElementById("delLegacy").addEventListener("click",async e=>{
+  const old=USERS.filter(u=>!u.username&&!u.superAdmin);if(!old.length)return;
+  if(!confirm("ลบบัญชีอีเมลเก่า "+old.length+" บัญชีถาวร?\\n\\n"+old.map(u=>u.email).join("\\n")+"\\n\\nย้อนกลับไม่ได้"))return;
+  e.target.disabled=true;const r=await post("/admin/api/delete-legacy",{ids:old.map(u=>u.id)});
+  say(r.ok?"ลบแล้ว "+r.d.deleted.length+" บัญชี"+(r.d.failed.length?" · ไม่สำเร็จ "+esc(r.d.failed.join(", ")):""):r.d&&r.d.error==="import first"?"นำเข้าไฟล์พนักงานก่อน":"ลบไม่สำเร็จ",!r.ok||r.d.failed.length>0,"legacyMsg");await load();
+});
 function draw(){
+  drawLegacy();
   const q=document.getElementById("q").value.trim().toLowerCase();
   const list=USERS.filter(u=>!q||(u.username+" "+u.email+" "+u.name+" "+u.nameTh+" "+u.code).toLowerCase().includes(q));
   const n=k=>USERS.filter(k).length;
