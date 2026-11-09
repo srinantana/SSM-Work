@@ -1,7 +1,7 @@
 // SSM Work login gate — Vercel Routing Middleware + Supabase Auth (username + password).
-// Everyone signs in with a username: first 3 letters of the English first name + "." + first letter of the
-// English surname (nan.s). When two people would share one, the later employee code gets more surname letters
-// (pat.s / pat.sa). Accounts are created by the super admin at /admin from the RAK employee Excel file.
+// Everyone signs in with a username: full English first name + "." + first letter of the English surname
+// (nantana.s). When two people would share one, the later employee code gets more surname letters
+// (sanya.s / sanya.so). Usernames set by hand in /admin (✎) are kept on re-import; generated ones follow the rule. Accounts are created by the super admin at /admin from the RAK employee Excel file.
 // Supabase still needs an email per account: a real company address when one is matched (nantana.s@rak.co.th),
 // otherwise an internal placeholder <username>@ssm.<ALLOWED_DOMAIN> that never receives mail (shared mailboxes).
 // New accounts get DEFAULT_PASSWORD and must set their own password at first sign-in.
@@ -103,7 +103,7 @@ code{background:var(--blush);color:var(--rak);border-radius:4px;padding:1px 6px}
 const LOCK = `<span class="ic"><svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.6" fill="#ffd9d9"/><rect x="5" y="10.5" width="14" height="10" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10.3" cy="14.6" r=".9" fill="currentColor"/><circle cx="13.7" cy="14.6" r=".9" fill="currentColor"/><path d="M10.4 17a2.2 2.2 0 0 0 3.2 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>`;
 const KEY = `<span class="ic"><svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><circle cx="8.5" cy="12" r="4.5" fill="#ffd9d9"/><circle cx="8.5" cy="12" r="4.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M13 12h8m-2.5 0v3m-3-3v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7.3" cy="11.4" r=".8" fill="currentColor"/><circle cx="9.7" cy="11.4" r=".8" fill="currentColor"/></svg></span>`;
 const EMAIL_RE = /^[a-z0-9._%+-]+@[a-z0-9.-]+$/;
-const USER_RE = /^[a-z]{1,3}\.[a-z]{1,6}[0-9]?$/;
+const USER_RE = /^[a-z]{2,30}\.[a-z]{1,6}[0-9]?$/;
 const letters = (s) => String(s || '').toLowerCase().normalize('NFKD').replace(/[^a-z]/g, '');
 const inDomain = (cfg, email) => { const e = String(email || '').toLowerCase(); return e.endsWith('@' + cfg.domain) || e.endsWith('.' + cfg.domain); };
 const internalEmail = (cfg, username) => `${username}@ssm.${cfg.domain}`;
@@ -173,11 +173,11 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), { status
 function signInPage(cfg, next, { status = 401, heading = 'เข้าสู่ระบบ SSM Work', msg, error, notice, email = '', headers } = {}) {
   return page({
     status, title: 'เข้าสู่ระบบ', headers,
-    body: `${LOCK}<h1>${esc(heading)}</h1><p>${msg || `สำหรับพนักงาน RAK Engineering · ชื่อผู้ใช้ = ชื่อภาษาอังกฤษ 3 ตัวแรก <b>.</b> นามสกุล 1 ตัวแรก`}</p>
+    body: `${LOCK}<h1>${esc(heading)}</h1><p>${msg || `สำหรับพนักงาน RAK Engineering · ชื่อผู้ใช้ = ชื่อภาษาอังกฤษเต็ม <b>.</b> นามสกุลตัวแรก`}</p>
 ${notice ? `<div class="ok">${notice}</div>` : ''}${error ? `<div class="err">${error}</div>` : ''}
 <form method="post" action="${esc(cfg.app)}/auth/login">
 <input type="hidden" name="next" value="${esc(next)}">
-<label class="f">ชื่อผู้ใช้<input type="text" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="เช่น nan.s" value="${esc(email)}"></label>
+<label class="f">ชื่อผู้ใช้<input type="text" name="username" required autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="เช่น nantana.s" value="${esc(email)}"></label>
 <label class="f">รหัสผ่าน<input type="password" name="password" required autocomplete="current-password"></label>
 <button class="btn" type="submit">เข้าสู่ระบบ →</button>
 </form>
@@ -306,22 +306,23 @@ async function adminApi(cfg, req, path) {
     })).filter((r) => (r.first && r.last) || EMAIL_RE.test(r.email));
     rows.sort((x, y) => (x.code || '~').localeCompare(y.code || '~')); // earlier employee code keeps the short username
     const out = { created: [], updated: [], failed: [], extended: [] };
-    const taken = new Set(byUser.keys());
+    const manual = (u) => u && metaOf(u).username && metaOf(u).username_auto === false;
+    const taken = new Set(users.filter(manual).map((u) => String(metaOf(u).username).toLowerCase()));
     for (const r of rows) {
       // Link to an existing account: same employee code → same username → company email (first.l@domain or given).
       const conv = r.first && r.last ? `${r.first}.${r.last[0]}@${cfg.domain}` : '';
       let u = (r.code && byCode.get(r.code)) || (r.email && byEmail.get(r.email)) || (conv && byEmail.get(conv)) || (r.username && byUser.get(r.username)) || null;
-      let username = u && metaOf(u).username ? String(metaOf(u).username).toLowerCase() : r.username;
+      let username = manual(u) ? String(metaOf(u).username).toLowerCase() : r.username;
       if (!username) {
         if (!(r.first && r.last)) { out.failed.push(`${r.email || r.nick} (ไม่มีชื่อ-นามสกุลภาษาอังกฤษ)`); continue; }
-        const f3 = r.first.slice(0, 3);
-        for (let n = 1; n <= r.last.length && n <= 6 && !username; n++) { const c = `${f3}.${r.last.slice(0, n)}`; if (!taken.has(c)) username = c; }
-        for (let d = 2; !username && d < 10; d++) { const c = `${f3}.${r.last[0]}${d}`; if (!taken.has(c)) username = c; }
-        if (username !== `${f3}.${r.last[0]}`) out.extended.push(`${r.nick || r.en} → ${username}`);
+        const f = r.first.slice(0, 30);
+        for (let n = 1; n <= r.last.length && n <= 6 && !username; n++) { const c = `${f}.${r.last.slice(0, n)}`; if (!taken.has(c)) username = c; }
+        for (let d = 2; !username && d < 10; d++) { const c = `${f}.${r.last[0]}${d}`; if (!taken.has(c)) username = c; }
+        if (username !== `${f}.${r.last[0]}`) out.extended.push(`${r.nick || r.en} → ${username}`);
       }
       if (!USER_RE.test(username)) { out.failed.push(`${r.nick || r.en} (ชื่อผู้ใช้ ${username} ไม่ถูกรูปแบบ)`); continue; }
       taken.add(username);
-      const meta = { username };
+      const meta = { username, username_auto: !manual(u) && !r.username };
       if (r.nick) meta.full_name = r.nick;
       if (r.code) meta.employee_code = r.code;
       if (r.th) meta.name_th = r.th;
@@ -342,7 +343,7 @@ async function adminApi(cfg, req, path) {
     if (!/^[0-9a-f-]{36}$/i.test(id) || !USER_RE.test(username)) return json({ error: 'bad username' }, 400);
     const clash = (await listUsers(cfg)).find((u) => u.id !== id && String((u.user_metadata || {}).username || '').toLowerCase() === username);
     if (clash) return json({ error: 'taken' }, 409);
-    const r = await call(cfg, `/auth/v1/admin/users/${id}`, { method: 'PUT', admin: true, body: { user_metadata: { username } } });
+    const r = await call(cfg, `/auth/v1/admin/users/${id}`, { method: 'PUT', admin: true, body: { user_metadata: { username, username_auto: false } } });
     return json({ ok: r.ok }, r.ok ? 200 : 502);
   }
 
@@ -414,7 +415,7 @@ td{padding:10px 14px;border-bottom:1px solid #edf0f4;vertical-align:middle}tr:la
 <div><h1>ผู้ใช้งาน</h1><p class="sub">เข้าระบบในชื่อ ${esc(me.username || me.email)} · บัญชีใหม่และบัญชีที่รีเซ็ตจะใช้รหัสเริ่มต้น และต้องตั้งรหัสใหม่ตอนเข้าครั้งแรก · บัญชีใหม่ยังเข้าเมนูไม่ได้ ติ๊กเมนูที่ให้สิทธิ์ (มีผลทันที)</p></div>
 <div class="cards" id="stats"></div>
 <section class="panel"><h2>นำเข้ารายชื่อจาก Excel</h2>
-<p class="muted">ใช้ไฟล์รายชื่อพนักงาน RAK (คอลัมน์ รหัส, ชื่อ, นามสกุล, ชื่อเล่น, ชื่อ (EN), นามสกุล (EN)) · ระบบสร้างชื่อผู้ใช้ = ชื่อ EN 3 ตัวแรก . นามสกุล EN 1 ตัวแรก ถ้าซ้ำกัน คนที่รหัสพนักงานใหม่กว่าจะได้ตัวอักษรนามสกุลเพิ่ม · นำเข้าซ้ำได้ บัญชีเดิมจะอัปเดตชื่อโดยไม่เปลี่ยนรหัสผ่าน · บัญชีใหม่ใช้รหัสเริ่มต้นและต้องตั้งรหัสใหม่ตอนเข้าครั้งแรก</p>
+<p class="muted">ใช้ไฟล์รายชื่อพนักงาน RAK (คอลัมน์ รหัส, ชื่อ, นามสกุล, ชื่อเล่น, ชื่อ (EN), นามสกุล (EN)) · ระบบสร้างชื่อผู้ใช้ = ชื่อ EN เต็ม . นามสกุล EN ตัวแรก ถ้าซ้ำกัน คนที่รหัสพนักงานใหม่กว่าจะได้ตัวอักษรนามสกุลเพิ่ม · ชื่อผู้ใช้ที่แก้เองด้วย ✎ จะไม่ถูกเปลี่ยนตอนนำเข้าซ้ำ · นำเข้าซ้ำได้ บัญชีเดิมจะอัปเดตชื่อโดยไม่เปลี่ยนรหัสผ่าน · บัญชีใหม่ใช้รหัสเริ่มต้นและต้องตั้งรหัสใหม่ตอนเข้าครั้งแรก</p>
 <div class="row"><input type="file" id="file" accept=".xlsx,.xls,.csv"><button class="btn primary" id="doImport" disabled>นำเข้า</button><span class="muted" id="preview"></span></div>
 <div id="importMsg"></div></section>
 <section class="panel"><h2>เพิ่มผู้ใช้ทีละคน</h2>
@@ -464,14 +465,14 @@ document.getElementById("rows").addEventListener("change",async e=>{
 });
 document.getElementById("rows").addEventListener("click",async e=>{
   const b=e.target.closest("button[data-a]");if(!b)return;const u=USERS.find(x=>x.id===b.dataset.id);const a=b.dataset.a;
-  if(a==="username"){const v=prompt("ชื่อผู้ใช้ใหม่ของ "+(u.name||u.email)+" (เช่น nan.s)",u.username||"");if(v===null)return;const r=await post("/admin/api/username",{id:u.id,username:v.trim().toLowerCase()});say(r.ok?"เปลี่ยนชื่อผู้ใช้เป็น "+esc(v.trim().toLowerCase())+" แล้ว":r.d&&r.d.error==="taken"?"ชื่อผู้ใช้นี้มีคนใช้แล้ว":"ชื่อผู้ใช้ไม่ถูกรูปแบบ (ตัวอย่าง nan.s)",!r.ok);await load();return;}
+  if(a==="username"){const v=prompt("ชื่อผู้ใช้ใหม่ของ "+(u.name||u.email)+" (เช่น nantana.s)",u.username||"");if(v===null)return;const r=await post("/admin/api/username",{id:u.id,username:v.trim().toLowerCase()});say(r.ok?"เปลี่ยนชื่อผู้ใช้เป็น "+esc(v.trim().toLowerCase())+" แล้ว":r.d&&r.d.error==="taken"?"ชื่อผู้ใช้นี้มีคนใช้แล้ว":"ชื่อผู้ใช้ไม่ถูกรูปแบบ (ตัวอย่าง nantana.s)",!r.ok);await load();return;}
   const who=u.username||u.email;const ask={reset:"รีเซ็ตรหัสของ "+who+" กลับเป็นรหัสเริ่มต้น และบังคับตั้งใหม่ตอนเข้าครั้งถัดไป?",delete:"ลบบัญชี "+who+" ถาวร? ย้อนกลับไม่ได้",ban:(b.dataset.v==="1"?"ปิด":"เปิด")+"การใช้งานบัญชี "+u.email+"?",role:(b.dataset.v==="admin"?"ตั้ง ":"ถอด ")+u.email+(b.dataset.v==="admin"?" เป็นผู้ดูแล?":" ออกจากผู้ดูแล?")}[a];
   if(!confirm(ask))return;b.disabled=true;
   const r=await post("/admin/api/"+a,{id:u.id,ban:b.dataset.v==="1",role:b.dataset.v});
   say(r.ok?"เรียบร้อย: "+esc(u.email):"ทำไม่สำเร็จ: "+esc(u.email),!r.ok);await load();
 });
 const norm=x=>String(x).toLowerCase().split(" ").join("");
-const genUser=(f,l)=>{f=String(f).toLowerCase().replace(/[^a-z]/g,"");l=String(l).toLowerCase().replace(/[^a-z]/g,"");return f&&l?f.slice(0,3)+"."+l[0]:"";};
+const genUser=(f,l)=>{f=String(f).toLowerCase().replace(/[^a-z]/g,"");l=String(l).toLowerCase().replace(/[^a-z]/g,"");return f&&l?f+"."+l[0]:"";};
 document.getElementById("file").addEventListener("change",async e=>{
   const f=e.target.files[0];PENDING_ROWS=[];document.getElementById("doImport").disabled=true;if(!f)return;
   const wb=XLSX.read(await f.arrayBuffer());const rows=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:""});
@@ -553,7 +554,7 @@ export default async function middleware(req) {
       if (!EMAIL_RE.test(login) || !inDomain(cfg, login)) return fail('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
       email = login;
     } else {
-      if (!USER_RE.test(login)) return fail('ชื่อผู้ใช้ไม่ถูกรูปแบบ · ชื่อภาษาอังกฤษ 3 ตัวแรก . นามสกุล 1 ตัวแรก เช่น nan.s', 400);
+      if (!USER_RE.test(login)) return fail('ชื่อผู้ใช้ไม่ถูกรูปแบบ · ชื่อภาษาอังกฤษเต็ม . นามสกุลตัวแรก เช่น nantana.s', 400);
       const users = await listUsers(cfg).catch(() => null);
       if (!users) return fail('ระบบไม่พร้อมชั่วคราว ลองใหม่อีกครั้ง', 503);
       const u = users.find((x) => String((x.user_metadata || {}).username || '').toLowerCase() === login);

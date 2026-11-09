@@ -152,7 +152,7 @@
   };
   const FILTERS = [["all", "All", null], ["draft", "Draft", ["draft"]], ["requested", "Requested", ["requested", "reviewed"]], ["approved", "Approved", ["approved", "locked"]], ["revise", "Revise", ["revise"]]];
   // RAK Site & Service team. Only SSM may Get Award and adjust the Budget control.
-  const PEOPLE = [["dew", "ดิว", "ssm", "nan.s"], ["spy", "สปาย", "sc", "pra.pu"], ["art", "อาร์ต", "sc", "sak.c"], ["num", "หนุ่ม", "sc", "tee.h"], ["bee", "บี", "md", "cha.s"]];
+  const PEOPLE = [["dew", "ดิว", "ssm", "nantana.s"], ["spy", "สปาย", "sc", "prakaikaew.p"], ["art", "อาร์ต", "sc", "sakkamon.c"], ["num", "หนุ่ม", "sc", "teedanai.h"], ["bee", "บี", "md", "chayanun.s"]];
   const ROLE_TH = { sc: "SC", ssm: "SSM", md: "MD" };
   const namesOf = r => PEOPLE.filter(x => x[2] === r).map(x => x[1]).join(" / ");
 
