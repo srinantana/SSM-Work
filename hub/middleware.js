@@ -166,9 +166,26 @@ async function sparePartApi(cfg, req, url, prof) {
   return res.ok ? json(p) : json({ error: res.status === 404 ? 'no_table' : 'supabase' }, res.status === 404 ? 503 : 502);
 }
 
-// Non-admins see only the menus an admin has ticked for them; a new account starts with none.
-const effectiveMenus = (prof) => (prof.role === 'admin' ? MENU_IDS.slice() : Array.isArray(prof.modules) ? prof.modules.filter((id) => MENU_IDS.includes(id)) : []);
-const canOpen = (prof, menu) => menu === null || prof.role === 'admin' || (menu !== '__admin' && effectiveMenus(prof).includes(menu));
+// Site Expense permissions are fixed by username (set by Dew, 9 Nov 2026), not by the admin checkboxes.
+//   ดิว nantana.s · บี chayanun.s · สปาย prakaikaew.p · อาร์ต sakkamon.c · หนุ่ม teedanai.h · นิ้ง chalunda.w · นิว suwitcha.b
+const SITE_EXPENSE = {
+  view:    ['teedanai.h', 'prakaikaew.p', 'sakkamon.c', 'nantana.s', 'chayanun.s', 'chalunda.w', 'suwitcha.b'],
+  create:  ['teedanai.h', 'prakaikaew.p', 'sakkamon.c', 'nantana.s'],   // new project, Estimate, send for review
+  review:  ['nantana.s'],                                               // approval step 1 (SSM)
+  approve: ['chayanun.s'],                                              // approval step 2 (MD)
+  award:   ['nantana.s'],                                               // Get Award + adjust Budget control
+  actual:  ['teedanai.h', 'prakaikaew.p', 'sakkamon.c', 'nantana.s'],   // record site expenses
+  check:   ['nantana.s'],                                               // check recorded actuals
+};
+const sitePerms = (prof) => Object.keys(SITE_EXPENSE).filter((k) => SITE_EXPENSE[k].includes(String(prof.username || '').toLowerCase()));
+// Non-admins see only the menus an admin has ticked for them; a new account starts with none. Site Expense: list above only.
+const effectiveMenus = (prof) => {
+  const base = prof.role === 'admin' ? MENU_IDS.slice() : Array.isArray(prof.modules) ? prof.modules.filter((id) => MENU_IDS.includes(id)) : [];
+  const out = base.filter((id) => id !== 'site-expense');
+  if (sitePerms(prof).includes('view')) out.push('site-expense');
+  return MENU_IDS.filter((id) => out.includes(id));
+};
+const canOpen = (prof, menu) => menu === null || (menu === 'site-expense' ? effectiveMenus(prof).includes(menu) : prof.role === 'admin' || (menu !== '__admin' && effectiveMenus(prof).includes(menu)));
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
 function signInPage(cfg, next, { status = 401, heading = 'เข้าสู่ระบบ SSM Work', msg, error, notice, email = '', headers } = {}) {
@@ -527,8 +544,9 @@ const post=(p,b)=>fetch(p,{method:"POST",headers:{"content-type":"application/js
 function say(t,err,el="msg"){document.getElementById(el).innerHTML=t?'<div class="msg'+(err?' err':'')+'">'+t+'</div>':"";}
 async function load(){const r=await fetch("/admin/api/users",{cache:"no-store"});if(!r.ok){say("โหลดรายชื่อไม่สำเร็จ ("+r.status+")",1);return;}USERS=await r.json();draw();}
 function menusCell(u){
-  if(u.role==="admin")return '<span class="muted">ทุกเมนู (ผู้ดูแล)</span>';
-  return '<div class="menus">'+MENUS.map(m=>'<label class="chk"><input type="checkbox" data-u="'+u.id+'" value="'+m.id+'"'+(u.modules.includes(m.id)?" checked":"")+'> '+esc(m.name)+'</label>').join("")+'</div>';
+  const se='<label class="chk" title="กำหนดตามรายชื่อในระบบ ไม่ใช่ติ๊กที่นี่"><input type="checkbox" disabled'+(u.modules.includes("site-expense")?" checked":"")+'> Site Expense <span class="muted">(ตามรายชื่อ)</span></label>';
+  if(u.role==="admin")return '<div class="menus"><span class="muted">ทุกเมนู (ผู้ดูแล)</span>'+se+'</div>';
+  return '<div class="menus">'+MENUS.filter(m=>m.id!=="site-expense").map(m=>'<label class="chk"><input type="checkbox" data-u="'+u.id+'" value="'+m.id+'"'+(u.modules.includes(m.id)?" checked":"")+'> '+esc(m.name)+'</label>').join("")+se+'</div>';
 }
 let EMP_TABLE=null;
 fetch("/admin/api/employees",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(d=>{EMP_TABLE=d;document.getElementById("srcInfo").innerHTML=d?"ใช้ข้อมูลจากตาราง <b>"+esc(d.table)+"</b> ใน Supabase · "+d.count+" แถว":"ไม่พบตาราง RAK_Employee ใน Supabase · เลือกไฟล์ RAK_Employee.xlsx ในกล่อง นำเข้ารายชื่อจาก Excel ด้านล่างก่อน แล้วกดปุ่มนี้";}).catch(()=>{});
@@ -754,7 +772,7 @@ export default async function middleware(req) {
     if (!signedIn) return json({}, 401);
     const live = await liveProfile(cfg, user);
     if (!live) return json({}, 401);
-    return json({ email: live.email, username: live.username, name: live.name, role: live.role, modules: effectiveMenus(live) });
+    return json({ email: live.email, username: live.username, name: live.name, role: live.role, modules: effectiveMenus(live), siteExpense: sitePerms(live) });
   }
 
   if (path === '/admin' || path.startsWith('/admin/')) {

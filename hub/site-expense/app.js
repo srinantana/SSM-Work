@@ -152,9 +152,18 @@
   };
   const FILTERS = [["all", "All", null], ["draft", "Draft", ["draft"]], ["requested", "Requested", ["requested", "reviewed"]], ["approved", "Approved", ["approved", "locked"]], ["revise", "Revise", ["revise"]]];
   // RAK Site & Service team. Only SSM may Get Award and adjust the Budget control.
-  const PEOPLE = [["dew", "ดิว", "ssm", "nantana.s"], ["spy", "สปาย", "sc", "prakaikaew.p"], ["art", "อาร์ต", "sc", "sakkamon.c"], ["num", "หนุ่ม", "sc", "teedanai.h"], ["bee", "บี", "md", "chayanun.s"]];
-  const ROLE_TH = { sc: "SC", ssm: "SSM", md: "MD" };
-  const namesOf = r => PEOPLE.filter(x => x[2] === r).map(x => x[1]).join(" / ");
+  // Site Expense permissions by person (set by Dew, 9 Nov 2026). The server applies the same list for menu access.
+  const PEOPLE = [["dew", "ดิว", "nantana.s", "SSM"], ["bee", "บี", "chayanun.s", "MD"], ["spy", "สปาย", "prakaikaew.p", "SC"], ["art", "อาร์ต", "sakkamon.c", "SC"], ["num", "หนุ่ม", "teedanai.h", "SC"], ["ning", "นิ้ง", "chalunda.w", "ดู"], ["new", "นิว", "suwitcha.b", "ดู"]];
+  const PERMS = {
+    create:  ["teedanai.h", "prakaikaew.p", "sakkamon.c", "nantana.s"],
+    review:  ["nantana.s"],
+    approve: ["chayanun.s"],
+    award:   ["nantana.s"],
+    actual:  ["teedanai.h", "prakaikaew.p", "sakkamon.c", "nantana.s"],
+    check:   ["nantana.s"],
+  };
+  const ROLE_TH = { sc: "SC", ssm: "SSM", md: "MD", create: "ผู้สร้าง", review: "SSM", approve: "MD", award: "SSM" };
+  const namesWith = k => PEOPLE.filter(x => PERMS[k].includes(x[2])).map(x => x[1]).join(" / ");
 
   const L = d => `<svg class="se-ci" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
   const IC = {
@@ -201,7 +210,7 @@
   function load() { try { const d = JSON.parse(localStorage.getItem(KEY) || "null"); if (d && d.v === 1) { if (!d.user) d.user = { sc: "spy", ssm: "dew", md: "bee" }[d.role] || "dew"; return d; } } catch (e) {} return seed(); }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {} }
   const me = () => PEOPLE.find(x => x[0] === DB.user) || PEOPLE[0];
-  const role = () => me()[2];
+  const can = k => PERMS[k].includes(me()[2]);
   const who = () => me()[1];
 
   /* ---------- calculations ---------- */
@@ -213,11 +222,11 @@
   const daysOf = p => span(p.start, p.end);
   const plannedOf = p => p.budget ? Object.values(p.budget).reduce((a, b) => a + b, 0) : totalOf(p);
   const actualBy = p => { const o = {}; CATS.forEach(c => o[c.code] = 0); p.actuals.filter(a => a.status !== "rejected").forEach(a => o[a.cat] += num(a.amount)); return o; };
-  const editable = p => (p.status === "draft" || p.status === "revise") && role() === "sc" && p.list === "active";
+  const editable = p => (p.status === "draft" || p.status === "revise") && can("create") && p.list === "active";
 
   /* ---------- shared bits ---------- */
   function roleBar() {
-    return `<div class="se-role"><span>🧪 โหมดทดลอง · ทดสอบเป็น</span>${PEOPLE.map(([k, n, r]) => `<button class="se-rb ${DB.user === k ? "on" : ""}" data-user="${k}" data-role="${r}">${esc(n)} <small>${ROLE_TH[r]}</small></button>`).join("")}
+    return `<div class="se-role"><span>🧪 โหมดทดลอง · ทดสอบเป็น</span>${PEOPLE.map(([k, n, u, t]) => `<button class="se-rb ${DB.user === k ? "on" : ""}" data-user="${k}" title="${esc(u)}">${esc(n)} <small>${esc(t)}</small></button>`).join("")}
       <span class="se-role-n">ข้อมูลเก็บในเบราว์เซอร์นี้เท่านั้น · rate เป็นค่าตัวอย่าง</span><button class="se-link" data-reset>ล้างข้อมูลทดลอง</button></div>`;
   }
   function wireRole(el, redraw) {
@@ -266,7 +275,7 @@
         </div>
         <div class="se-row">
           <div class="se-seg">${[["active", "Active", ""], ["archived", "Archived", IC.box], ["trash", "Trash", IC.trash]].map(([k, t, ic]) => `<button class="se-sb ${VIEW.list === k ? "on" : ""}" data-list="${k}">${ic}${t}${k !== "active" && cnt(k) ? ` <small>${cnt(k)}</small>` : ""}</button>`).join("")}</div>
-          ${role() === "sc" ? `<button class="se-new" data-new>${IC.plus}New Project</button>` : `<span class="se-hint">สร้างโปรเจคได้เฉพาะ SC (${namesOf("sc")})</span>`}
+          ${can("create") ? `<button class="se-new" data-new>${IC.plus}New Project</button>` : `<span class="se-hint">สร้างโปรเจคได้เฉพาะ ${namesWith("create")}</span>`}
         </div>
         <div class="se-row">
           <label class="se-q">${IC.search}<input id="seQ" placeholder="Search IJ, Job no., customer, city..." value="${esc(VIEW.q)}" aria-label="ค้นหาโปรเจค"></label>
@@ -362,7 +371,7 @@
             <h2>${esc(p.name)}</h2><div class="se-cu">${esc(p.customer)}${p.city ? " · " + esc(p.city) : ""} · ${fmtD(p.start)} – ${fmtD(p.end)}</div></div>
           <div class="se-ph-r"><span><small>ระยะเวลา</small><b>${daysOf(p)} days</b></span><span><small>คน</small><b>${peopleOf(p)}</b></span><span><small>${p.budget ? "Budget" : "Planned"}</small><b>${baht(plannedOf(p))}</b></span></div>
           ${p.award ? `<div class="se-award"><span class="se-aw-ic">🏆</span><span><b>Awarded</b> · ${esc(p.ij)} → <b class="se-jo">Job ${esc(p.jo)}</b> · ${fmtD(p.award.date)}${p.award.value ? ` · มูลค่างาน ${baht(p.award.value)}` : ""}${p.award.by ? ` · เปิด Job โดย ${esc(p.award.by)}` : ""}${p.award.note || p.award.source ? `<small>${[p.award.note, p.award.source].filter(Boolean).map(esc).join(" · ")}${p.award.estimate && Math.round(Object.values(p.award.estimate).reduce((x, y) => x + y, 0)) !== Math.round(plannedOf(p)) ? ` · ปรับจาก Estimate ${baht(Object.values(p.award.estimate).reduce((x, y) => x + y, 0))}` : ""}</small>` : ""}</span><span class="se-aw-b">Budget control ${baht(plannedOf(p))} 🔒</span></div>` : ""}
-          <div class="se-ph-a">${p.status === "approved" && p.list === "active" ? (role() === "ssm" ? `<button class="se-btn award" data-award>🏆 Get Award</button>` : `<span class="se-hint" style="margin-right:auto">รอ SSM (${namesOf("ssm")}) กด Get Award และกำหนด Budget control</span>`) : ""}${editable(p) ? `<button class="se-btn" data-edit>${IC.edit}แก้ไขข้อมูล</button>` : ""}${p.list === "active" ? `<button class="se-btn" data-arch>${IC.box}Archive</button><button class="se-btn danger" data-trash>${IC.trash}Trash</button>` : ""}</div>
+          <div class="se-ph-a">${p.status === "approved" && p.list === "active" ? (can("award") ? `<button class="se-btn award" data-award>🏆 Get Award</button>` : `<span class="se-hint" style="margin-right:auto">รอ ${namesWith("award")} กด Get Award และกำหนด Budget control</span>`) : ""}${editable(p) ? `<button class="se-btn" data-edit>${IC.edit}แก้ไขข้อมูล</button>` : ""}${p.list === "active" ? `<button class="se-btn" data-arch>${IC.box}Archive</button><button class="se-btn danger" data-trash>${IC.trash}Trash</button>` : ""}</div>
         </div>
         <div class="se-steps">${stepper}</div>
         <nav class="se-tabs" aria-label="Section ของโปรเจค">${SECS.map(s => `<a class="se-tab" href="${href(s.id)}" ${s.id === cur.id ? 'aria-current="page"' : ""}><span class="n">${s.ic}</span><b>${s.no}. ${esc(s.name)}</b><small>${esc(s.th)}</small></a>`).join("")}</nav>
@@ -417,7 +426,7 @@
         if (changed && !g("#awSrc")) return "ตัวเลขต่างจาก Estimate · ใส่ที่มา / หมายเหตุการปรับงบ";
         p.jo = jo; p.budget = bud; p.lockedAt = new Date().toISOString(); p.status = "locked";
         p.award = { date, value: num(g("#awVal")) || 0, by: g("#awBy"), note: g("#awRef"), source: g("#awSrc"), estimate: est, at: new Date().toISOString() };
-        p.history.push({ at: p.award.at, role: role(), by: who(), action: "award", note: `Job ${jo} · Budget ${baht(total)}${changed ? ` (Estimate ${baht(estTotal)})` : ""}${p.award.source ? " · " + p.award.source : ""}` });
+        p.history.push({ at: p.award.at, role: "award", by: who(), action: "award", note: `Job ${jo} · Budget ${baht(total)}${changed ? ` (Estimate ${baht(estTotal)})` : ""}${p.award.source ? " · " + p.award.source : ""}` });
         save(); toast(`Get Award แล้ว · ${p.ij} → Job ${jo} · ล็อก Budget control ${baht(total)}`);
         location.hash = "#site-expense/" + encodeURIComponent(p.id);
         window.dispatchEvent(new HashChangeEvent("hashchange"));
@@ -472,7 +481,6 @@
   /* ---------- 2. Estimate ---------- */
   function secEstimate(sec, p, redraw) {
     const ed = editable(p);
-    const r = role();
     const rateOpts = (cat, l) => `<option value="">— เลือก rate —</option>` + (RATES[cat] || []).map(([n, u, v], i) => `<option value="${i}" ${l && l.unit === u && num(l.rate) === v && l.scope === n ? "selected" : ""}>${esc(n)} · ${money(v)}/${esc(u)}</option>`).join("");
     const row = (l, i) => ed ? `<tr data-id="${l.id}">
         <td class="c se-no">${i + 1}</td>
@@ -490,13 +498,13 @@
     const by = sumByCat(p);
     const actions = [];
     if (p.list === "active") {
-      if ((p.status === "draft" || p.status === "revise") && r === "sc") actions.push(`<button class="se-btn primary" data-act="submit">ส่งให้ SSM ตรวจ →</button>`);
-      if (p.status === "requested" && r === "ssm") actions.push(`<button class="se-btn" data-act="back">↩ ส่งกลับให้ SC แก้</button><button class="se-btn primary" data-act="approve">✓ ผ่าน ส่งให้ MD</button>`);
-      if (p.status === "reviewed" && r === "md") actions.push(`<button class="se-btn" data-act="back">↩ ส่งกลับให้ SC แก้</button><button class="se-btn primary" data-act="approve">✓ อนุมัติงบ</button>`);
-      if (p.status === "approved" && r === "ssm") actions.push(`<button class="se-btn award" data-act="award">🏆 Get Award · ผูก Job no. &amp; ล็อก Budget control</button>`);
+      if ((p.status === "draft" || p.status === "revise") && can("create")) actions.push(`<button class="se-btn primary" data-act="submit">ส่งให้ SSM ตรวจ →</button>`);
+      if (p.status === "requested" && can("review")) actions.push(`<button class="se-btn" data-act="back">↩ ส่งกลับให้ SC แก้</button><button class="se-btn primary" data-act="approve">✓ ผ่าน ส่งให้ MD</button>`);
+      if (p.status === "reviewed" && can("approve")) actions.push(`<button class="se-btn" data-act="back">↩ ส่งกลับให้ SC แก้</button><button class="se-btn primary" data-act="approve">✓ อนุมัติงบ</button>`);
+      if (p.status === "approved" && can("award")) actions.push(`<button class="se-btn award" data-act="award">🏆 Get Award · ผูก Job no. &amp; ล็อก Budget control</button>`);
     }
-    const owner = { draft: "sc", revise: "sc", requested: "ssm", reviewed: "md", approved: "ssm" }[p.status];
-    const waitMsg = p.list === "active" && owner && !actions.length ? `<span class="se-hint">ขั้นตอนนี้เป็นของ ${ROLE_TH[owner]} (${namesOf(owner)}) · สลับคนด้านบนเพื่อทดสอบ</span>` : "";
+    const owner = { draft: "create", revise: "create", requested: "review", reviewed: "approve", approved: "award" }[p.status];
+    const waitMsg = p.list === "active" && owner && !actions.length ? `<span class="se-hint">ขั้นตอนนี้เป็นของ ${namesWith(owner)} · สลับคนด้านบนเพื่อทดสอบ</span>` : "";
     const hist = p.history.slice().reverse();
     const ACT = { submit: "ส่งตรวจ", approve: "ผ่าน / อนุมัติ", back: "ส่งกลับแก้", lock: "เปิด Job & ล็อกงบ", award: "Get Award · ผูก Job no. & ล็อก Budget control" };
     sec.innerHTML = `
@@ -527,7 +535,7 @@
     });
     const add = sec.querySelector("[data-add]");
     if (add) add.onclick = () => { p.lines.push({ id: uid(), cat: "manpower", scope: "", people: "", days: "", qty: "", unit: "manday", rate: "", remark: "" }); save(); redraw(); const ins = sec.querySelectorAll('input[data-k="scope"]'); if (ins.length) ins[ins.length - 1].focus(); };
-    const log = (action, note = "") => p.history.push({ at: new Date().toISOString(), role: role(), by: who(), action, note });
+    const log = (action, note = "") => p.history.push({ at: new Date().toISOString(), role: { submit: "create", lock: "award", award: "award" }[action] || (p.status === "reviewed" ? "approve" : "review"), by: who(), action, note });
     sec.querySelectorAll("[data-act]").forEach(b => b.onclick = () => {
       const a = b.dataset.act;
       if (a === "submit") {
@@ -551,13 +559,13 @@
         <div class="se-gate big">${IC.lock}<span><b>บันทึก Actual ได้เมื่อ Get Award แล้ว (มี Job no. และ Budget control ที่ล็อกแล้ว)</b><br>สถานะตอนนี้: ${STATUS[p.status].th} · ${STATUS[p.status].wait} · <a href="#site-expense/${encodeURIComponent(p.id)}/estimate">ไปที่ Estimate →</a></span></div>`;
       return;
     }
-    const act = actualBy(p), r = role(), can = p.list === "active";
+    const act = actualBy(p), active = p.list === "active", canAdd = active && can("actual"), canChk = active && can("check");
     const left = c => p.budget[c] - act[c];
     const rows = p.actuals.slice().sort((a, b) => b.date.localeCompare(a.date));
     const STA = { pending: ["รอตรวจ", "s-req"], checked: ["ตรวจแล้ว", "s-ok"], rejected: ["ไม่ผ่าน", "s-rev"] };
     sec.innerHTML = `
-      <div class="se-sec-h"><h3>🧾 Actual record · Job ${esc(p.jo)}</h3><span class="badge live">บันทึกได้</span></div>
-      ${can ? `<div class="se-form2">
+      <div class="se-sec-h"><h3>🧾 Actual record · Job ${esc(p.jo)}</h3>${canAdd ? `<span class="badge live">บันทึกได้</span>` : `<span class="badge off">ดูอย่างเดียว · บันทึกได้เฉพาะ ${namesWith("actual")}</span>`}</div>
+      ${canAdd ? `<div class="se-form2">
         <label class="se-f">วันที่<input type="date" id="aDate" value="${today()}"></label>
         <label class="se-f">หมวด<select id="aCat">${CATS.map(c => `<option value="${c.code}">${esc(c.name)}</option>`).join("")}</select></label>
         <label class="se-f w2">รายการ<input id="aDesc" placeholder="เช่น ค่าที่พัก 2 ห้อง × 3 คืน"></label>
@@ -569,9 +577,9 @@
       <div class="tbl"><table><thead><tr><th>วันที่</th><th>หมวด</th><th>รายการ</th><th class="r">จำนวนเงิน</th><th>ใบเสร็จ</th><th>ผู้บันทึก</th><th>สถานะ</th><th></th></tr></thead>
         <tbody>${rows.length ? rows.map(a => `<tr data-a="${a.id}"><td>${fmtD(a.date)}</td><td>${catCell(catOf(a.cat))}</td><td>${esc(a.desc)}</td><td class="r">${money(num(a.amount))}</td><td>${a.receipt ? `📎 ${esc(a.receipt)}` : `<span class="se-muted">–</span>`}</td><td>${esc(a.by)}</td>
           <td><span class="se-st ${STA[a.status][1]}">${STA[a.status][0]}</span></td>
-          <td><span class="se-rowact">${can && r === "ssm" && a.status === "pending" ? `<button class="se-btn sm" data-chk="checked">✓</button><button class="se-btn sm" data-chk="rejected">✗</button>` : ""}${can && r === "sc" && a.status === "pending" ? `<button class="se-x" data-adel aria-label="ลบ">${IC.x}</button>` : ""}</span></td></tr>`).join("")
+          <td><span class="se-rowact">${canChk && a.status === "pending" ? `<button class="se-btn sm" data-chk="checked">✓</button><button class="se-btn sm" data-chk="rejected">✗</button>` : ""}${canAdd && a.status === "pending" ? `<button class="se-x" data-adel aria-label="ลบ">${IC.x}</button>` : ""}</span></td></tr>`).join("")
           : `<tr><td colspan="8" class="se-muted c" style="padding:22px">ยังไม่มีรายการ</td></tr>`}</tbody></table></div>`;
-    if (!can) return;
+    if (canAdd) {
     const upd = () => { const c = sec.querySelector("#aCat").value, v = left(c); const e = sec.querySelector("#aLeft"); e.textContent = baht(v) + " จาก " + baht(p.budget[c]); e.className = v < 0 ? "neg" : ""; };
     sec.querySelector("#aCat").onchange = upd; upd();
     sec.querySelector("#aAdd").onclick = () => {
@@ -582,6 +590,7 @@
       p.actuals.push({ id: uid(), date: g("#aDate"), cat: g("#aCat"), desc: g("#aDesc"), amount, receipt: f ? f.name : "", by: who(), status: "pending" });
       save(); const c = g("#aCat"); toast(left(c) < 0 ? "บันทึกแล้ว · ⚠️ หมวดนี้เกินงบ" : "บันทึกแล้ว · รอ SSM ตรวจ"); redraw();
     };
+    }
     sec.querySelectorAll("tr[data-a]").forEach(tr => {
       const a = p.actuals.find(x => x.id === tr.dataset.a);
       tr.querySelectorAll("[data-chk]").forEach(b => b.onclick = () => { a.status = b.dataset.chk; save(); redraw(); });
@@ -663,7 +672,7 @@ td.neg,.neg{color:var(--rak);font-weight:600}
     document.querySelectorAll(".se-modal").forEach(m => m.remove());
     if (!DB) {
       DB = load();
-      const signed = PEOPLE.find(x => x[3] === ((window.SSM_ME || {}).username || ""));
+      const signed = PEOPLE.find(x => x[2] === ((window.SSM_ME || {}).username || ""));
       if (signed && !DB.picked) DB.user = signed[0]; // start as the signed-in person until someone switches in the test bar
     }
     const [pid, sec] = (sub || "").split("/").map(decodeURIComponent);
