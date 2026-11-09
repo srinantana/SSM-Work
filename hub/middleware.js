@@ -4,7 +4,8 @@
 // (sanya.s / sanya.so). Usernames set by hand in /admin (✎) are kept on re-import; generated ones follow the rule. Accounts are created by the super admin at /admin from the RAK employee Excel file.
 // Supabase still needs an email per account: a real company address when one is matched (nantana.s@rak.co.th),
 // otherwise an internal placeholder <username>@ssm.<ALLOWED_DOMAIN> that never receives mail (shared mailboxes).
-// New accounts get DEFAULT_PASSWORD and must set their own password at first sign-in.
+// New accounts get DEFAULT_PASSWORD and must set their own password at first sign-in. /admin can also reset every
+// account from the RAK_Employee table in Supabase (or the Excel file): all accounts are deleted and recreated.
 // Env vars (Vercel → Project ssmwork → Settings → Environment Variables):
 //   SUPABASE_URL, SUPABASE_ANON_KEY  – Supabase project URL and publishable (anon) key. Not secret.
 //   SUPABASE_SERVICE_ROLE_KEY        – secret key (sb_secret_… or legacy service_role); /admin only. Never expose it.
@@ -262,6 +263,51 @@ async function liveProfile(cfg, sess) {
   return p.email === String(sess.email).toLowerCase() ? p : null;
 }
 
+// ---------- RAK employee data ----------
+// Column names are matched loosely so both the Excel headers ("ชื่อ (EN)") and snake_case ("first_name_en") work.
+const colKey = (k) => String(k || '').toLowerCase().replace(/[\s_\-()\[\].]/g, '');
+const COLS = {
+  code: ['รหัส', 'รหัสพนักงาน', 'code', 'employeecode', 'empcode', 'employeeid', 'empid', 'staffid'],
+  status: ['สถานะ', 'status'],
+  first: ['ชื่อen', 'firstnameen', 'firstname', 'nameen', 'fnameen', 'givenname'],
+  last: ['นามสกุลen', 'lastnameen', 'lastname', 'surnameen', 'surname', 'lnameen', 'familyname'],
+  nick: ['ชื่อเล่น', 'nickname', 'nicknameth', 'nick'],
+  thFirst: ['ชื่อ', 'firstnameth', 'nameth', 'fnameth'],
+  thLast: ['นามสกุล', 'lastnameth', 'surnameth', 'lnameth'],
+  email: ['อีเมล', 'email', 'mail'],
+};
+function employeeRow(obj) {
+  const by = {};
+  for (const [k, v] of Object.entries(obj || {})) by[colKey(k)] = v;
+  const get = (f) => { for (const c of COLS[f]) if (by[colKey(c)] != null && String(by[colKey(c)]).trim() !== '') return String(by[colKey(c)]).trim(); return ''; };
+  return { code: get('code'), status: get('status'), first: get('first'), last: get('last'), nick: get('nick'), th: [get('thFirst'), get('thLast')].filter(Boolean).join(' '), email: get('email') };
+}
+const leftCompany = (status) => /ลาออก|พ้นสภาพ|resign|inactive|terminated|left/i.test(String(status || ''));
+const EMP_TABLES = ['RAK_Employee', 'rak_employee', 'RAK_Employees', 'rak_employees', 'employees', 'employee'];
+async function readEmployeeTable(cfg) {
+  for (const t of EMP_TABLES) {
+    const r = await call(cfg, `/rest/v1/${encodeURIComponent(t)}?select=*`, { method: 'GET', admin: true });
+    if (r.ok && Array.isArray(r.data)) return { table: t, rows: r.data.map(employeeRow) };
+  }
+  return null;
+}
+// Username = full English first name . first letter of surname; on a clash the later employee code takes more surname letters.
+function planUsernames(rows, taken = new Set()) {
+  const out = [], extended = [];
+  const list = rows.map((r) => ({ ...r, f: letters(r.first), l: letters(r.last) })).filter((r) => r.f && r.l && !leftCompany(r.status));
+  list.sort((x, y) => (String(x.code || '~').toUpperCase()).localeCompare(String(y.code || '~').toUpperCase()));
+  for (const r of list) {
+    let username = '';
+    for (let n = 1; n <= r.l.length && n <= 6 && !username; n++) { const c = `${r.f.slice(0, 30)}.${r.l.slice(0, n)}`; if (!taken.has(c)) username = c; }
+    for (let d = 2; !username && d < 10; d++) { const c = `${r.f.slice(0, 30)}.${r.l[0]}${d}`; if (!taken.has(c)) username = c; }
+    taken.add(username);
+    if (username !== `${r.f.slice(0, 30)}.${r.l[0]}`) extended.push(`${r.nick || r.first} → ${username}`);
+    const { f, l, ...rest } = r;
+    out.push({ ...rest, username, auto: true });
+  }
+  return { rows: out, extended, skipped: rows.length - list.length };
+}
+
 // ---------- admin ----------
 async function listUsers(cfg) {
   const all = [];
@@ -284,8 +330,31 @@ async function adminApi(cfg, req, path) {
       return { id: u.id, email: p.email, username: p.username, code: md.employee_code || '', nameTh: md.name_th || '', internal: p.email.endsWith('@ssm.' + cfg.domain), name: p.name, role: p.role, modules: effectiveMenus(p), mustChange: p.mustChange, banned: !!(u.banned_until && new Date(u.banned_until) > new Date()), lastSignIn: u.last_sign_in_at || null, superAdmin: p.email === cfg.superAdmin };
     }).sort((a, b) => (a.username || '~' + a.email).localeCompare(b.username || '~' + b.email)));
   }
+  if (path === '/admin/api/employees' && req.method === 'GET') {
+    const t = await readEmployeeTable(cfg);
+    return t ? json({ table: t.table, count: t.rows.length }) : json({ error: 'no table' }, 404);
+  }
   if (req.method !== 'POST') return json({ error: 'method' }, 405);
   const body = await req.json().catch(() => ({}));
+
+  // Reset step 1: usernames for every employee (from the Supabase table, or rows sent from the Excel file).
+  if (path === '/admin/api/plan') {
+    let src = 'excel', rows = Array.isArray(body.rows) ? body.rows.map((r) => (r && r.first !== undefined ? { code: String(r.code || ''), status: String(r.status || ''), first: r.first, last: r.last, nick: String(r.nick || ''), th: String(r.th || ''), email: String(r.email || '') } : employeeRow(r))) : [];
+    if (body.source === 'table') { const t = await readEmployeeTable(cfg); if (!t) return json({ error: 'no table' }, 404); src = t.table; rows = t.rows; }
+    const p = planUsernames(rows.slice(0, 2000));
+    return json({ source: src, ...p });
+  }
+  // Reset step 2: delete accounts in small batches (the super admin is never deleted).
+  if (path === '/admin/api/delete-many') {
+    const ids = new Set((Array.isArray(body.ids) ? body.ids : []).slice(0, 25).map(String));
+    const out = { deleted: 0, failed: [] };
+    for (const u of await listUsers(cfg)) {
+      if (!ids.has(u.id) || String(u.email).toLowerCase() === cfg.superAdmin) continue;
+      const r = await call(cfg, `/auth/v1/admin/users/${u.id}`, { method: 'DELETE', admin: true });
+      if (r.ok) out.deleted++; else out.failed.push(String(u.email));
+    }
+    return json(out);
+  }
 
   if (path === '/admin/api/import') {
     const users = await listUsers(cfg);
@@ -302,8 +371,8 @@ async function adminApi(cfg, req, path) {
       code: String(r.code || '').trim().toUpperCase(), first: letters(r.first), last: letters(r.last),
       nick: String(r.nick || r.name || '').trim(), th: String(r.th || '').trim(), en: [r.first, r.last].map((x) => String(x || '').trim()).filter(Boolean).join(' '),
       email: String(r.email || '').trim().toLowerCase(), role: String(r.role || '').trim().toLowerCase() === 'admin' ? 'admin' : 'user',
-      username: String(r.username || '').trim().toLowerCase(),
-    })).filter((r) => (r.first && r.last) || EMAIL_RE.test(r.email));
+      username: String(r.username || '').trim().toLowerCase(), auto: r.auto === true, status: String(r.status || ''),
+    })).filter((r) => ((r.first && r.last) || EMAIL_RE.test(r.email)) && !leftCompany(r.status));
     rows.sort((x, y) => (x.code || '~').localeCompare(y.code || '~')); // earlier employee code keeps the short username
     const out = { created: [], updated: [], failed: [], extended: [] };
     const manual = (u) => u && metaOf(u).username && metaOf(u).username_auto === false;
@@ -322,15 +391,17 @@ async function adminApi(cfg, req, path) {
       }
       if (!USER_RE.test(username)) { out.failed.push(`${r.nick || r.en} (ชื่อผู้ใช้ ${username} ไม่ถูกรูปแบบ)`); continue; }
       taken.add(username);
-      const meta = { username, username_auto: !manual(u) && !r.username };
+      const meta = { username, username_auto: r.auto || (!manual(u) && !r.username) };
       if (r.nick) meta.full_name = r.nick;
       if (r.code) meta.employee_code = r.code;
       if (r.th) meta.name_th = r.th;
       if (r.en) meta.name_en = r.en;
-      const email = u ? String(u.email).toLowerCase() : (r.email && inDomain(cfg, r.email) && !byEmail.has(r.email) ? r.email : internalEmail(cfg, username));
+      const email = u ? String(u.email).toLowerCase() : conv && conv === cfg.superAdmin ? conv : (r.email && inDomain(cfg, r.email) && !byEmail.has(r.email) ? r.email : internalEmail(cfg, username));
       const role = email === cfg.superAdmin ? 'admin' : (u && u.app_metadata && u.app_metadata.role === 'admin') ? 'admin' : r.role;
       const res = u
-        ? await call(cfg, `/auth/v1/admin/users/${u.id}`, { method: 'PUT', admin: true, body: { user_metadata: meta, app_metadata: { role } } })
+        ? await call(cfg, `/auth/v1/admin/users/${u.id}`, { method: 'PUT', admin: true, body: body.reset
+          ? { password: cfg.defaultPassword, ban_duration: 'none', user_metadata: { ...meta, must_change_password: true }, app_metadata: { role } }
+          : { user_metadata: meta, app_metadata: { role } } })
         : await call(cfg, '/auth/v1/admin/users', { admin: true, body: { email, password: cfg.defaultPassword, email_confirm: true, user_metadata: { ...meta, full_name: meta.full_name || username, must_change_password: true }, app_metadata: { role } } });
       if (res.ok && !u) { byEmail.set(email, res.data); byUser.set(username, res.data); }
       (res.ok ? (u ? out.updated : out.created) : out.failed).push(res.ok ? `${username} (${r.nick || r.en || email})` : `${username} (${errText(res.data) || res.status})`);
@@ -430,6 +501,11 @@ td{padding:10px 14px;border-bottom:1px solid #edf0f4;vertical-align:middle}tr:la
 <main>
 <div><h1>ผู้ใช้งาน</h1><p class="sub">เข้าระบบในชื่อ ${esc(me.username || me.email)} · บัญชีใหม่และบัญชีที่รีเซ็ตจะใช้รหัสเริ่มต้น และต้องตั้งรหัสใหม่ตอนเข้าครั้งแรก · บัญชีใหม่ยังเข้าเมนูไม่ได้ ติ๊กเมนูที่ให้สิทธิ์ (มีผลทันที)</p></div>
 <div class="cards" id="stats"></div>
+<section class="panel" style="border-color:#f0b9b9"><h2>🔄 รีเซ็ตผู้ใช้ทั้งหมดจาก RAK_Employee</h2>
+<p class="muted">ลบบัญชีทั้งหมด แล้วสร้างใหม่จากรายชื่อพนักงาน · ชื่อผู้ใช้ = ชื่อ EN เต็ม . นามสกุลตัวแรก (ซ้ำ → เพิ่มตัวถัดไปของนามสกุล) · รหัสผ่านครั้งแรกเป็นรหัสเริ่มต้น และบังคับเปลี่ยนตอนเข้าครั้งแรก · บัญชี Super admin ไม่ถูกลบแต่ถูกรีเซ็ตรหัสเหมือนทุกคน · สิทธิ์เมนูเดิมจะหายทั้งหมด</p>
+<div class="row"><span id="srcInfo" class="muted">กำลังตรวจหาตาราง RAK_Employee ใน Supabase…</span></div>
+<div class="row"><button class="btn primary" id="resetAll">ล้างและสร้างผู้ใช้ใหม่ทั้งหมด</button><span class="muted" id="resetNote"></span></div>
+<div id="resetMsg"></div></section>
 <section class="panel"><h2>นำเข้ารายชื่อจาก Excel</h2>
 <p class="muted">ใช้ไฟล์รายชื่อพนักงาน RAK (คอลัมน์ รหัส, ชื่อ, นามสกุล, ชื่อเล่น, ชื่อ (EN), นามสกุล (EN)) · ระบบสร้างชื่อผู้ใช้ = ชื่อ EN เต็ม . นามสกุล EN ตัวแรก ถ้าซ้ำกัน คนที่รหัสพนักงานใหม่กว่าจะได้ตัวอักษรนามสกุลเพิ่ม · ชื่อผู้ใช้ที่แก้เองด้วย ✎ จะไม่ถูกเปลี่ยนตอนนำเข้าซ้ำ · นำเข้าซ้ำได้ บัญชีเดิมจะอัปเดตชื่อโดยไม่เปลี่ยนรหัสผ่าน · บัญชีใหม่ใช้รหัสเริ่มต้นและต้องตั้งรหัสใหม่ตอนเข้าครั้งแรก</p>
 <div class="row"><input type="file" id="file" accept=".xlsx,.xls,.csv"><button class="btn primary" id="doImport" disabled>นำเข้า</button><span class="muted" id="preview"></span></div>
@@ -454,6 +530,26 @@ function menusCell(u){
   if(u.role==="admin")return '<span class="muted">ทุกเมนู (ผู้ดูแล)</span>';
   return '<div class="menus">'+MENUS.map(m=>'<label class="chk"><input type="checkbox" data-u="'+u.id+'" value="'+m.id+'"'+(u.modules.includes(m.id)?" checked":"")+'> '+esc(m.name)+'</label>').join("")+'</div>';
 }
+let EMP_TABLE=null;
+fetch("/admin/api/employees",{cache:"no-store"}).then(r=>r.ok?r.json():null).then(d=>{EMP_TABLE=d;document.getElementById("srcInfo").innerHTML=d?"ใช้ข้อมูลจากตาราง <b>"+esc(d.table)+"</b> ใน Supabase · "+d.count+" แถว":"ไม่พบตาราง RAK_Employee ใน Supabase · เลือกไฟล์ RAK_Employee.xlsx ในกล่อง นำเข้ารายชื่อจาก Excel ด้านล่างก่อน แล้วกดปุ่มนี้";}).catch(()=>{});
+const chunks=(a,n)=>{const o=[];for(let i=0;i<a.length;i+=n)o.push(a.slice(i,i+n));return o;};
+document.getElementById("resetAll").addEventListener("click",async e=>{
+  const m=t=>say(t,0,"resetMsg"),bad=t=>say(t,1,"resetMsg");
+  if(!EMP_TABLE&&!PENDING_ROWS.some(r=>r.first)){bad("ยังไม่มีรายชื่อ · เลือกไฟล์ RAK_Employee.xlsx ด้านล่างก่อน");return;}
+  e.target.disabled=true;m("กำลังเตรียมชื่อผู้ใช้…");
+  const pl=await post("/admin/api/plan",EMP_TABLE?{source:"table"}:{rows:PENDING_ROWS});
+  if(!pl.ok||!pl.d.rows||!pl.d.rows.length){bad("อ่านรายชื่อพนักงานไม่สำเร็จ");e.target.disabled=false;return;}
+  const P=pl.d,others=USERS.filter(u=>!u.superAdmin);
+  const ok=prompt("จะลบบัญชี "+others.length+" บัญชี และสร้างใหม่ "+P.rows.length+" คนจาก "+P.source+(P.extended.length?" (ชื่อซ้ำ: "+P.extended.join(", ")+")":"")+(P.skipped?" · ข้ามคนที่ไม่มีชื่อ EN หรือลาออก "+P.skipped+" แถว":"")+" · รหัสผ่านทุกคนรวมถึงของคุณจะกลับเป็นรหัสเริ่มต้น ย้อนกลับไม่ได้ · พิมพ์ RESET เพื่อยืนยัน");
+  if(ok!=="RESET"){m("ยกเลิกแล้ว");e.target.disabled=false;return;}
+  let del=0,delFail=[];
+  for(const c of chunks(others.map(u=>u.id),20)){m("กำลังลบบัญชีเดิม… "+del+"/"+others.length);const r=await post("/admin/api/delete-many",{ids:c});if(r.ok){del+=r.d.deleted;delFail.push(...r.d.failed);}else delFail.push(c.length+" บัญชี");}
+  let made=0,upd=0,fail=[];
+  for(const c of chunks(P.rows,12)){m("กำลังสร้างผู้ใช้… "+(made+upd)+"/"+P.rows.length);const r=await post("/admin/api/import",{rows:c,reset:true});if(r.ok){made+=r.d.created.length;upd+=r.d.updated.length;fail.push(...r.d.failed);}else fail.push(c.length+" คน (ขัดข้อง)");}
+  const sum="ลบ "+del+" บัญชี · สร้างใหม่ "+made+" · รีเซ็ต "+upd+(P.extended.length?"<br>ชื่อซ้ำ: "+esc(P.extended.join(", ")):"")+(delFail.length||fail.length?"<br>ไม่สำเร็จ: "+esc(delFail.concat(fail).join(", ")):"");
+  say(sum+"<br>รหัสผ่านของคุณถูกรีเซ็ตแล้ว · กำลังออกจากระบบ ให้เข้าใหม่ด้วยชื่อผู้ใช้และรหัสเริ่มต้น แล้วตั้งรหัสใหม่",delFail.length+fail.length>0,"resetMsg");
+  setTimeout(()=>{location.href="/auth/logout";},8000);
+});
 function drawLegacy(){
   const old=USERS.filter(u=>!u.username&&!u.superAdmin),ready=USERS.some(u=>u.username&&!u.superAdmin);
   document.getElementById("legacy").hidden=!old.length;
