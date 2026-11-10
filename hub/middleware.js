@@ -14,6 +14,8 @@
 //   ALLOWED_DOMAIN                   – rak.co.th
 //   SUPER_ADMIN                      – nantana.s@rak.co.th (always admin; cannot be disabled or deleted)
 //   DEFAULT_PASSWORD                 – first-login password for new / reset accounts
+//   SERVICE_PLAN_SHEET_URL, SERVICE_PLAN_TOKEN – optional: Apps Script relay for the Service Plan sheet
+//                                      (scripts/service-plan-sheet.gs). Without them Service Plan shows its snapshot.
 // If a required value is missing the site stays locked (fails closed).
 
 export const config = { matcher: ['/((?!favicon\\.ico).*)'] };
@@ -122,6 +124,7 @@ const MENU_IDS = MENUS.map((m) => m.id);
 function menuOfPath(path) {
   if (path.startsWith('/spare-part/') || path.startsWith('/api/spare-part/')) return 'spare-part';
   if (path.startsWith('/site-expense/')) return 'site-expense';
+  if (path.startsWith('/service-plan/') || path.startsWith('/api/service-plan/')) return 'service-plan';
   const m = path.match(/^\/customers\/[^/]+\/[^/]+\/([^/]+)/);
   if (!m) return null; // not a tool page
   return MENU_IDS.find((id) => m[1].startsWith(id)) || '__admin';
@@ -165,6 +168,27 @@ async function sparePartApi(cfg, req, url, prof) {
   const row = { id: p.id, jo: String(p.jo || ''), customer: String(p.customer || ''), name: String(p.name || ''), status: String(p.status || 'draft'), data: p, updated_by: prof.email, updated_at: now };
   const res = await fetch(cfg.url + SP_TABLE + '?on_conflict=id', { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(row) });
   return res.ok ? json(p) : json({ error: res.status === 404 ? 'no_table' : 'supabase' }, res.status === 404 ? 503 : 502);
+}
+
+// Service Plan reads tab "ใบขอคน 2026" of the sheet "ใบร้องขอคนจากฝ่ายผลิต" live through a Google Apps Script web app
+// (scripts/service-plan-sheet.gs), because the sheet is shared only with RAK accounts. The relay returns columns A–Q;
+// hub/service-plan/app.js keeps only IS/SO/IN/WR rows with status New/Checking/Confirm/Complete.
+let SP_PLAN_CACHE = { at: 0, data: null };
+async function servicePlanApi(env, req, url) {
+  if (url.pathname !== '/api/service-plan/jobs') return json({ error: 'not found' }, 404);
+  if (req.method !== 'GET') return json({ error: 'method' }, 405);
+  const src = String(env.SERVICE_PLAN_SHEET_URL || '').trim(), token = String(env.SERVICE_PLAN_TOKEN || '').trim();
+  if (!/^https:\/\/script\.google\.com\//.test(src) || token.length < 16) return json({ error: 'not_configured' }, 503);
+  if (url.searchParams.get('refresh') !== '1' && SP_PLAN_CACHE.data && Date.now() - SP_PLAN_CACHE.at < 60000) return json(SP_PLAN_CACHE.data);
+  const r = await fetch(src + (src.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token), { redirect: 'follow' });
+  const d = r.ok ? await r.json().catch(() => null) : null;
+  if (!d || !Array.isArray(d.rows)) return json({ error: (d && d.error) || 'sheet' }, 502);
+  const data = {
+    updated: d.updated || new Date().toISOString(), sheet: String(d.sheet || ''), gid: d.gid || null,
+    rows: d.rows.filter((x) => x && Array.isArray(x.v)).map((x) => ({ n: Number(x.n) || 0, v: x.v.slice(0, 17).map((c) => String(c ?? '')) })),
+  };
+  SP_PLAN_CACHE = { at: Date.now(), data };
+  return json(data);
 }
 
 // Site Expense permissions are fixed by username (set by Dew, 9 Nov 2026), not by the admin checkboxes.
@@ -792,6 +816,14 @@ export default async function middleware(req) {
     if (!live) return json({ error: 'login required' }, 401);
     if (!canOpen(live, 'spare-part')) return json({ error: 'no access' }, 403);
     try { return await sparePartApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
+  }
+
+  if (path.startsWith('/api/service-plan/')) {
+    if (!signedIn) return json({ error: 'login required' }, 401);
+    const live = await liveProfile(cfg, user);
+    if (!live) return json({ error: 'login required' }, 401);
+    if (!canOpen(live, 'service-plan')) return json({ error: 'no access' }, 403);
+    try { return await servicePlanApi(env, req, url); } catch { return json({ error: 'sheet' }, 502); }
   }
 
   if (signedIn) {

@@ -208,6 +208,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:#f1f3
 </div>
 <script src="/spare-part/app.js"></script>
 <script src="/site-expense/app.js"></script>
+<script src="/service-plan/app.js"></script>
 <script>
 "use strict";
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -222,8 +223,8 @@ const MODULES = [
      plan:["สร้างรายการอะไหล่จาก P&ID + Aux list + BOM","จุดใช้งานตาม P&ID และข้อมูลผู้ผลิต","Export Excel ตามแบบฟอร์มลูกค้า"]},
   {id:"punch-list",  icon:"i-punch",   name:"Punch List",   th:"ติดตามงานค้างก่อนส่งมอบ",    desc:"บันทึกและติดตาม punch list ระหว่างติดตั้ง จนถึง SAT และปิดงาน",
      plan:["บันทึกรายการพร้อมรูปถ่ายและผู้รับผิดชอบ","สถานะ Open / In progress / Closed","รายงานให้ลูกค้าก่อน SAT","สรุปจำนวนงานค้างรายโปรเจค"]},
-  {id:"service-plan",icon:"i-plan",    name:"Service Plan", th:"แผนงานบริการลูกค้า",         desc:"วางแผนและติดตามงานบริการหลังส่งมอบ เช่น PM ตามรอบ และเข้าซ่อมตามนัด",
-     plan:["แผนบริการรายลูกค้า / รายเครื่อง (PM ตามรอบ)","ปฏิทินนัดเข้าบริการ และทีมที่รับผิดชอบ","แจ้งเตือนก่อนถึงกำหนดเข้าบริการ","บันทึกผลการบริการและรายงานให้ลูกค้า"]},
+  {id:"service-plan",icon:"i-plan",    live:true, name:"Service Plan", th:"แผนงานบริการลูกค้า",         desc:"ปฏิทินงานบริการ IS / SO / IN / WR จากใบร้องขอคน (Google Sheet) · มุมมองรายวัน สัปดาห์ เดือน ปี",
+     plan:["ปฏิทินรายวัน / สัปดาห์ / เดือน / ปี จาก Google Sheet ใบขอคน","กดดูรายละเอียดงาน + ทะเบียนรถ","แจ้งเตือนก่อนถึงกำหนดเข้าบริการ","บันทึกผลการบริการ"]},
 ];
 let REG = {customers:[]};
 let ME = null; // from /auth/me: {email, name, role, modules:[...]} — the server enforces the same rules
@@ -325,11 +326,13 @@ function render(){
   document.title = (id === "home" ? "SSM Work" : m.name + " · SSM Work") + " · RAK Engineering";
   const sp = id === "spare-part" && ME !== null && allowed(id) && window.SparePart;
   const se = id === "site-expense" && ME !== null && allowed(id) && window.SiteExpense;
-  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : sp ? (subRoute() ? "" : hero(m)) + `<div id="spRoot"></div>` : se ? (subRoute() ? "" : hero(m)) + `<div id="seRoot"></div>` : allowed(id) ? pageModule(m) : pageDenied(m))
+  const pl = id === "service-plan" && ME !== null && allowed(id) && window.ServicePlan;
+  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : sp ? (subRoute() ? "" : hero(m)) + `<div id="spRoot"></div>` : se ? (subRoute() ? "" : hero(m)) + `<div id="seRoot"></div>` : pl ? `<div id="plRoot" class="spc-root"></div>` : allowed(id) ? pageModule(m) : pageDenied(m))
     + `<div class="foot"><span>RAK Engineering Co., Ltd. · Site &amp; Service Management</span><span>${REG.updated ? "อัปเดตรายการ " + esc(REG.updated) : ""}</span></div>`;
   renderNav();
   if (sp) window.SparePart.mount(document.getElementById("spRoot"), subRoute());
   if (se) window.SiteExpense.mount(document.getElementById("seRoot"), subRoute());
+  if (pl) window.ServicePlan.mount(document.getElementById("plRoot"), subRoute());
   const q = document.getElementById("q");
   if (q) q.addEventListener("input", () => { document.getElementById("list").innerHTML = customerBlocks(rows(), q.value.trim().toLowerCase()); });
   setMenu(false);
