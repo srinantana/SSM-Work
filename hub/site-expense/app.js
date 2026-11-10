@@ -286,8 +286,8 @@
       });
       const d = tr.querySelector("[data-phdel]");
       if (d) d.onclick = () => {
-        const n = p.lines.filter(l => l.kind === "mp" && l.phase === x.id).length;
-        if (n && !confirm(`ลบ ${x.name || "phase นี้"}? กำลังคน ${n} แถวใน phase นี้จะย้ายไป “ยังไม่ระบุ phase”`)) return;
+        const n = p.lines.filter(l => l.phase === x.id).length;
+        if (n && !confirm(`ลบ ${x.name || "phase นี้"}? ค่าใช้จ่าย ${n} รายการใน phase นี้จะย้ายไป “ทั้งโปรเจค”`)) return;
         p.phases = p.phases.filter(y => y !== x); p.lines.forEach(l => { if (l.phase === x.id) l.phase = ""; }); after();
       };
     });
@@ -309,6 +309,53 @@
       <div class="tbl"><table class="se-mps"><thead><tr><th>Phase</th><th class="c">วัน</th><th class="c">คน</th><th class="c">Man-day</th><th class="r">ค่าแรง</th><th class="r">OT</th><th class="r">เบี้ยเลี้ยง</th><th class="r">รวม</th></tr></thead>
       <tbody>${rows.map(([n, ls, d]) => tr(esc(n), calc(ls), d)).join("")}</tbody>
       <tfoot>${tr("<b>รวมทั้งหมด</b>", Object.assign(all, { ppl: peopleOf(p) }), daysOf(p), true)}</tfoot></table></div>`;
+  }
+
+  const phPeople = (p, id) => p.lines.filter(l => l.kind === "mp" && l.phase === id).reduce((a, l) => a + num(l.qty), 0);
+  // Category total per phase
+  function catSummary(p, code) {
+    const ph = phasesOf(p), known = new Set(ph.map(x => x.id)), ls = p.lines.filter(l => l.cat === code);
+    const sum = f => ls.filter(f).reduce((a, l) => a + amtOf(l), 0);
+    const rows = ph.map((x, i) => [`${i + 1}. ${x.name || "Phase " + (i + 1)}`, phDays(x), sum(l => l.phase === x.id)]);
+    const all = sum(l => !known.has(l.phase)); if (all) rows.push(["ทั้งโปรเจค", null, all]);
+    const T = ls.reduce((a, l) => a + amtOf(l), 0);
+    return `<div class="se-grp-h"><b>📊 สรุปตาม phase</b></div><div class="tbl"><table class="se-mps"><thead><tr><th>Phase</th><th class="c">วัน</th><th class="r">จำนวนเงิน</th><th>สัดส่วน</th></tr></thead>
+      <tbody>${rows.map(([n, d, v]) => `<tr><td>${esc(n)}</td><td class="c">${d == null ? "" : d || "–"}</td><td class="r">${money(v)}</td><td class="se-mt">${T ? `<span class="se-meter"><i style="width:${v / T * 100}%"></i></span><span class="se-pct">${(v / T * 100).toFixed(0)}%</span>` : ""}</td></tr>`).join("")}</tbody>
+      <tfoot><tr><td><b>รวม</b></td><td class="c">${daysOf(p) || ""}</td><td class="r"><b>${money(T)}</b></td><td></td></tr></tfoot></table></div>`;
+  }
+  // Accommodation draft from manpower that stays overnight: twin rooms for pairs, a single for an odd one out,
+  // nights = days − 1 (as in the SC Site Expense app); hotel rate by location. Replaces earlier drafts of that phase.
+  function autoRooms(p, id) {
+    const ph = phasesOf(p).find(x => x.id === id); if (!ph) return;
+    const n = p.lines.filter(l => l.kind === "mp" && l.phase === id && l.overnight).reduce((a, l) => a + num(l.qty), 0);
+    const nights = Math.max(1, (phDays(ph) || 1) - 1);
+    if (!n) return toast(`ยังไม่มีกำลังคนที่ “ค้างคืน” ใน ${ph.name || "phase นี้"} · ติ๊กค้างคืนในหน้า Manpower ก่อน`);
+    const old = p.lines.filter(l => l.kind === "acc" && l.phase === id && l.auto);
+    if (old.length && !confirm(`มีที่พักที่ Auto draft ไว้แล้วใน ${ph.name} · สร้างใหม่แทนของเดิม?`)) return;
+    p.lines = p.lines.filter(l => !old.includes(l));
+    const local = !!p.destination, rate = local ? 700 : 2000, twin = Math.floor(n / 2), single = n % 2;
+    const mk = (label, rooms) => Object.assign(newLine("accommodation", "acc"), { phase: id, auto: true, label, billing: "night", unit_qty: rooms, periods: nights, rate, note: `Auto · ${n} คนค้างคืน` });
+    if (twin) p.lines.push(mk(`Twin Room (${local ? "Hotel ในประเทศ" : "Hotel ต่างประเทศ"})`, twin));
+    if (single) p.lines.push(mk(`Single Room (${local ? "Hotel ในประเทศ" : "Hotel ต่างประเทศ"})`, single));
+    toast(`Auto draft: ${n} คน → ${twin ? twin + " Twin" : ""}${twin && single ? " + " : ""}${single ? single + " Single" : ""} × ${nights} คืน`);
+  }
+  // Working period page: phases + cost of every category per phase
+  function secPeriod(sec, p, redraw, href) {
+    const ed = editable(p), ph = phasesOf(p), known = new Set(ph.map(x => x.id));
+    const cell = (code, f) => p.lines.filter(l => l.cat === code && f(l)).reduce((a, l) => a + amtOf(l), 0);
+    const rows = ph.map((x, i) => [`<span class="se-phn">${i + 1}</span>${esc(x.name || "Phase " + (i + 1))}`, l => l.phase === x.id, phDays(x), phPeople(p, x.id)]);
+    if (p.lines.some(l => !known.has(l.phase))) rows.push([`<span class="se-phn all">∑</span>ทั้งโปรเจค`, l => !known.has(l.phase), null, null]);
+    sec.innerHTML = `
+      <a class="se-back" href="#site-expense/${encodeURIComponent(p.id)}/estimate">${IC.back}สรุป Estimate ทุกหมวด</a>
+      <div class="se-catnav"><a href="${href("period")}" class="on">${IC.cal}<span>Working period</span></a>${CATS.map(x => `<a href="${href(x.code)}">${x.ic}<span>${esc(x.name)}</span></a>`).join("")}</div>
+      <div class="se-sec-h"><h3 class="se-cat-h">${IC.cal}Working period <small>ช่วงทำงานแต่ละ phase · ไม่จำเป็นต้องต่อเนื่องกัน</small></h3>${ed ? `<span class="badge live">แก้ไขได้</span>` : `<span class="badge off">อ่านอย่างเดียว</span>`}</div>
+      ${wpPanel(p, ed, true)}
+      <div class="se-grp"><div class="se-grp-h"><b>💰 ค่าใช้จ่ายแยกตาม phase × หมวด</b><span class="se-hint">กดตัวเลขเพื่อไปกรอกในหมวดนั้น</span></div>
+        <div class="tbl"><table class="se-matrix"><thead><tr><th>Phase</th><th class="c">วัน</th><th class="c">คน</th>${CATS.map(c => `<th class="r">${esc(c.name)}</th>`).join("")}<th class="r">รวม</th></tr></thead>
+        <tbody>${rows.length ? rows.map(([n, f, d, ppl]) => `<tr><td>${n}</td><td class="c">${d == null ? "" : d || "–"}</td><td class="c">${ppl == null ? "" : ppl || "–"}</td>${CATS.map(c => { const v = cell(c.code, f); return `<td class="r"><a class="se-mlink" href="${href(c.code)}">${v ? money(v) : "–"}</a></td>`; }).join("")}<td class="r"><b>${money(CATS.reduce((a, c) => a + cell(c.code, f), 0))}</b></td></tr>`).join("")
+          : `<tr><td colspan="${CATS.length + 4}" class="se-muted c" style="padding:16px">เพิ่ม phase ด้านบนก่อน</td></tr>`}</tbody>
+        <tfoot><tr><td><b>รวม</b></td><td class="c">${daysOf(p) || ""}</td><td class="c">${peopleOf(p) || ""}</td>${CATS.map(c => `<td class="r"><b>${money(cell(c.code, () => true))}</b></td>`).join("")}<td class="r"><b>${money(totalOf(p))}</b></td></tr></tfoot></table></div></div>`;
+    wireWp(sec, p, redraw);
   }
 
   /* ---------- category detail page ---------- */
@@ -335,27 +382,40 @@
         <div class="tbl"><table class="se-dt"><thead><tr><th class="c" style="width:40px">#</th>${g.fields.map(f => `<th class="${f.t === "num" ? "r" : f.t === "check" ? "c" : ""}" ${f.w ? `style="width:${f.w}px"` : ""}>${esc(f.l)}</th>`).join("")}<th class="r" style="width:120px">จำนวนเงิน</th>${ed ? '<th style="width:36px"></th>' : ""}</tr></thead>
         <tbody>${rows.length ? rows.map((l, i) => `<tr data-id="${l.id}"><td class="c se-no">${i + 1}</td>${g.fields.map(f => `<td class="${f.t === "num" ? "r" : f.t === "check" ? "c" : ""}">${cell(l, f)}</td>`).join("")}<td class="r se-amt" data-amt>${money(amtOf(l))}</td>${ed ? `<td><button class="se-x" data-del aria-label="ลบแถว">${IC.x}</button></td>` : ""}</tr>`).join("")
           : `<tr><td colspan="${g.fields.length + (ed ? 3 : 2)}" class="se-muted c" style="padding:16px">ยังไม่มีรายการ</td></tr>`}</tbody></table></div>
-        ${ed ? `<button class="se-btn" data-add="${g.kind}" data-phase="${esc(o.phase || "")}">${IC.plus}เพิ่ม${esc(g.title)}${o.addTo ? " ใน " + esc(o.addTo) : ""}</button>` : ""}</div>`;
+        ${ed && !o.noAdd ? `<button class="se-btn" data-add="${g.kind}" data-phase="${esc(o.phase || "")}">${IC.plus}เพิ่ม${esc(g.title)}${o.addTo ? " ใน " + esc(o.addTo) : ""}</button>` : ""}</div>`;
     };
-    const phases = phasesOf(p), mpByPhase = c.code === "manpower" && phases.length > 0;
-    if (mpByPhase && phases.length === 1) p.lines.forEach(l => { if (l.kind === "mp" && !l.phase) l.phase = phases[0].id; });
+    if (code === "period") return secPeriod(sec, p, redraw, href);
+    const phases = phasesOf(p), byPhase = phases.length > 0;
+    if (phases.length === 1) p.lines.forEach(l => { if (!l.phase) l.phase = phases[0].id; });
     const known = new Set(phases.map(x => x.id));
-    const body = mpByPhase
-      ? `<p class="se-hint" style="margin:0">กำลังคนแยกตาม phase · ${esc(groups[0].hint)}</p>` + phases.map((ph, i) => group(groups[0], { filter: l => l.phase === ph.id, phase: ph.id, addTo: ph.name || `Phase ${i + 1}`, cls: "se-phg", hint: "",
-          title: `<span class="se-phn">${i + 1}</span>${esc(ph.name || "Phase " + (i + 1))} <small class="se-muted">${fmtD(ph.start)} – ${fmtD(ph.end)} · ${phDays(ph) || "–"} วัน</small>` })).join("")
-        + (p.lines.some(l => l.kind === "mp" && !known.has(l.phase)) ? group(groups[0], { filter: l => !known.has(l.phase), title: "ยังไม่ระบุ phase", hint: "รายการเดิมก่อนแบ่ง phase · ลบแล้วเพิ่มใหม่ใน phase ที่ถูกต้อง", cls: "se-phg" }) : "")
-        + `<div class="se-grp" id="mpSum">${mpSummary(p)}</div>`
-      : groups.map(g => group(g)).join("");
+    const inPh = id => l => id ? l.phase === id : !known.has(l.phase);
+    // One section per phase (+ one for costs that belong to the whole project); a kind's table shows once it has rows.
+    const section = (id, i, ph) => {
+      const shown = groups.filter(g => groups.length === 1 || p.lines.some(l => l.cat === c.code && l.kind === g.kind && inPh(id)(l)));
+      const sub = p.lines.filter(l => l.cat === c.code && inPh(id)(l)).reduce((a, l) => a + amtOf(l), 0);
+      const head = ph ? `<span class="se-phn">${i + 1}</span>${esc(ph.name || "Phase " + (i + 1))} <small class="se-muted">${fmtD(ph.start)} – ${fmtD(ph.end)} · ${phDays(ph) || "–"} วัน${c.code !== "manpower" ? ` · ${phPeople(p, id)} คน` : ""}</small>`
+        : `<span class="se-phn all">∑</span>ทั้งโปรเจค <small class="se-muted">ค่าใช้จ่ายที่ไม่ผูกกับ phase ใด เช่น เหมาทั้งงาน ประกัน แพ็คของ</small>`;
+      const tools = c.code === "accommodation" && ed && ph ? `<button class="se-btn auto" data-auto="${id}">✨ Auto draft ที่พัก</button>` : "";
+      return `<div class="se-phsec ${ph ? "" : "all"}" data-sec="${id}"><div class="se-phsec-h"><b>${head}</b><span class="se-grp-t" data-phsub="${id}">${baht(sub)}</span></div>
+        ${shown.map(g => group(g, { filter: inPh(id), phase: id, noAdd: true, cls: groups.length === 1 ? "in-ph solo" : "in-ph" })).join("") || `<p class="se-muted" style="margin:0">ยังไม่มีรายการ</p>`}
+        ${ed ? `<div class="se-actions">${groups.map(g => `<button class="se-btn" data-add="${g.kind}" data-phase="${id}">${IC.plus}${esc(g.title)}</button>`).join("")}${tools}</div>` : ""}</div>`;
+    };
+    const showAll = !byPhase || c.code !== "manpower" || p.lines.some(l => l.cat === c.code && !known.has(l.phase));
+    const body = !byPhase ? groups.map(g => group(g)).join("")
+      : `<p class="se-hint" style="margin:0">${esc(groups.map(g => g.title + ": " + g.hint).join(" · "))}</p>`
+        + phases.map((ph, i) => section(ph.id, i, ph)).join("")
+        + (showAll ? section("", 0, null) : "")
+        + `<div class="se-grp" id="catSum">${c.code === "manpower" ? mpSummary(p) : catSummary(p, c.code)}</div>`;
     const lists = [...new Set(groups.flatMap(g => g.fields.filter(f => f.t === "pick").map(f => f.list)))];
     const acts = p.actuals.filter(a => a.cat === c.code).sort((a, b) => b.date.localeCompare(a.date));
     const STA = { pending: ["รอตรวจ", "s-req"], checked: ["ตรวจแล้ว", "s-ok"], rejected: ["ไม่ผ่าน", "s-rev"] };
     const canAdd = p.status === "locked" && p.list === "active" && can("actual"), canChk = p.list === "active" && can("check");
     sec.innerHTML = `
       <a class="se-back" href="#site-expense/${encodeURIComponent(p.id)}/estimate">${IC.back}สรุป Estimate ทุกหมวด</a>
-      <div class="se-catnav">${CATS.map(x => `<a href="${href(x.code)}" class="${x.code === c.code ? "on" : ""}">${x.ic}<span>${esc(x.name)}</span></a>`).join("")}</div>
+      <div class="se-catnav"><a href="${href("period")}" class="${code === "period" ? "on" : ""}">${IC.cal}<span>Working period</span></a>${CATS.map(x => `<a href="${href(x.code)}" class="${x.code === c.code ? "on" : ""}">${x.ic}<span>${esc(x.name)}</span></a>`).join("")}</div>
       <div class="se-sec-h"><h3 class="se-cat-h">${c.ic}${esc(c.name)} <small>${esc(c.th)}</small></h3>${ed ? `<span class="badge live">แก้ไขได้</span>` : `<span class="badge off">${p.status === "locked" ? "🔒 ล็อกเป็น Budgetary แล้ว" : "อ่านอย่างเดียว"}</span>`}</div>
       <div class="se-kpis">${kpi("Estimate", baht(est))}${kpi("Budget", bud == null ? "—" : baht(bud))}${kpi("Actual", baht(act))}${kpi("คงเหลือ", bud == null ? "—" : baht(bud - act), bud != null && bud - act < 0 ? "over" : "")}</div>
-      ${wpPanel(p, ed, c.code === "manpower" || !phases.length)}
+      ${byPhase ? "" : `<div class="se-alert">ยังไม่ได้แบ่ง Working period · <a href="${href("period")}">กำหนด phase</a> แล้วค่าใช้จ่ายทุกหมวดจะแยกตาม phase ได้</div>`}
       ${lists.map(k => `<datalist id="dl-${k}">${MASTER[k].map(([n, d]) => { const v = typeof d === "function" ? d(p) : d; return `<option value="${esc(n)}">${typeof d === "function" ? (v.rate ? money(v.rate) + " (" + esc(p.destination) + ")" : "ราคาตามจังหวัดปลายทาง") : Object.values(v).filter(x => typeof x === "number").map(money).join(" / ")}</option>`; }).join("")}</datalist>`).join("")}
       ${body}
       <div class="se-cat-tot"><span>รวม Estimate หมวด ${esc(c.name)}</span><b id="seCatTot">${baht(est)}</b></div>
@@ -376,7 +436,8 @@
     const tot = () => {
       sec.querySelector("#seCatTot").textContent = baht(sumByCat(p)[c.code]);
       sec.querySelectorAll(".se-grp[data-gi]").forEach(gEl => { gEl.querySelector(".se-grp-t").textContent = baht(p.lines.filter(GF[+gEl.dataset.gi]).reduce((a, l) => a + amtOf(l), 0)); });
-      const ms = sec.querySelector("#mpSum"); if (ms) ms.innerHTML = mpSummary(p);
+      sec.querySelectorAll("[data-phsub]").forEach(x => { const id = x.dataset.phsub; x.textContent = baht(p.lines.filter(l => l.cat === c.code && (id ? l.phase === id : !known.has(l.phase))).reduce((a, l) => a + amtOf(l), 0)); });
+      const ms = sec.querySelector("#catSum"); if (ms) ms.innerHTML = c.code === "manpower" ? mpSummary(p) : catSummary(p, c.code);
     };
     wireWp(sec, p, redraw);
     sec.querySelectorAll("tr[data-id]").forEach(tr => {
@@ -392,14 +453,17 @@
     });
     sec.querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
       const nl = newLine(c.code, b.dataset.add);
-      if ((nl.kind === "doc" || nl.kind === "air") && peopleOf(p)) nl.qty = peopleOf(p);   // default: whole team
       const ph = phasesOf(p).find(x => x.id === b.dataset.phase);
-      if (nl.kind === "mp") { nl.phase = ph ? ph.id : ""; nl.days = ph ? phDays(ph) || "" : daysOf(p) || ""; nl.days_auto = true; }
-      if (nl.kind === "acc") { const d = daysOf(p); if (d) nl.periods = Math.max(1, d - 1); }
+      nl.phase = ph ? ph.id : "";
+      const team = ph ? phPeople(p, ph.id) : peopleOf(p), days = ph ? phDays(ph) : daysOf(p);
+      if ((nl.kind === "doc" || nl.kind === "air") && team) nl.qty = team;   // default: the team of that phase
+      if (nl.kind === "mp") { nl.days = days || ""; nl.days_auto = true; }
+      if (nl.kind === "acc" && days) nl.periods = Math.max(1, days - 1);
       p.lines.push(nl); save(); redraw();
       const row = document.querySelector(`tr[data-id="${nl.id}"]`), ins = row && row.querySelectorAll("input");
       if (ins && ins.length) ins[0].focus();
     });
+    sec.querySelectorAll("[data-auto]").forEach(b => b.onclick = () => { autoRooms(p, b.dataset.auto); save(); redraw(); });
     const add = sec.querySelector("#cAdd");
     if (add) add.onclick = () => {
       const g = id => sec.querySelector(id).value.trim(), amount = num(g("#cAmt"));
@@ -430,6 +494,13 @@
 .se-cat-tot b{font-size:18px;color:var(--rak)}
 .se-wp summary{cursor:pointer;list-style:none}.se-wp summary::-webkit-details-marker{display:none}.se-wp summary b::after{content:" ▾";color:var(--muted);font-weight:400}.se-wp:not([open]) summary b::after{content:" ▸"}
 .se-wpt{min-width:560px}
+.se-phsec{display:grid;gap:10px;border:1px solid var(--line);border-left:4px solid var(--rak);border-radius:12px;padding:12px 14px;background:#fff}
+.se-phsec.all{border-left-color:#6d7582;background:#fbfbfc}.se-phsec-h{display:flex;align-items:center;gap:10px}.se-phsec-h b{font-size:15px;font-weight:600}.se-phsec-h small{font-weight:400;font-size:12.5px;margin-left:6px}
+.se-grp.in-ph{border:0;padding:0;background:transparent}.se-grp.in-ph.solo>.se-grp-h{display:none}.se-grp.in-ph .se-grp-t{font-size:13px;color:var(--muted)}
+.se-phn.all{background:#6d7582}
+.se-btn.auto{background:#fff7e0;border-color:#f1d38a;color:#7a5410;font-weight:600}
+.se-matrix{min-width:980px}.se-matrix td:first-child{min-width:190px;white-space:nowrap}.se-matrix td,.se-matrix th{font-variant-numeric:tabular-nums}.se-matrix tfoot td{border-top:2px solid var(--line);background:#fafbfc}
+.se-mlink{color:inherit;text-decoration:none}.se-mlink:hover{color:var(--rak);text-decoration:underline}
 .se-phg{border-left:4px solid var(--rak)}.se-phn{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--rak);color:#fff;font-size:12px;margin-right:8px}
 .se-phg .se-grp-h small{font-weight:400;font-size:12.5px;margin-left:6px}
 .se-mps td,.se-mps th{font-variant-numeric:tabular-nums}.se-mps tfoot td{border-top:2px solid var(--line);background:#fafbfc}
@@ -476,7 +547,7 @@
           L1("manpower", "mp", { phase: "ph2", position: "Site Engineer", qty: 1, days: 5, day_rate: 2000, ot_rate: 375, overnight: true }), L1("manpower", "mp", { phase: "ph2", position: "Team Lead", qty: 3, days: 5, day_rate: 2000, ot_rate: 375, overnight: true, note: "PP+ME+EE" }),
           L1("manpower", "mp", { phase: "ph3", position: "Site Engineer", qty: 1, days: 30, day_rate: 2000, ot_rate: 375, overnight: true }), L1("manpower", "mp", { phase: "ph3", position: "Team Lead", qty: 3, days: 30, day_rate: 2000, ot_rate: 375, overnight: true, note: "PP+ME+EE" }),
           L1("manpower", "mp", { phase: "ph3", position: "Technician", qty: 8, days: 30, day_rate: 1000, ot_rate: 187.5, overnight: true, note: "PP+ME+EE" }), L1("manpower", "mp", { phase: "ph3", position: "Engineer", qty: 1, days: 10, day_rate: 2000, ot_rate: 375, overnight: true, note: "If needed", days_auto: false }),
-          L1("transportation", "veh", { description: "รถ 10 ล้อ เฮี๊ยบติดเครน", vehicles_qty: 2, trips: 5, rate: 8500 }), L1("transportation", "veh", { description: "รถเครน 25 ตัน", vehicles_qty: 1, trips: 4, rate: 9000, signal_crew: 2, signal_rate: 4500 }),
+          L1("transportation", "veh", { phase: "ph3", description: "รถ 10 ล้อ เฮี๊ยบติดเครน", vehicles_qty: 2, trips: 5, rate: 8500 }), L1("transportation", "veh", { phase: "ph3", description: "รถเครน 25 ตัน", vehicles_qty: 1, trips: 4, rate: 9000, signal_crew: 2, signal_rate: 4500 }),
           L1("accommodation", "acc", { label: "Hotel Rental", unit_qty: 2, periods: 10, rate: 2000 }), L1("accommodation", "acc", { label: "House rental (Airbnb)", billing: "month", unit_qty: 1, periods: 1, rate: 200000 })],
         history: [{ at: new Date().toISOString(), role: "sc", by: "อาร์ต", action: "submit", note: "" }, { at: new Date().toISOString(), role: "ssm", by: "ดิว", action: "approve", note: "" }, { at: new Date().toISOString(), role: "md", by: "บี", action: "approve", note: "" }, { at: new Date().toISOString(), role: "ssm", by: "ดิว", action: "award", note: "Job 03302026" }],
         actuals: [
@@ -643,7 +714,7 @@
     { id: "actual", no: "3", name: "Actual record", th: "บันทึกค่าใช้จ่ายจริงจากหน้างาน", ic: "🧾" },
   ];
   function project(el, p, secId, catCode) {
-    const isCat = secId === "cat" && CATS.some(c => c.code === catCode);
+    const isCat = secId === "cat" && (catCode === "period" || CATS.some(c => c.code === catCode));
     const cur = isCat ? SECS[1] : SECS.find(s => s.id === secId) || SECS[0];
     const st = STATUS[p.status];
     const href = s => `#site-expense/${encodeURIComponent(p.id)}${s === "dashboard" ? "" : "/" + s}`;
@@ -798,7 +869,7 @@
       ${p.status === "revise" ? `<div class="se-alert">↩ ถูกส่งกลับให้แก้: ${esc((p.history.filter(h => h.action === "back").pop() || {}).note || "-")}</div>` : ""}
       <div class="tbl"><table class="se-estcat"><thead><tr><th>หมวดค่าใช้จ่าย</th><th>รายละเอียด</th><th class="c">รายการ</th><th class="r">Estimate</th><th></th></tr></thead>
         <tbody>${CATS.map(c => { const ls = p.lines.filter(l => l.cat === c.code), b = ls.map(l => KIND[l.kind] ? KIND[l.kind].brief(l) : "").filter(Boolean); return `<tr class="se-click" data-go="${c.code}" tabindex="0" title="${ed ? "กรอก" : "ดู"}รายละเอียด ${esc(c.name)}"><td>${catCell(c)}</td><td class="se-brief">${b.length ? esc(b.slice(0, 3).join(" · ")) + (b.length > 3 ? ` · +${b.length - 3}` : "") : "–"}</td><td class="c">${ls.length || "–"}</td><td class="r"><b>${by[c.code] ? money(by[c.code]) : "–"}</b></td><td class="r"><span class="se-go">${ed ? "กรอกรายละเอียด" : "ดูรายละเอียด"} →</span></td></tr>`; }).join("")}</tbody>
-        <tfoot><tr><td colspan="3"><b>รวมประเมิน</b></td><td class="r"><b>${money(totalOf(p))}</b></td><td></td></tr></tfoot></table></div>
+        <tfoot>${phasesOf(p).length > 1 ? `<tr><td colspan="5" class="se-muted" style="font-size:12.5px">ตาม phase: ${phasesOf(p).map((x, i) => `${esc(x.name || "Phase " + (i + 1))} ${baht(p.lines.filter(l => l.phase === x.id).reduce((a, l) => a + amtOf(l), 0))}`).join(" · ")} · <a href="#site-expense/${encodeURIComponent(p.id)}/cat/period">ดูทั้งหมด →</a></td></tr>` : ""}<tr><td colspan="3"><b>รวมประเมิน</b></td><td class="r"><b>${money(totalOf(p))}</b></td><td></td></tr></tfoot></table></div>
       ${ed ? `<p class="se-hint">กดที่หมวดเพื่อกรอกรายละเอียด (ตำแหน่ง ค่าแรง OT ที่พัก ตั๋ว รถ ฯลฯ) ระบบคำนวณยอดให้ตามสูตรเดียวกับ SC Site Expense</p>` : ""}
       <div class="se-approve">
         <div class="se-actions">${actions.join("")}${waitMsg}</div>
@@ -942,6 +1013,7 @@ td.neg,.neg{color:var(--rak);font-weight:600}
     document.querySelectorAll(".se-modal").forEach(m => m.remove());
     if (!DB) {
       DB = load();
+      DB.projects.forEach(p => { const ph = phasesOf(p); if (ph.length === 1) p.lines.forEach(l => { if (!l.phase) l.phase = ph[0].id; }); });
       const signed = PEOPLE.find(x => x[2] === ((window.SSM_ME || {}).username || ""));
       if (signed && !DB.picked) DB.user = signed[0]; // start as the signed-in person until someone switches in the test bar
     }
