@@ -3,3 +3,7 @@ node_modules/
 .env*
 !.env.example
 *.tsbuildinfo
+
+# Manpower import output (staff names / leave records) — never commit
+manpower-seed*
+*.sql.local
