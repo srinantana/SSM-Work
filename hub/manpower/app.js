@@ -186,7 +186,6 @@
     const id = w.id + "|" + key(d), rq = DATA.RQ.get(id);
     if (!rq) return h;
     const pend = rq.filter(x => x.status === "pending");
-    if (pend.length && dayOff(key(d), d) && !DATA.A.has(id)) return h;
     const tip = rq.map(x => `${x.req_no} ${x.label} (${x.status === "pending" ? (x.mode === "swap" ? "ขอสลับ · รอ PC" : "รอ PC") : "Confirm"})`).join(", ");
     const flag = `<b class="mp-rq${pend.length ? "" : " ok"}" title="${esc("คำขอคน: " + tip)}">${pend.length ? "ขอ" : "✓"}</b>`;
     if (!h.includes(" data-k=")) h = h.replace("<td ", `<td data-k="${esc(id)}" `);
@@ -265,7 +264,7 @@
     }
     if (sv.length) body += `<div class="mp-svd"><h4><b class="mp-sp in">SP</b> Confirm จาก Service Plan</h4>${sv.map(j => `<dl class="mp-dl"><dt>Job no.</dt><dd>${esc(j.job)} · ${esc(j.type)}</dd><dt>ลูกค้า</dt><dd>${esc(j.customer)}</dd><dt>งาน</dt><dd>${esc(j.desc.split("\n")[0])}</dd><dt>สถานะ</dt><dd>${esc(j.status)}</dd></dl>`).join("")}<p class="mp-ro">ข้อมูลมาจากใบขอคนอัตโนมัติ แก้ที่ Service Plan / ใบขอคน${(a && a.project_code !== "SERVICE") ? " · ⚠ วันนี้มีงานอื่นลงไว้แล้ว ตรวจสอบว่าคนนี้ไปงานไหน" : ""}</p></div>`;
     const rq = DATA.RQ.get(k) || [];
-    if (rq.length) body += `<div class="mp-svd"><h4><b class="mp-rq in">ขอ</b> คำขอคนจาก Service Plan</h4>${rq.map(q => `<div class="mp-rqr"><span><b>${esc(q.req_no)}</b> ${esc(q.label)} · <b class="${q.status === "pending" ? "w" : "c"}">${q.status === "pending" ? (q.mode === "swap" ? "ขอสลับคน · รอ PC" : "รอ PC Confirm") : "Confirm แล้ว"}</b></span><button type="button" class="mp-ok" data-rq="${q.rid}">${q.status === "pending" && DATA.canApprove ? "เปิดคำขอ · Confirm / Reject" : "เปิดคำขอ"}</button></div>`).join("")}<p class="mp-ro">สถานะเดียวกับเมนู Service Plan · Confirm / Reject ได้เฉพาะกอล์ฟและโจ้</p></div>`;
+    if (rq.length) body += `<div class="mp-svd"><h4><b class="mp-rq in">ขอ</b> คำขอคนจาก Service Plan</h4>${rq.map(q => `<div class="mp-rqr"><span><b>${esc(q.req_no)}</b> ${esc(q.label)} · <b class="${q.status === "pending" ? "w" : "c"}">${q.status === "pending" ? (q.mode === "swap" ? "ขอสลับคน · รอ PC" : "รอ PC Confirm") : "Confirm แล้ว"}</b></span><button type="button" class="mp-ok" data-rq="${q.rid}">${q.status === "pending" && DATA.canApprove ? "เปิดคำขอ · Confirm / Reject" : "เปิดคำขอ"}</button></div>`).join("")}<p class="mp-ro">สถานะเดียวกับเมนู Service Plan · Confirm / Reject: ดิว กอล์ฟ (ทุกคน) · โจ้ (เฉพาะช่างไฟฟ้า)</p></div>`;
     const form = DATA.canEdit ? editForms({ ids: [wid], from: day, to: day, a, x }) : "";
     const el = document.createElement("div");
     el.className = "mp-modal";

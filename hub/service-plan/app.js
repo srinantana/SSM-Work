@@ -156,7 +156,7 @@
         ? `<span class="spc-src snap">● ข้อมูลสำรอง</span> ณ ${esc(META.updated ? META.updated.toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) : "–")}${META.why ? " · " + esc(META.why) : ""}`
         : `<span class="spc-src snap">● โหลดข้อมูลไม่สำเร็จ</span>`;
     const nq = window.SPRequest ? window.SPRequest.pending() : 0;
-    return `<div class="spc-bar spc-rq"><b>ขอคน <small>ทดลองใช้</small></b><button type="button" class="spc-btn pri" id="spcNew">+ ขอคน</button><a class="spc-btn" href="#service-plan/req">คำขอคน / Confirm${nq ? ` <i>${nq}</i>` : ""}</a><span>กรอกคำขอ เลือกคนจากแผน Manpower แล้วรอ PC (กอล์ฟ / โจ้) Confirm</span></div>
+    return `<div class="spc-bar spc-rq"><b>ขอคน <small>ทดลองใช้</small></b><button type="button" class="spc-btn pri" id="spcNew">+ ขอคน</button><a class="spc-btn" href="#service-plan/req">คำขอคน / Confirm${nq ? ` <i>${nq}</i>` : ""}</a><span>กรอกคำขอ เลือกคนจากแผน Manpower แล้วรอ Confirm (กอล์ฟ · โจ้ สำหรับช่างไฟฟ้า)</span></div>
     <div class="spc-bar">
       <div class="spc-nav"><a class="spc-btn" href="${href(S.view, step(-1))}" aria-label="ก่อนหน้า">‹</a><a class="spc-btn" href="${href(S.view, today())}">วันนี้</a><a class="spc-btn" href="${href(S.view, step(1))}" aria-label="ถัดไป">›</a><h2>${esc(title())}</h2></div>
       <div class="spc-views" role="tablist">${VIEWS.map(([v, t]) => `<a role="tab" aria-selected="${v === S.view}" href="${href(v, S.date)}">${t}</a>`).join("")}</div>

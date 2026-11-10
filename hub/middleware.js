@@ -653,23 +653,50 @@ async function manpowerApi(cfg, req, url, prof) {
 }
 
 // ---------- Service Plan · ขอคน (manpower requests, trial — set by Dew, 10 Nov 2026) ----------
-// Anyone who can open Service Plan or Manpower asks for people in the app (the requester is the signed-in user):
+// The people listed in SPR_REQUEST ask for people in the app (the requester is the signed-in user):
 // type IS/SO/IN/WR/IJ/JO, customer, job name, date range, vehicle, people. Availability is read from the Manpower plan:
 //   f free · h held by a "จอง" booking · b busy (confirmed work, or a confirmed ใบขอคน job) · a asked by another pending
-//   request · o off (Sunday, company holiday, the person's day off / leave)
+//   request · o off (the person's leave only — Service may ask for all 7 days)
 // A person who is free is asked for directly ("book"); a person with h / b days is a swap request ("swap", a reason is
-// required when confirmed work is hit). Only กอล์ฟ and โจ้ confirm or reject — from Service Plan or from Manpower, the
-// status is the same row (sp_request_people.status). Confirm writes the person's working days in the range into
+// required when confirmed work is hit). ดิว / กอล์ฟ (everyone) and โจ้ (EE) confirm or reject — from Service Plan or Manpower, the
+// status is the same row (sp_request_people.status). Confirm writes every day of the range (minus leave) into
 // mp_assignments (work_type service, source 'sp', not tentative) and replaces what was planned there (kept in mp_change_log).
 // Tables: database/service_plan_requests.sql. API under /api/service-plan/req/ (list, avail, create, decide, cancel).
 const SPR_TYPES = ['IS', 'SO', 'IN', 'WR', 'IJ', 'JO'];
-const SPR_APPROVE = { usernames: ['kitisak.s'], namesTh: ['กิติศักดิ์ สุ่นศักดิ์สวัสดิ์'], nicknames: ['กอล์ฟ', 'โจ้'] };
-async function sprCanApprove(cfg, prof) {
-  if (SPR_APPROVE.usernames.includes(String(prof.username || '').toLowerCase()) || SPR_APPROVE.namesTh.includes(thKey(prof.nameTh))) return true;
-  const th = thKey(prof.nameTh);
-  if (!th) return false;
-  const r = await call(cfg, `/rest/v1/mp_workers?select=nickname&name_th=eq.${encodeURIComponent(th)}`, { method: 'GET', admin: true }).catch(() => null);
-  return !!(r && r.ok && Array.isArray(r.data) && r.data.some((w) => String(w.nickname || '').split(/[\/,]/).some((n) => SPR_APPROVE.nicknames.includes(n.trim()))));
+// Rights (set by Dew, 10 Nov 2026 22:45):
+//   Confirm / Reject — ดิว (SSM) and กอล์ฟ: everyone · โจ้ (เจนรบ แก้วกระแสร์): electricians (unit EE) only
+//   ขอคน (create)    — ดิว อิ๋ม ปุ๋ม หนุ่ม สปาย อาร์ต แพรวา ไอซ์ ซี กอล์ฟ โจ้
+// Matched by username, Thai full name, Thai first name (เจนรบ) or — for people whose full name is not known here yet
+// (อิ๋ม ปุ๋ม แพรวา) — the nickname in RAK_Employee (by employee code, else Thai name) / mp_workers.
+// Requests may cover all 7 days: Sundays, company holidays and a person's weekly day off stay selectable; only leave blocks.
+const SPR_APPROVE_ALL = { usernames: ['nantana.s', 'kitisak.s'], namesTh: ['นันทนา ศรีสกุลเตียว', 'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์'] };
+const SPR_APPROVE_EE = { firstTh: ['เจนรบ'] };
+const SPR_REQUEST = {
+  usernames: ['nantana.s', 'teedanai.h', 'prakaikaew.p', 'sakkamon.c', 'pichayut.k', 'napat.t', 'kitisak.s'],
+  namesTh: ['นันทนา ศรีสกุลเตียว', 'ธีร์ดนัย ฮุยสูงเนิน', 'ประกายแก้ว ปัญญา', 'ศักดิ์กมล จันทริมา', 'พิชญ์ยุทธ คงดิศ', 'นภัท ทองอำไพ', 'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์'],
+  firstTh: ['เจนรบ'], nicknames: ['อิ๋ม', 'ปุ๋ม', 'แพรวา'],
+};
+const SPR_DAYOFF = ['H', 'PH', 'EX', 'สลับวันหยุด']; // not leave: still bookable
+const sprFirst = (prof) => thKey(prof.nameTh).split(' ')[0];
+let SPR_EMP = { at: 0, rows: null };
+async function sprNicks(cfg, prof) {
+  const th = thKey(prof.nameTh), out = [];
+  if (Date.now() - SPR_EMP.at > 300000) { const e = await readEmployeeTable(cfg).catch(() => null); SPR_EMP = { at: Date.now(), rows: e ? e.rows : [] }; }
+  const code = String(prof.code || '').toUpperCase();
+  const row = (code && SPR_EMP.rows.find((r) => String(r.code).toUpperCase() === code)) || (th && SPR_EMP.rows.find((r) => thKey(r.th) === th));
+  if (row && row.nick) out.push(row.nick);
+  if (th) { const r = await call(cfg, `/rest/v1/mp_workers?select=nickname&name_th=eq.${encodeURIComponent(th)}`, { method: 'GET', admin: true }).catch(() => null); if (r && r.ok && Array.isArray(r.data)) r.data.forEach((w) => out.push(w.nickname || '')); }
+  return out.join('/').split(/[\/,]/).map((n) => n.trim()).filter(Boolean);
+}
+// → 'all' | ['EE'] | null
+async function sprScope(cfg, prof) {
+  if (SPR_APPROVE_ALL.usernames.includes(String(prof.username || '').toLowerCase()) || SPR_APPROVE_ALL.namesTh.includes(thKey(prof.nameTh))) return 'all';
+  return SPR_APPROVE_EE.firstTh.includes(sprFirst(prof)) ? ['EE'] : null;
+}
+const sprCanApprove = async (cfg, prof) => !!(await sprScope(cfg, prof));
+async function sprCanRequest(cfg, prof) {
+  if (SPR_REQUEST.usernames.includes(String(prof.username || '').toLowerCase()) || SPR_REQUEST.namesTh.includes(thKey(prof.nameTh)) || SPR_REQUEST.firstTh.includes(sprFirst(prof))) return true;
+  return (await sprNicks(cfg, prof)).some((n) => SPR_REQUEST.nicknames.includes(n));
 }
 const sprNo = (r) => { const d = new Date(r.created_at || Date.now()); return `SPR-${String(d.getUTCFullYear()).slice(2)}${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(r.id).padStart(4, '0')}`; };
 const sprLabel = (r) => [r.type, r.customer, r.job_name].filter(Boolean).join(' · ');
@@ -700,16 +727,16 @@ async function sprAvail(cfg, from, to, exclude) {
   for (const a of asg || []) put(a.worker_id + '|' + a.day, a.tentative ? 'h' : 'b', a.text);
   const spRow = sp && sp.ok && Array.isArray(sp.data) ? sp.data[0] : null;
   for (const s of serviceOverlay(spRow && spRow.data, workers, from, to).service) put(s.worker_id + '|' + s.day, 'b', ['ใบขอคน', s.type, s.customer, s.job].filter(Boolean).join(' '));
-  for (const x of abs || []) cell.set(x.worker_id + '|' + x.day, ['o', x.type]);
+  const own = new Map(); // the person's weekly day off / holiday: noted, still bookable
+  for (const x of abs || []) { if (SPR_DAYOFF.includes(x.type)) own.set(x.worker_id + '|' + x.day, 'วันหยุดของช่าง (' + x.type + ')'); else cell.set(x.worker_id + '|' + x.day, ['o', x.type]); }
   const off = days.map((d) => H.has(d) ? H.get(d) : new Date(d + 'T00:00:00Z').getUTCDay() === 0 ? 'วันอาทิตย์' : '');
   const out = workers.map((w) => {
     let c = ''; const t = {};
     days.forEach((d, i) => {
       const v = cell.get(w.id + '|' + d);
       if (v && v[0] === 'o') { c += 'o'; t[i] = v[1]; }
-      else if (off[i] && (!v || v[0] === 'a')) { c += 'o'; t[i] = off[i]; }
       else if (v) { c += v[0]; t[i] = v[1]; }
-      else c += 'f';
+      else { c += 'f'; const n = own.get(w.id + '|' + d) || off[i]; if (n) t[i] = n; }
     });
     return { id: w.id, name: w.name_th, nick: w.nickname || '', unit: w.unit, trade: w.trade || '', c, t };
   });
@@ -719,13 +746,14 @@ async function sprList(cfg, prof) {
   const reqs = await call(cfg, '/rest/v1/sp_requests?select=*&order=id.desc&limit=400', { method: 'GET', admin: true });
   if (!reqs.ok) return json({ error: 'no_table' }, 503);
   const ids = reqs.data.map((r) => r.id);
-  const [people, workers, projects, sp, canApprove] = await Promise.all([
+  const [people, workers, projects, sp, scope] = await Promise.all([
     ids.length ? restAll(cfg, `/rest/v1/sp_request_people?select=*&request_id=in.(${ids.join(',')})&order=id.asc`) : [],
     restAll(cfg, '/rest/v1/mp_workers?select=id,name_th,nickname,unit'),
     restAll(cfg, '/rest/v1/mp_projects?select=customer'),
     call(cfg, SPL_TABLE + '?select=data&id=eq.main', { method: 'GET', admin: true }).catch(() => null),
-    sprCanApprove(cfg, prof),
+    sprScope(cfg, prof),
   ]);
+  const canRequest = await sprCanRequest(cfg, prof).catch(() => false);
   const W = new Map((workers || []).map((w) => [w.id, w]));
   const by = new Map();
   for (const p of people || []) { const w = W.get(p.worker_id) || {}; if (!by.has(p.request_id)) by.set(p.request_id, []); by.get(p.request_id).push({ ...p, name: w.name_th || p.worker_id, nick: w.nickname || '', unit: w.unit || '' }); }
@@ -735,10 +763,11 @@ async function sprList(cfg, prof) {
   for (const r of reqs.data) { const k = String(r.vehicle || '').trim(); if (k) cnt.set(k, (cnt.get(k) || 0) + 1); }
   const vehicles = [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 40).map((x) => x[0]);
   const customers = [...new Set((projects || []).map((p) => p.customer).concat(reqs.data.map((r) => r.customer)).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th'));
-  return json({ me: { username: prof.username || prof.email, name: prof.nameTh || prof.name }, canApprove, vehicles, customers,
+  return json({ me: { username: prof.username || prof.email, name: prof.nameTh || prof.name }, canApprove: !!scope, approveUnits: scope === 'all' ? null : scope, canRequest, vehicles, customers,
     requests: reqs.data.map((r) => ({ ...r, req_no: sprNo(r), people: by.get(r.id) || [] })) });
 }
 async function sprCreate(cfg, req, prof) {
+  if (!(await sprCanRequest(cfg, prof))) return json({ error: 'บัญชีนี้ยังไม่มีสิทธิ์ขอคน ติดต่อดิว (SSM)' }, 403);
   const d = await mpBody(req);
   if (!d) return json({ error: 'json' }, 400);
   const type = String(d.type || '').toUpperCase(), customer = mpStr(d.customer, 120), job = mpStr(d.job_name, 160);
@@ -754,7 +783,7 @@ async function sprCreate(cfg, req, prof) {
     if (seen.has(p.id)) continue; seen.add(p.id);
     const w = A.get(p.id);
     if (!w) return json({ error: 'ไม่พบรายชื่อ ' + p.id }, 404);
-    if (!/[^o]/.test(w.c)) return json({ error: `${w.nick || w.name} ลา / หยุดตลอดช่วงที่ขอ เลือกคนอื่น` }, 409);
+    if (!/[^o]/.test(w.c)) return json({ error: `${w.nick || w.name} ลาตลอดช่วงที่ขอ เลือกคนอื่น` }, 409);
     const conflicts = [];
     av.days.forEach((day, i) => { if ('hba'.includes(w.c[i])) conflicts.push({ day, s: w.c[i], t: String(w.t[i] || '').slice(0, 160) }); });
     const busy = /b/.test(w.c), swap = /[hb]/.test(w.c);
@@ -786,7 +815,8 @@ async function sprProject(cfg, customer, job, jobNo) {
 }
 // POST /api/service-plan/req/decide {ids:[sp_request_people.id], action:'confirm'|'reject', note} — กอล์ฟ / โจ้ only
 async function sprDecide(cfg, req, prof) {
-  if (!(await sprCanApprove(cfg, prof))) return json({ error: 'Confirm / Reject ได้เฉพาะกอล์ฟและโจ้' }, 403);
+  const scope = await sprScope(cfg, prof);
+  if (!scope) return json({ error: 'Confirm / Reject ได้เฉพาะดิว กอล์ฟ และโจ้ (ช่างไฟฟ้า)' }, 403);
   const d = await mpBody(req);
   const ids = [...new Set((Array.isArray(d && d.ids) ? d.ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 60);
   const action = d && d.action, note = mpStr(d && d.note, 300);
@@ -794,6 +824,11 @@ async function sprDecide(cfg, req, prof) {
   const people = await restAll(cfg, `/rest/v1/sp_request_people?select=*&id=in.(${ids.join(',')})&status=eq.pending`);
   if (!people) return json({ error: 'no_table' }, 503);
   if (!people.length) return json({ error: 'รายการนี้ถูกตัดสินไปแล้ว รีเฟรชหน้า' }, 409);
+  if (scope !== 'all') {
+    const ws = await restAll(cfg, `/rest/v1/mp_workers?select=id,unit&id=in.(${[...new Set(people.map((p) => p.worker_id))].map(encodeURIComponent).join(',')})`);
+    const U = new Map((ws || []).map((w) => [w.id, w.unit]));
+    if (people.some((p) => !scope.includes(U.get(p.worker_id)))) return json({ error: 'โจ้ Confirm / Reject ได้เฉพาะช่างไฟฟ้า (EE)' }, 403);
+  }
   const reqs = await restAll(cfg, `/rest/v1/sp_requests?select=*&id=in.(${[...new Set(people.map((p) => p.request_id))].join(',')})&cancelled=is.false`);
   const R = new Map((reqs || []).map((r) => [r.id, r]));
   const who = prof.username || prof.email, now = new Date().toISOString(), H = { ...authHeaders(cfg.service), prefer: 'return=minimal' };
@@ -804,7 +839,10 @@ async function sprDecide(cfg, req, prof) {
     if (action === 'confirm') {
       const code = await sprProject(cfg, r.customer, r.job_name, r.job_no);
       if (!code) return json({ error: 'supabase' }, 502);
-      const days = (await mpWorkDays(cfg, [p.worker_id], r.date_from, r.date_to, true, null)).get(p.worker_id) || [];
+      // all 7 days of the range, minus the person's leave days
+      const lv = await restAll(cfg, `/rest/v1/mp_absences?select=day,type&worker_id=eq.${encodeURIComponent(p.worker_id)}&day=gte.${r.date_from}&day=lte.${r.date_to}`);
+      const out = new Set((lv || []).filter((x) => !SPR_DAYOFF.includes(x.type)).map((x) => x.day));
+      const days = mpDays(r.date_from, r.date_to).filter((x) => !out.has(x));
       const one = days.length ? days : mpDays(r.date_from, r.date_to).slice(0, 1);
       const old = await restAll(cfg, `/rest/v1/mp_assignments?select=worker_id,day,project_code,text,tentative,work_type&worker_id=eq.${encodeURIComponent(p.worker_id)}&day=in.(${one.join(',')})`);
       replaced.push(...(old || []));
@@ -946,7 +984,7 @@ function profileOf(cfg, user) {
   const meta = user.user_metadata || {};
   const role = email === cfg.superAdmin ? 'admin' : (user.app_metadata && user.app_metadata.role) === 'admin' ? 'admin' : 'user';
   const mods = user.app_metadata && user.app_metadata.modules;
-  return { id: user.id, email, username: String(meta.username || ''), name: meta.full_name || meta.username || email.split('@')[0], nameTh: String(meta.name_th || ''), role, modules: Array.isArray(mods) ? mods : null, mustChange: meta.must_change_password === true };
+  return { id: user.id, email, username: String(meta.username || ''), name: meta.full_name || meta.username || email.split('@')[0], nameTh: String(meta.name_th || ''), code: String(meta.employee_code || ''), role, modules: Array.isArray(mods) ? mods : null, mustChange: meta.must_change_password === true };
 }
 
 async function startSession(cfg, prof, next) {

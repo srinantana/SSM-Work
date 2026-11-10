@@ -2,7 +2,8 @@
    window.SPRequest: load(force) · page(el, onChange) · openList(onChange) · open(id, onChange) · form(onChange)
    API /api/service-plan/req/{list,avail,create,decide,cancel} (hub/middleware.js). The requester is the signed-in user.
    Availability comes from the Manpower plan: f ว่าง · a มีคำขออื่นรอ PC · h ติดจอง · b มีงานยืนยันแล้ว · o ลา / วันหยุด.
-   Only กอล์ฟ and โจ้ get the Confirm / Reject buttons (canApprove from the API); the status is the same in both menus. */
+   Confirm / Reject: ดิว and กอล์ฟ for everyone, โจ้ for unit EE only (canApprove + approveUnits from the API); ขอคน only
+   for the people the API allows (canRequest). Sundays / holidays are bookable (7 days); only leave blocks a day. */
 (function () {
   "use strict";
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -11,7 +12,7 @@
   const MS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
   const DS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
   const PST = { pending: ["รอ PC", "p"], confirmed: ["Confirm", "c"], rejected: ["ไม่อนุมัติ", "r"], cancelled: ["ยกเลิก", "x"] };
-  const AV = { f: "ว่าง", a: "มีคำขออื่นรอ PC", h: "ติดจอง", b: "มีงานยืนยันแล้ว", o: "ลา / วันหยุด" };
+  const AV = { f: "ว่าง", a: "มีคำขออื่นรอ PC", h: "ติดจอง", b: "มีงานยืนยันแล้ว", o: "ลา" };
   const dt = k => new Date(k + "T00:00:00");
   const iso = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   const addD = (k, n) => { const d = dt(k); d.setDate(d.getDate() + n); return iso(d); };
@@ -69,9 +70,9 @@
     const rows = sets[f] || [];
     const tab = (k, t) => `<button type="button" data-f="${k}" class="${f === k ? "on" : ""}">${t} <b>${sets[k].length}</b></button>`;
     return `<div class="spr-top"><div class="spr-tabs">${tab("wait", "รอ Confirm")}${tab("mine", "คำขอของฉัน")}${tab("all", "ทั้งหมด")}</div>
-      <button type="button" class="spr-btn pri" data-new>+ ขอคน</button></div>
-      <p class="spr-hint">${L.canApprove ? "คุณมีสิทธิ์ <b>Confirm / Reject</b> คำขอ (กอล์ฟ / โจ้)" : "ส่งคำขอแล้วรอ PC (กอล์ฟ / โจ้) Confirm · ผู้ขอ = ชื่อที่ login: <b>" + esc(L.me.name) + "</b>"}</p>
-      ${rows.length ? `<div class="spr-list">${rows.map(card).join("")}</div>` : `<div class="spr-empty">${f === "wait" ? "ไม่มีคำขอรอ Confirm" : f === "mine" ? "ยังไม่มีคำขอของคุณ กด “+ ขอคน”" : "ยังไม่มีคำขอ"}</div>`}`;
+      ${L.canRequest ? `<button type="button" class="spr-btn pri" data-new>+ ขอคน</button>` : ""}</div>
+      <p class="spr-hint">${L.canApprove ? "คุณมีสิทธิ์ <b>Confirm / Reject</b> คำขอ" + (L.approveUnits ? " เฉพาะช่างไฟฟ้า (" + L.approveUnits.join(", ") + ")" : " ทุกคน") : L.canRequest ? "ส่งคำขอแล้วรอ Confirm (กอล์ฟ · โจ้ สำหรับช่างไฟฟ้า) · ผู้ขอ = ชื่อที่ login: <b>" + esc(L.me.name) + "</b>" : "บัญชีนี้ดูคำขอได้อย่างเดียว (ยังไม่มีสิทธิ์ขอคน)"}</p>
+      ${rows.length ? `<div class="spr-list">${rows.map(card).join("")}</div>` : `<div class="spr-empty">${f === "wait" ? "ไม่มีคำขอรอ Confirm" : f === "mine" ? "ยังไม่มีคำขอของคุณ" : "ยังไม่มีคำขอ"}</div>`}`;
   }
   function card(r) {
     const [t, c] = status(r), sw = r.people.some(p => p.mode === "swap" && p.status === "pending");
@@ -111,7 +112,8 @@
     const m = modal("", true);
     const draw = msg => {
       r = L.requests.find(x => x.id === id) || r;
-      const [t, c] = status(r), pend = r.people.filter(p => p.status === "pending"), can = L.canApprove && !r.cancelled;
+      const inScope = p => !L.approveUnits || L.approveUnits.includes(p.unit);
+      const [t, c] = status(r), allPend = r.people.filter(p => p.status === "pending"), can = L.canApprove && !r.cancelled, pend = allPend.filter(inScope);
       const mine = r.requested_by === L.me.username, anyC = r.people.some(p => p.status === "confirmed");
       const conf = p => (p.conflicts || []).length ? `<details class="spr-cf"><summary>${p.mode === "swap" ? "⚠ งานชน" : "มีคำขออื่นซ้อน"} ${(p.conflicts || []).length} วัน (ตอนส่งคำขอ)</summary><ul>${p.conflicts.map(x => `<li><b>${esc(fmt(x.day))}</b> <span class="av-${esc(x.s)}">${esc(AV[x.s] || "")}</span> ${esc(x.t)}</li>`).join("")}</ul></details>` : "";
       m.el.querySelector(".spr-dlg").innerHTML = `<header class="st-${c}"><div><span class="spr-pill st-${c}">${esc(t)}</span> <span class="spr-pill ty">${esc(r.type)}</span> <small>${esc(r.req_no)}</small><h3>${esc(subject(r))}</h3></div><button type="button" class="spr-x" aria-label="ปิด">✕</button></header>
@@ -126,12 +128,12 @@
               <span class="spr-pill ${p.mode === "swap" ? "sw" : "bk"}">${p.mode === "swap" ? "ขอสลับคน" : "ขอจอง (ว่าง)"}</span><span class="spr-pill st-${PST[p.status][1]}">${PST[p.status][0]}</span></div>
             ${p.reason ? `<div class="spr-rs">เหตุผลที่ขอสลับ: ${esc(p.reason)}</div>` : ""}${conf(p)}
             ${p.decided_at && p.status !== "pending" ? `<div class="spr-by">${PST[p.status][0]} โดย ${esc(p.decided_name || p.decided_by || "")} · ${esc(new Date(p.decided_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }))}${p.decision_note ? " · " + esc(p.decision_note) : ""}</div>` : ""}
-            ${can && p.status === "pending" ? `<div class="spr-pa"><button type="button" class="spr-btn ok" data-act="confirm" data-id="${p.id}">✓ Confirm</button><button type="button" class="spr-btn no" data-act="reject" data-id="${p.id}">✕ Reject</button></div>` : ""}</div>`).join("")}</div>
+            ${can && p.status === "pending" && inScope(p) ? `<div class="spr-pa"><button type="button" class="spr-btn ok" data-act="confirm" data-id="${p.id}">✓ Confirm</button><button type="button" class="spr-btn no" data-act="reject" data-id="${p.id}">✕ Reject</button></div>` : ""}</div>`).join("")}</div>
           ${can && pend.length ? `<div class="spr-act"><input id="sprNote" placeholder="หมายเหตุถึงผู้ขอ (ถ้ามี)" maxlength="300">
-            ${pend.length > 1 ? `<button type="button" class="spr-btn ok" data-act="confirm" data-id="all">✓ Confirm ทั้ง ${pend.length} คน</button><button type="button" class="spr-btn no" data-act="reject" data-id="all">✕ Reject ทั้งหมด</button>` : ""}
-            <small>Confirm แล้วระบบจะลงงาน Service ใน Manpower board ให้ทันที${pend.some(p => p.mode === "swap") ? " · <b>คำขอสลับ: งานเดิมของคนนั้นในวันดังกล่าวจะถูกแทนที่</b> (เก็บไว้ในประวัติการแก้ไข)" : ""}</small></div>` : ""}
-          ${!L.canApprove && pend.length ? `<p class="spr-hint">รอ PC (กอล์ฟ / โจ้) Confirm</p>` : ""}
-          ${(mine || L.canApprove) && !r.cancelled && !anyC && pend.length ? `<button type="button" class="spr-link" data-cancel>ยกเลิกคำขอนี้</button>` : ""}
+            ${pend.length > 1 ? `<button type="button" class="spr-btn ok" data-act="confirm" data-id="all">✓ Confirm ทั้ง ${pend.length} คน${L.approveUnits ? " (ช่างไฟฟ้า)" : ""}</button><button type="button" class="spr-btn no" data-act="reject" data-id="all">✕ Reject ทั้งหมด</button>` : ""}
+            <small>Confirm แล้วระบบจะลงงาน Service ใน Manpower board ให้ทันที (ทุกวันในช่วง รวมวันอาทิตย์ / วันหยุด ยกเว้นวันลา)${pend.some(p => p.mode === "swap") ? " · <b>คำขอสลับ: งานเดิมของคนนั้นในวันดังกล่าวจะถูกแทนที่</b> (เก็บไว้ในประวัติการแก้ไข)" : ""}</small></div>` : ""}
+          ${allPend.length && !pend.length ? `<p class="spr-hint">รอ Confirm — กอล์ฟ (ทุกคน) · โจ้ (เฉพาะช่างไฟฟ้า)</p>` : ""}
+          ${(mine || L.canApprove) && !r.cancelled && !anyC && allPend.length ? `<button type="button" class="spr-link" data-cancel>ยกเลิกคำขอนี้</button>` : ""}
           <div class="spr-msg" role="status">${msg || ""}</div></div>`;
     };
     draw();
@@ -145,7 +147,7 @@
         let done;
         if (cx) { await call("cancel", { id }); done = "ยกเลิกคำขอแล้ว"; }
         else {
-          const ids = b.dataset.id === "all" ? r.people.filter(p => p.status === "pending").map(p => p.id) : [+b.dataset.id];
+          const ids = b.dataset.id === "all" ? r.people.filter(p => p.status === "pending" && (!L.approveUnits || L.approveUnits.includes(p.unit))).map(p => p.id) : [+b.dataset.id];
           const res = await call("decide", { ids, action: b.dataset.act, note });
           done = b.dataset.act === "confirm" ? `Confirm แล้ว ${res.done} คน · ลง Manpower ${res.cells} ช่อง${res.replaced ? " (แทนที่งานเดิม " + res.replaced + " ช่อง)" : ""}` : `Reject แล้ว ${res.done} คน`;
         }
@@ -156,14 +158,14 @@
 
   /* ---------- new request ---------- */
   function form(onChange) {
-    return load().then(() => buildForm(onChange), err => void modal(`<header><h3>+ ขอคน</h3><button type="button" class="spr-x">✕</button></header><div class="spr-body"><div class="spr-empty err">${esc(err.message)}</div></div>`));
+    return load().then(() => L.canRequest ? buildForm(onChange) : void modal(`<header><h3>+ ขอคน</h3><button type="button" class="spr-x">✕</button></header><div class="spr-body"><div class="spr-empty">บัญชีนี้ยังไม่มีสิทธิ์ขอคน — ผู้ที่ขอได้: ดิว อิ๋ม ปุ๋ม หนุ่ม สปาย อาร์ต แพรวา ไอซ์ ซี กอล์ฟ โจ้<br>ติดต่อดิว (SSM) เพื่อเพิ่มสิทธิ์</div></div>`), err => void modal(`<header><h3>+ ขอคน</h3><button type="button" class="spr-x">✕</button></header><div class="spr-body"><div class="spr-empty err">${esc(err.message)}</div></div>`));
   }
   function buildForm(onChange) {
     const F = { people: new Map(), tab: "day", day: "all", free: true, person: "", av: null, key: "", unit: "" };
     const t0 = iso(new Date());
     const m = modal(`<header><h3>+ ขอคน <small>ทดลองใช้</small></h3><button type="button" class="spr-x" aria-label="ปิด">✕</button></header>
       <form class="spr-body spr-form" novalidate>
-        <p class="spr-hint">ผู้ขอ: <b>${esc(L ? L.me.name : "")}</b> (ตามชื่อที่ login)</p>
+        <p class="spr-hint">ผู้ขอ: <b>${esc(L ? L.me.name : "")}</b> (ตามชื่อที่ login) · ขอได้ครบ 7 วัน รวมวันอาทิตย์และวันหยุด</p>
         <div class="spr-grid">
           <label>ประเภท<select name="type" required>${TYPES.map(t => `<option>${t}</option>`).join("")}</select></label>
           <label class="w2">ชื่อลูกค้า<input name="customer" required maxlength="120" list="sprCust" autocomplete="off"><datalist id="sprCust">${(L ? L.customers : []).map(c => `<option value="${esc(c)}">`).join("")}</datalist></label>
@@ -187,7 +189,7 @@
     const cat = w => { const c = sub(w).c; return !/[^o]/.test(c) ? "o" : /b/.test(c) ? "b" : /h/.test(c) ? "h" : /a/.test(c) ? "a" : "f"; };
     const cnt = (c, ch) => c.split(ch).length - 1;
     const strip = (w, lo, hi, big) => { const { a, b } = rng(); let h = ""; for (let i = lo; i <= hi; i++) { const d = F.av.days[i], s = w.c[i], inR = d >= a && d <= b; h += `<i class="av-${s}${inR ? " in" : ""}" title="${esc(DS[dt(d).getDay()] + " " + fmt(d) + " · " + AV[s] + (w.t[i] ? ": " + w.t[i] : ""))}">${big ? dt(d).getDate() : ""}</i>`; } return `<span class="spr-strip${big ? " big" : ""}">${h}</span>`; };
-    const sum = w => { const c = sub(w).c, n = c.length - cnt(c, "o"), fr = cnt(c, "f") + cnt(c, "a"); const k = cat(w); return k === "o" ? "ลา / หยุดตลอดช่วง" : k === "f" ? `ว่างครบ ${n} วัน` : k === "a" ? `ว่าง ${n} วัน · มีคำขออื่นรออยู่` : `ว่าง ${fr}/${n} วัน · ${cnt(c, "b") ? "ชนงาน " + cnt(c, "b") + " วัน" : ""}${cnt(c, "b") && cnt(c, "h") ? " · " : ""}${cnt(c, "h") ? "ติดจอง " + cnt(c, "h") + " วัน" : ""}`; };
+    const sum = w => { const c = sub(w).c, n = c.length - cnt(c, "o"), fr = cnt(c, "f") + cnt(c, "a"); const k = cat(w); return k === "o" ? "ลาตลอดช่วง" : k === "f" ? `ว่างครบ ${n} วัน` : k === "a" ? `ว่าง ${n} วัน · มีคำขออื่นรออยู่` : `ว่าง ${fr}/${n} วัน · ${cnt(c, "b") ? "ชนงาน " + cnt(c, "b") + " วัน" : ""}${cnt(c, "b") && cnt(c, "h") ? " · " : ""}${cnt(c, "h") ? "ติดจอง " + cnt(c, "h") + " วัน" : ""}`; };
     const addBtn = w => cat(w) === "o" ? `<button type="button" class="spr-add" disabled>ไม่ว่าง</button>` : F.people.has(w.id) ? `<button type="button" class="spr-add on" data-rm="${esc(w.id)}">✓ เลือกแล้ว</button>` : `<button type="button" class="spr-add" data-add="${esc(w.id)}">${"hb".includes(cat(w)) ? "+ ขอสลับ" : "+ เลือก"}</button>`;
 
     function drawPick() {
@@ -204,7 +206,7 @@
           // weeks (Mon–Sun) of the whole window; requested days are outlined
           let cal = `<div class="spr-cal"><div class="spr-ch">${["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"].map(x => `<span>${x}</span>`).join("")}</div><div class="spr-cg">`;
           for (let k = 0; k < (dt(F.av.days[0]).getDay() + 6) % 7; k++) cal += `<i class="pad"></i>`;
-          F.av.days.forEach((d, i) => { const s = w.c[i], inR = d >= a && d <= b, dd = dt(d); cal += `<i class="av-${s}${inR ? " in" : ""}" title="${esc(fmt(d) + " · " + AV[s] + (w.t[i] ? ": " + w.t[i] : ""))}"><b>${dd.getDate()}</b>${dd.getDate() === 1 || i === 0 ? `<small>${MS[dd.getMonth()]}</small>` : ""}${w.t[i] && s !== "f" ? `<em>${esc(w.t[i])}</em>` : ""}</i>`; });
+          F.av.days.forEach((d, i) => { const s = w.c[i], inR = d >= a && d <= b, dd = dt(d); cal += `<i class="av-${s}${inR ? " in" : ""}" title="${esc(fmt(d) + " · " + AV[s] + (w.t[i] ? ": " + w.t[i] : ""))}"><b>${dd.getDate()}</b>${dd.getDate() === 1 || i === 0 ? `<small>${MS[dd.getMonth()]}</small>` : ""}${w.t[i] ? `<em>${esc(w.t[i])}</em>` : ""}</i>`; });
           cal += `</div></div>`;
           body = `<div class="spr-who"><b>${esc(w.nick || w.name)}</b> <span>${esc(w.name)} · ${esc(w.unit)}${w.trade ? " · " + esc(w.trade) : ""}</span><span class="spr-pill av-${cat(w)}">${esc(sum(w))}</span>${addBtn(w)}</div>${cal}<p class="spr-hint">กรอบสีแดง = ช่วงวันที่ขอ (${esc(fmtR(a, b))}) · แสดงถึง ${esc(fmt(F.av.to))}</p>`;
         }
@@ -230,7 +232,7 @@
         const k = cat(w), c = sub(w).c, swap = "hb".includes(k); if (swap || k === "o") warn++;
         const hits = [...c].map((s, n) => "hb".includes(s) ? `${fmt(F.av.days[i + n])} ${w.t[i + n] || AV[s]}` : "").filter(Boolean);
         return `<div class="spr-s av-${k}"><div class="spr-pn"><b>${esc(w.nick || w.name.split(" ")[0])}</b> <span>${esc(w.name)} · ${esc(w.unit)}</span>
-          <span class="spr-pill ${swap ? "sw" : k === "o" ? "st-r" : "bk"}">${k === "o" ? "ลา / หยุดตลอดช่วง — เอาออก" : swap ? "⚠ งานชน → ขอสลับคน" : k === "a" ? "ว่าง (มีคำขออื่นรออยู่)" : "ว่าง → ขอจอง"}</span>
+          <span class="spr-pill ${swap ? "sw" : k === "o" ? "st-r" : "bk"}">${k === "o" ? "ลาตลอดช่วง — เอาออก" : swap ? "⚠ งานชน → ขอสลับคน" : k === "a" ? "ว่าง (มีคำขออื่นรออยู่)" : "ว่าง → ขอจอง"}</span>
           <label class="spr-chk"><input type="radio" name="leader" value="${esc(id)}" ${p.leader ? "checked" : ""}>หัวหน้าทีม (SS)</label><button type="button" class="spr-rm" data-rm="${esc(id)}" aria-label="เอาออก">✕</button></div>
           ${swap ? `<div class="spr-rs">${esc(hits.slice(0, 4).join(" · "))}${hits.length > 4 ? ` … อีก ${hits.length - 4} วัน` : ""}</div><input data-reason="${esc(id)}" value="${esc(p.reason || "")}" maxlength="300" placeholder="เหตุผลที่ขอสลับ${k === "b" ? " (ต้องกรอก — งานเดิมยืนยันแล้ว)" : " (ถ้ามี)"}" ${k === "b" ? "required" : ""}>` : ""}</div>`;
       }).join("") + (warn ? `<p class="spr-warn">⚠ มีคนที่งานชน: คำขอจะถูกส่งเป็น <b>ขอสลับคน</b> ให้ PC พิจารณา — ถ้า PC Confirm งานเดิมในวันนั้นจะถูกแทนที่</p>` : "");
@@ -270,7 +272,7 @@
       const say = t => { msg.innerHTML = `<span class="err">${esc(t)}</span>`; };
       if (!f.customer.value.trim() || !f.job_name.value.trim()) return say("กรอกชื่อลูกค้าและชื่องาน");
       if (!F.av || !F.people.size) return say("เลือกคนอย่างน้อย 1 คน");
-      for (const [id, p] of F.people) { const w = F.av.workers.find(x => x.id === id), k = w ? cat(w) : "o"; if (k === "o") return say(`${w ? w.nick || w.name : id} ลา / หยุดตลอดช่วง เอาออกจากรายชื่อ`); if (k === "b" && !p.reason.trim()) return say(`ใส่เหตุผลที่ขอสลับ ${w.nick || w.name} (งานเดิมยืนยันแล้ว)`); }
+      for (const [id, p] of F.people) { const w = F.av.workers.find(x => x.id === id), k = w ? cat(w) : "o"; if (k === "o") return say(`${w ? w.nick || w.name : id} ลาตลอดช่วง เอาออกจากรายชื่อ`); if (k === "b" && !p.reason.trim()) return say(`ใส่เหตุผลที่ขอสลับ ${w.nick || w.name} (งานเดิมยืนยันแล้ว)`); }
       const btn = f.querySelector("[type=submit]"); btn.disabled = true; msg.textContent = "กำลังส่งคำขอ…";
       try {
         const res = await call("create", { type: f.type.value, customer: f.customer.value, job_name: f.job_name.value, job_no: f.job_no.value, description: f.description.value,
