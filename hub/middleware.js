@@ -14,8 +14,8 @@
 //   ALLOWED_DOMAIN                   – rak.co.th
 //   SUPER_ADMIN                      – nantana.s@rak.co.th (always admin; cannot be disabled or deleted)
 //   DEFAULT_PASSWORD                 – first-login password for new / reset accounts
-//   SERVICE_PLAN_SHEET_URL, SERVICE_PLAN_TOKEN – optional: Apps Script relay for the Service Plan sheet
-//                                      (scripts/service-plan-sheet.gs). Without them Service Plan shows its snapshot.
+//   SERVICE_PLAN_TOKEN               – shared secret the n8n workflow sends (header x-ssm-token) to
+//                                      POST /api/service-plan/sync (scripts/n8n-service-plan-sync.json)
 // If a required value is missing the site stays locked (fails closed).
 
 export const config = { matcher: ['/((?!favicon\\.ico).*)'] };
@@ -170,25 +170,38 @@ async function sparePartApi(cfg, req, url, prof) {
   return res.ok ? json(p) : json({ error: res.status === 404 ? 'no_table' : 'supabase' }, res.status === 404 ? 503 : 502);
 }
 
-// Service Plan reads tab "ใบขอคน 2026" of the sheet "ใบร้องขอคนจากฝ่ายผลิต" live through a Google Apps Script web app
-// (scripts/service-plan-sheet.gs), because the sheet is shared only with RAK accounts. The relay returns columns A–Q;
+// Service Plan: an n8n workflow (scripts/n8n-service-plan-sync.json) watches tab "ใบขอคน 2026" of the sheet
+// "ใบร้องขอคนจากฝ่ายผลิต" and, whenever a row is added or changed, posts columns A–Q of every row to
+// POST /api/service-plan/sync (header x-ssm-token = SERVICE_PLAN_TOKEN). The rows are kept in Supabase table
+// public.service_plan_snapshot (database/service_plan.sql); GET /api/service-plan/jobs returns them to signed-in users.
 // hub/service-plan/app.js keeps only IS/SO/IN/WR rows with status New/Checking/Confirm/Complete.
-let SP_PLAN_CACHE = { at: 0, data: null };
-async function servicePlanApi(env, req, url) {
+const SPL_TABLE = '/rest/v1/service_plan_snapshot';
+async function servicePlanSync(cfg, env, req) {
+  const token = String(env.SERVICE_PLAN_TOKEN || '').trim();
+  if (token.length < 16) return json({ error: 'not_configured' }, 503);
+  if (!sameString(String(req.headers.get('x-ssm-token') || ''), token)) return json({ error: 'forbidden' }, 403);
+  const text = await req.text().catch(() => '');
+  if (text.length > 3000000) return json({ error: 'too large' }, 413);
+  let d;
+  try { d = JSON.parse(text); } catch { return json({ error: 'json' }, 400); }
+  if (!d || !Array.isArray(d.rows)) return json({ error: 'rows' }, 400);
+  const now = new Date().toISOString();
+  const data = {
+    updated: now, sheet: String(d.sheet || ''), gid: Number(d.gid) || null,
+    rows: d.rows.filter((x) => x && Array.isArray(x.v)).slice(0, 5000)
+      .map((x) => ({ n: Number(x.n) || 0, v: x.v.slice(0, 17).map((c) => String(c ?? '').slice(0, 4000)) })),
+  };
+  const res = await fetch(cfg.url + SPL_TABLE + '?on_conflict=id', { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ id: 'main', data, updated_at: now }) });
+  if (!res.ok) return json({ error: res.status === 404 ? 'no_table' : 'supabase' }, res.status === 404 ? 503 : 502);
+  return json({ ok: true, rows: data.rows.length, updated: now });
+}
+async function servicePlanApi(cfg, req, url) {
   if (url.pathname !== '/api/service-plan/jobs') return json({ error: 'not found' }, 404);
   if (req.method !== 'GET') return json({ error: 'method' }, 405);
-  const src = String(env.SERVICE_PLAN_SHEET_URL || '').trim(), token = String(env.SERVICE_PLAN_TOKEN || '').trim();
-  if (!/^https:\/\/script\.google\.com\//.test(src) || token.length < 16) return json({ error: 'not_configured' }, 503);
-  if (url.searchParams.get('refresh') !== '1' && SP_PLAN_CACHE.data && Date.now() - SP_PLAN_CACHE.at < 60000) return json(SP_PLAN_CACHE.data);
-  const r = await fetch(src + (src.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token), { redirect: 'follow' });
-  const d = r.ok ? await r.json().catch(() => null) : null;
-  if (!d || !Array.isArray(d.rows)) return json({ error: (d && d.error) || 'sheet' }, 502);
-  const data = {
-    updated: d.updated || new Date().toISOString(), sheet: String(d.sheet || ''), gid: d.gid || null,
-    rows: d.rows.filter((x) => x && Array.isArray(x.v)).map((x) => ({ n: Number(x.n) || 0, v: x.v.slice(0, 17).map((c) => String(c ?? '')) })),
-  };
-  SP_PLAN_CACHE = { at: Date.now(), data };
-  return json(data);
+  const r = await call(cfg, SPL_TABLE + '?select=data&id=eq.main', { method: 'GET', admin: true });
+  if (!r.ok) return json({ error: 'no_table' }, 503);
+  const row = Array.isArray(r.data) && r.data[0];
+  return row && row.data ? json(row.data) : json({ error: 'no_data' }, 503);
 }
 
 // Site Expense permissions are fixed by username (set by Dew, 9 Nov 2026), not by the admin checkboxes.
@@ -704,6 +717,12 @@ export default async function middleware(req) {
     return page({ status: 503, title: 'กำลังตั้งค่า', body: `${LOCK}<h1>ระบบ login กำลังตั้งค่า</h1><p>ผู้ดูแลยังตั้งค่าการเข้าสู่ระบบไม่ครบ เว็บจึงปิดไว้ก่อนเพื่อความปลอดภัย</p><div class="note">ผู้ดูแล: ใส่ <code>SUPABASE_URL</code>, <code>SUPABASE_ANON_KEY</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code>, <code>SUPER_ADMIN</code> และ <code>DEFAULT_PASSWORD</code> ใน Vercel แล้ว redeploy</div>` });
   }
 
+  // n8n pushes the Service Plan sheet here (token, no session; not a browser form).
+  if (path === '/api/service-plan/sync') {
+    if (req.method !== 'POST') return json({ error: 'method' }, 405);
+    try { return await servicePlanSync(cfg, env, req); } catch { return json({ error: 'supabase' }, 502); }
+  }
+
   // Forms post to APP_URL so every cookie lives on one host.
   if (req.method === 'POST' && url.origin !== cfg.app) return json({ error: 'wrong host' }, 400);
   if (req.method === 'POST') {
@@ -823,7 +842,7 @@ export default async function middleware(req) {
     const live = await liveProfile(cfg, user);
     if (!live) return json({ error: 'login required' }, 401);
     if (!canOpen(live, 'service-plan')) return json({ error: 'no access' }, 403);
-    try { return await servicePlanApi(env, req, url); } catch { return json({ error: 'sheet' }, 502); }
+    try { return await servicePlanApi(cfg, req, url); } catch { return json({ error: 'supabase' }, 502); }
   }
 
   if (signedIn) {

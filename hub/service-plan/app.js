@@ -1,8 +1,8 @@
 /* SSM Work · Service Plan module — calendar of site/service jobs from the sheet "ใบร้องขอคนจากฝ่ายผลิต" (tab ใบขอคน 2026).
    Routes (inside the hub): #service-plan                    → month view, today
                             #service-plan/<view>/<yyyy-mm-dd> → view = day | week | month | year
-   Data:  /api/service-plan/jobs?refresh=1 – live sheet via the middleware + Apps Script relay (scripts/service-plan-sheet.gs)
-          /service-plan/data/snapshot.json   – fallback snapshot when the relay is not configured or fails
+   Data:  /api/service-plan/jobs          – latest sheet rows, pushed by n8n on every added/changed row (scripts/n8n-service-plan-sync.json)
+          /service-plan/data/snapshot.json – fallback snapshot until the first n8n sync (or if Supabase is unreachable)
    Rows kept: column E (type) ∈ IS/SO/IN/WR and column I (status) ∈ New/Checking/Confirm/Complete.
    Subject:   Status | Type | Customer (F) | Job no. (D) — SS team leader (N).   Detail: Working description (G) + ทะเบียนรถ (H). */
 (function () {
@@ -71,10 +71,10 @@
   async function load(force) {
     let data = null, src = "live", why = "";
     try {
-      const r = await fetch("/api/service-plan/jobs" + (force ? "?refresh=1" : ""), { cache: "no-store" });
+      const r = await fetch("/api/service-plan/jobs", { cache: "no-store" });
       if (r.ok) data = await r.json();
-      else why = r.status === 503 ? "ยังไม่ได้เชื่อม Google Sheet แบบสด" : "ดึงข้อมูลจาก Google Sheet ไม่สำเร็จ (" + r.status + ")";
-    } catch { why = "ดึงข้อมูลจาก Google Sheet ไม่สำเร็จ"; }
+      else why = r.status === 503 ? "ยังไม่มีข้อมูลซิงก์จาก n8n" : "โหลดข้อมูลไม่สำเร็จ (" + r.status + ")";
+    } catch { why = "โหลดข้อมูลไม่สำเร็จ"; }
     if (!data || !Array.isArray(data.rows)) {
       src = "snapshot";
       data = await fetch("/service-plan/data/snapshot.json", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
@@ -133,7 +133,7 @@
     const all = JOBS.concat(UNDATED).filter(j => S.ty.has(j.type));
     const cnt = s => all.filter(j => j.status === s).length;
     const src = META.src === "live"
-      ? `<span class="spc-src live">● Google Sheet สด</span> อัปเดต ${esc(META.fetched.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" }))}`
+      ? `<span class="spc-src live">● Google Sheet (n8n)</span> ซิงก์ล่าสุด ${esc((META.updated || META.fetched).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }))}`
       : META.src === "snapshot"
         ? `<span class="spc-src snap">● ข้อมูลสำรอง</span> ณ ${esc(META.updated ? META.updated.toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) : "–")}${META.why ? " · " + esc(META.why) : ""}`
         : `<span class="spc-src snap">● โหลดข้อมูลไม่สำเร็จ</span>`;
