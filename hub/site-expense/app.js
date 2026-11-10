@@ -122,7 +122,7 @@
   /* ======================= TEST MODE =======================
      Everything below keeps its data in this browser only (localStorage key KEY).
      Swap load()/save() for calls to /api/site-expense/* (Supabase tables in database/site_expense.sql) to go live. */
-  const KEY = "ssm-site-expense-test-v1";
+  const KEY = "ssm-site-expense-test-v2"; // v2: category detail lines (v1 test data is left untouched)
   const num = v => { const n = parseFloat(String(v ?? "").replace(/,/g, "")); return isFinite(n) ? n : 0; };
   const baht = n => "฿" + Math.round(n).toLocaleString("en-US");
   const money = n => Math.round(n).toLocaleString("en-US");
@@ -131,16 +131,6 @@
   const fmtD = d => { if (!d) return "—"; const x = new Date(d + "T00:00:00"); return isNaN(x) ? d : x.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); };
   const span = (a, b) => (a && b) ? Math.max(1, Math.round((new Date(b) - new Date(a)) / 864e5) + 1) : 0;
   const catOf = code => CATS.find(c => c.code === code) || CATS[5];
-
-  // Sample master rates (placeholders until the real rate tables exist in Supabase)
-  const RATES = {
-    manpower:       [["Engineer", "manday", 3500], ["Supervisor", "manday", 4000], ["Technician", "manday", 2500], ["Helper", "manday", 1500]],
-    subcontract:    [["งานเหมาช่วง (lot)", "lot", 0], ["เครนยก / Rigging", "day", 15000]],
-    transportation: [["รถกระบะ", "trip", 3000], ["รถ 6 ล้อ", "trip", 8000], ["รถ 10 ล้อ", "trip", 12000]],
-    accommodation:  [["ห้องพัก (ในประเทศ)", "คืน", 1200], ["ห้องพัก (ต่างประเทศ)", "คืน", 3500]],
-    travel:         [["ตั๋วเครื่องบินในประเทศ", "ใบ", 4000], ["ตั๋วเครื่องบินต่างประเทศ", "ใบ", 25000], ["ค่าเดินทางในพื้นที่", "วัน", 500]],
-    site_expense:   [["เบี้ยเลี้ยง", "คน-วัน", 400], ["วัสดุสิ้นเปลือง", "lot", 0], ["ค่าใช้จ่ายเบ็ดเตล็ด", "lot", 0]],
-  };
 
   const STATUS = {
     draft:     { th: "Draft",         cls: "s-draft", wait: "SC กำลังร่าง" },
@@ -182,22 +172,228 @@
     edit: L('<path d="M4.5 19.5h4l10-10a2.8 2.8 0 0 0-4-4l-10 10z"/>'),
   };
 
+  /* ---------- category detail structures (follow the Base44 / SC Site Expense schema) ----------
+     Each category has one or more line groups; every line stores { id, cat, kind, ...fields }.
+     Totals: manpower = คน×วัน×ค่าแรง + คน×ชม.OT×ค่า OT · subcontract = เหมา + manday · vehicles = คัน×เที่ยว×ราคา + คนให้สัญญาณ
+             ground = จำนวน×ครั้ง×ราคา · accommodation = ห้อง×คืน/เดือน×ราคา · air = ใบ×ราคา · documents/site = จำนวน×ราคา */
+  // Master rates copied from the SC Site Expense app in Base44 (10 Nov 2026) until the SSM Work rate tables exist in Supabase.
+  const DESTS = ["กรุงเทพฯ", "ปทุมธานี", "อยุธยา", "สมุทรปราการ", "สมุทรสาคร", "ฉะเชิงเทรา", "ชลบุรี", "ระยอง", "ขอนแก่น"];
+  const byDest = (o) => (p) => ({ rate: o[p.destination] != null ? o[p.destination] : "" });
+  const MR = { allowance: 150, signal: 4500 };
+  const otOf = (d) => Math.round(d / 8 * 1.5 * 100) / 100; // OT/hour = day rate ÷ 8 × 1.5
+  const pos = (n, d) => [n, { day_rate: d, ot_rate: otOf(d) }];
+  const MASTER = {
+    positions: [pos("Technician", 1000), pos("Team Lead", 2000), pos("Engineer", 2000), pos("Site Engineer", 2000), pos("Project Engineer", 3000), pos("Programmer", 5000)],
+    vehicles: [
+      ["รถเครน 10 ตัน", { rate: 7000 }], ["รถเครน 25 ตัน", { rate: 9000 }], ["รถเครน 50 ตัน", { rate: 20000 }], ["รถเครน 100 ตัน", { rate: 80000 }], ["รถเครน 200 ตัน", { rate: 120000 }],
+      ["โฟลคลิฟท์ 2 ตัน", { rate: 2000 }], ["โฟลคลิฟท์ 5 ตัน", { rate: 7500 }],
+      ["เทรลเลอร์", byDest({ "ขอนแก่น": 25000, "ระยอง": 12000, "อยุธยา": 12000, "ปทุมธานี": 9500, "กรุงเทพฯ": 9500, "ชลบุรี": 8500, "ฉะเชิงเทรา": 7000, "สมุทรสาคร": 7000 })],
+      ["รถ 10 ล้อ เฮี๊ยบติดเครน", byDest({ "ขอนแก่น": 19500, "ระยอง": 10000, "อยุธยา": 10000, "ปทุมธานี": 8500, "กรุงเทพฯ": 8500, "ชลบุรี": 7500, "ฉะเชิงเทรา": 7500, "สมุทรสาคร": 6500, "สมุทรปราการ": 6500 })],
+      ["รถ 6 ล้อ เฮี๊ยบติดเครน", byDest({ "ขอนแก่น": 18000, "ระยอง": 9000, "อยุธยา": 9000, "ปทุมธานี": 7000, "กรุงเทพฯ": 7000, "ชลบุรี": 7000, "ฉะเชิงเทรา": 7000, "สมุทรสาคร": 5000, "สมุทรปราการ": 5000 })],
+      ["6ล้อ (คอกยาว, ธรรมดา)", byDest({ "ขอนแก่น": 18000, "ระยอง": 7000, "อยุธยา": 7000, "ปทุมธานี": 6500, "กรุงเทพฯ": 6500, "ชลบุรี": 5000, "ฉะเชิงเทรา": 5000, "สมุทรสาคร": 4500, "สมุทรปราการ": 4500 })]],
+    ground: [["Taxi Airport Round trip (Thailand)", { rate: 1000 }], ["รถตู้ (Site Trip)", { rate: 1000 }], ["รถส่วนตัว (Site Trip)", { rate: 500 }], ["รถส่วนตัว (Round Trip)", { rate: 2000 }], ["รถ Pick up (Round Trip)", { rate: 1000 }], ["รถตู้ (Round Trip)", { rate: 2500 }]],
+    rooms: [["Hotel ในประเทศ", { rate: 700, billing: "night" }], ["Hotel ต่างประเทศ", { rate: 2000, billing: "night" }], ["Apartment รายเดือน", { rate: 4500, billing: "month" }], ["บ้านเช่า รายเดือน", { rate: 80000, billing: "month" }]],
+    airlines: [].concat(...[["Indonesia", 15000, 20000], ["Malaysia", 15000, 20000], ["Vietnam", 15000, 20000], ["Japan", 25000, 35000]].map(([c, a, t]) => [
+      [`Air Asia · ${c}`, { airline: "Air Asia", country: c, fare: a }], [`Thai Airways · ${c}`, { airline: "Thai Airways", country: c, fare: t }]]), [["OTHER", { airline: "OTHER" }]]),
+    docs: [["Visa fee / ค่าธรรมเนียมวีซ่า", { rate: 3000 }], ["Invitation letter / หนังสือเชิญจากปลายทาง", { rate: 1000 }], ["Travel Insurance", { rate: 1500 }], ["Passport ทำใหม่/ต่ออายุ (เหลือ < 6 เดือน)", { rate: 1500 }],
+      ["ใบรับรองแพทย์ / Fit to work", { rate: 800 }], ["Vaccination certificate", { rate: 500 }], ["Work permit / COE ปลายทาง", { rate: 2000 }], ["Taxi Airport Round trip (Destination)", { rate: 4000 }], ["Excess baggage (เครื่องมือช่าง)", { rate: 2500 }]],
+    tiers: [["เงินสำรองหน้าไซส์ (Cash in advance)", { rate: 5000 }], ["Safety Equipments 1 — scope เล็ก", { rate: 3000 }], ["Safety Equipments 2 — scope กลาง", { rate: 5000 }], ["Safety Equipments 3 — scope ใหญ่", { rate: 20000 }],
+      ["Pocket money 1 — scope เล็ก", { rate: 3000 }], ["Pocket money 2 — scope กลาง", { rate: 6000 }], ["Pocket money 3 — scope ใหญ่", { rate: 10000 }],
+      ["Site material expense 1 — scope เล็ก", { rate: 5000 }], ["Site material expense 2 — scope กลาง", { rate: 15000 }], ["Site material expense 3 — scope ใหญ่", { rate: 25000 }], ["อื่นๆ (ระบุเอง)", { rate: 0 }]],
+  };
+  const F = (k, l, o = {}) => Object.assign({ k, l, t: "num" }, o);
+  const FORMS = {
+    manpower: [{ kind: "mp", title: "กำลังคน", hint: "คน × วัน × ค่าแรง + คน × ชม. OT × ค่า OT (ค่าแรง ÷ 8 × 1.5) + ค้างคืน: คน × วัน × เบี้ยเลี้ยง",
+      fields: [F("position", "ตำแหน่ง", { t: "pick", list: "positions", w: 180 }), F("qty", "คน", { w: 64, d: 1 }), F("days", "วัน", { w: 64 }), F("day_rate", "ค่าแรง/วัน", { w: 100 }), F("ot_hours", "ชม. OT/คน", { w: 84 }), F("ot_rate", "ค่า OT/ชม.", { w: 90 }), F("overnight", "ค้างคืน", { t: "check", w: 64 }), F("allow_rate", "เบี้ยเลี้ยง/วัน", { w: 84, d: MR.allowance }), F("note", "หมายเหตุ", { t: "text" })],
+      amt: r => num(r.qty) * num(r.days) * num(r.day_rate) + num(r.qty) * num(r.ot_hours) * num(r.ot_rate) + (r.overnight ? num(r.qty) * num(r.days) * num(r.allow_rate) : 0),
+      brief: r => `${r.position || "–"} ×${num(r.qty) || 0}` }],
+    subcontract: [{ kind: "sub", title: "ผู้รับเหมาช่วง", hint: "เหมา (lot × ราคา) + Manday (จำนวน × ราคา)",
+      fields: [F("title", "งาน", { t: "text", w: 150 }), F("scope", "ขอบเขตงาน", { t: "text" }), F("supplier", "ผู้รับเหมา", { t: "text", w: 140 }), F("lump_qty", "เหมา (lot)", { w: 72 }), F("lump_rate", "ราคาเหมา", { w: 100 }), F("manday_qty", "Manday", { w: 72 }), F("manday_rate", "ราคา/Manday", { w: 100 })],
+      amt: r => num(r.lump_qty) * num(r.lump_rate) + num(r.manday_qty) * num(r.manday_rate),
+      brief: r => r.title || r.supplier || "–" }],
+    transportation: [
+      { kind: "veh", title: "รถขนส่ง / เครน / โฟลคลิฟท์", hint: "คัน × เที่ยว × ราคา + คนให้สัญญาณ × ค่าให้สัญญาณ · รถที่ราคาตามจังหวัดใช้ “จังหวัดปลายทาง” ของโปรเจค",
+        fields: [F("description", "ประเภทรถ", { t: "pick", list: "vehicles", w: 190 }), F("vehicles_qty", "คัน", { w: 60, d: 1 }), F("trips", "เที่ยว", { w: 64, d: 1 }), F("rate", "ราคา/เที่ยว", { w: 100 }), F("signal_crew", "คนให้สัญญาณ", { w: 90 }), F("signal_rate", "ค่าให้สัญญาณ", { w: 100, d: MR.signal }), F("note", "หมายเหตุ", { t: "text" })],
+        amt: r => num(r.vehicles_qty) * num(r.trips) * num(r.rate) + num(r.signal_crew) * num(r.signal_rate),
+        brief: r => `${r.description || "–"} ×${num(r.trips) || 0} เที่ยว` }],
+    accommodation: [{ kind: "acc", title: "ที่พัก", hint: "ห้อง × คืน (หรือเดือน) × ราคา",
+      fields: [F("label", "ที่พัก / ประเภทห้อง", { t: "pick", list: "rooms", w: 220 }), F("billing", "คิดเป็น", { t: "select", opts: [["night", "คืน"], ["month", "เดือน"]], w: 80 }), F("unit_qty", "ห้อง", { w: 64, d: 1 }), F("periods", "คืน / เดือน", { w: 80, d: 1 }), F("rate", "ราคา", { w: 100 }), F("note", "หมายเหตุ", { t: "text" })],
+      amt: r => num(r.unit_qty) * num(r.periods) * num(r.rate),
+      brief: r => `${num(r.unit_qty) || 0} ห้อง × ${num(r.periods) || 0} ${r.billing === "month" ? "เดือน" : "คืน"}` }],
+    travel: [
+      { kind: "air", title: "ตั๋วเครื่องบิน", hint: "จำนวนใบ × ราคา/ใบ",
+        fields: [F("for_label", "สำหรับ (ทีม / ตำแหน่ง)", { t: "text", w: 170 }), F("country", "ปลายทาง", { t: "text", w: 120 }), F("airline", "สายการบิน", { t: "pick", list: "airlines", w: 170 }), F("ticket_type", "ประเภท", { t: "select", opts: [["Fixed", "Fixed"], ["Flexible", "Flexible"]], w: 96 }), F("qty", "ใบ", { w: 60, d: 1 }), F("fare", "ราคา/ใบ", { w: 100 })],
+        amt: r => num(r.qty) * num(r.fare),
+        brief: r => `✈ ${r.for_label || r.country || "ตั๋ว"} ×${num(r.qty) || 0}` },
+      { kind: "doc", title: "เอกสารเดินทาง / ค่าใช้จ่ายต่อคน", hint: "จำนวนคน × ราคา/คน",
+        fields: [F("doc_name", "เอกสาร", { t: "pick", list: "docs", w: 220 }), F("qty", "คน", { w: 64, d: 1 }), F("rate", "ราคา/คน", { w: 100 }), F("note", "หมายเหตุ", { t: "text" })],
+        amt: r => num(r.qty) * num(r.rate),
+        brief: r => r.doc_name || "–" },
+      { kind: "tground", title: "รถรับส่ง / เดินทางในพื้นที่", hint: "คัน × เที่ยว × ราคา",
+        fields: [F("description", "ประเภท", { t: "pick", list: "ground", w: 230 }), F("vehicles_qty", "คัน", { w: 60, d: 1 }), F("trips", "เที่ยว", { w: 64, d: 1 }), F("rate", "ราคา/เที่ยว", { w: 100 }), F("note", "หมายเหตุ", { t: "text" })],
+        amt: r => num(r.vehicles_qty) * num(r.trips) * num(r.rate),
+        brief: r => r.description || "–" }],
+    site_expense: [{ kind: "se", title: "ค่าใช้จ่ายหน้างาน", hint: "จำนวน × ราคา",
+      fields: [F("tier_item", "รายการ", { t: "pick", list: "tiers", w: 200 }), F("description", "รายละเอียด", { t: "text" }), F("qty", "จำนวน", { w: 72, d: 1 }), F("rate", "ราคา", { w: 100 }), F("holder_name", "ผู้ถือเงิน", { t: "text", w: 120 })],
+      amt: r => num(r.qty) * num(r.rate),
+      brief: r => r.tier_item || r.description || "–" }],
+  };
+  const KIND = {}; Object.values(FORMS).forEach(gs => gs.forEach(g => KIND[g.kind] = g));
+  KIND.ground = KIND.veh;
+  const newLine = (cat, kind) => { const g = KIND[kind], l = { id: uid(), cat, kind }; g.fields.forEach(f => l[f.k] = f.t === "check" ? false : f.k === "billing" ? "night" : f.k === "ticket_type" ? "Fixed" : f.d != null ? f.d : ""); return l; };
+  // Lines from the earlier single-table Estimate → the category structure (totals stay the same)
+  function migrateLine(l) {
+    if (l.kind) return l;
+    const q = (l.qty !== "" && l.qty != null) ? num(l.qty) : num(l.people) * num(l.days);
+    const base = { id: l.id || uid(), cat: l.cat };
+    switch (l.cat) {
+      case "manpower": return Object.assign(base, { kind: "mp", position: l.scope || "", qty: num(l.people) ? l.people : 1, days: num(l.people) && num(l.days) ? l.days : q || "", day_rate: l.rate, ot_hours: "", ot_rate: "", overnight: false, note: l.remark || "" });
+      case "subcontract": return Object.assign(base, { kind: "sub", title: l.scope || "", scope: "", supplier: "", lump_qty: q || 1, lump_rate: l.rate, manday_qty: "", manday_rate: "" });
+      case "transportation": return Object.assign(base, { kind: "veh", description: l.scope || "", vehicles_qty: 1, trips: q || 1, rate: l.rate, signal_crew: "", signal_rate: "", note: "" });
+      case "accommodation": return Object.assign(base, { kind: "acc", label: l.scope || "", billing: l.unit === "เดือน" ? "month" : "night", unit_qty: 1, periods: q || 1, rate: l.rate, note: "" });
+      case "travel": return Object.assign(base, { kind: "air", for_label: l.scope || "", country: "", airline: "", ticket_type: "Fixed", qty: q || 1, fare: l.rate });
+      default: return Object.assign(base, { cat: "site_expense", kind: "se", tier_item: "", description: l.scope || "", qty: q || 1, rate: l.rate, holder_name: "" });
+    }
+  }
+
+  /* ---------- category detail page ---------- */
+  function secCategory(sec, p, redraw, code) {
+    const c = catOf(code), ed = editable(p), groups = FORMS[c.code];
+    const est = sumByCat(p)[c.code], bud = p.budget ? p.budget[c.code] || 0 : null, act = actualBy(p)[c.code];
+    const href = x => `#site-expense/${encodeURIComponent(p.id)}/cat/${x}`;
+    const kpi = (l, v, cls = "") => `<div class="se-kpi ${cls}"><span>${l}</span><b>${v}</b></div>`;
+    const cell = (l, f) => {
+      const v = l[f.k];
+      if (!ed) return f.t === "check" ? (v ? "✓" : "–") : f.t === "select" ? esc((f.opts.find(o => o[0] === v) || [, v || "–"])[1]) : f.t === "num" ? (v === "" || v == null ? "–" : money(num(v))) : esc(v || "–");
+      if (f.t === "check") return `<input type="checkbox" data-k="${f.k}" ${v ? "checked" : ""} aria-label="${esc(f.l)}">`;
+      if (f.t === "select") return `<select class="se-in" data-k="${f.k}">${f.opts.map(o => `<option value="${o[0]}" ${o[0] === v ? "selected" : ""}>${esc(o[1])}</option>`).join("")}</select>`;
+      if (f.t === "pick") return `<input class="se-in" data-k="${f.k}" data-pick="${f.list}" list="dl-${f.list}" value="${esc(v)}" placeholder="เลือกหรือพิมพ์">`;
+      return `<input class="se-in ${f.t === "num" ? "r" : ""}" data-k="${f.k}" value="${esc(v)}" ${f.t === "num" ? 'inputmode="decimal"' : ""}>`;
+    };
+    const group = g => {
+      const rows = p.lines.filter(l => l.cat === c.code && l.kind === g.kind);
+      const sub = rows.reduce((a, l) => a + amtOf(l), 0);
+      return `<div class="se-grp" data-kind="${g.kind}">
+        <div class="se-grp-h"><b>${esc(g.title)}</b><span class="se-hint">${esc(g.hint)}</span><span class="se-grp-t">${baht(sub)}</span></div>
+        <div class="tbl"><table class="se-dt"><thead><tr><th class="c" style="width:40px">#</th>${g.fields.map(f => `<th class="${f.t === "num" ? "r" : f.t === "check" ? "c" : ""}" ${f.w ? `style="width:${f.w}px"` : ""}>${esc(f.l)}</th>`).join("")}<th class="r" style="width:120px">จำนวนเงิน</th>${ed ? '<th style="width:36px"></th>' : ""}</tr></thead>
+        <tbody>${rows.length ? rows.map((l, i) => `<tr data-id="${l.id}"><td class="c se-no">${i + 1}</td>${g.fields.map(f => `<td class="${f.t === "num" ? "r" : f.t === "check" ? "c" : ""}">${cell(l, f)}</td>`).join("")}<td class="r se-amt" data-amt>${money(amtOf(l))}</td>${ed ? `<td><button class="se-x" data-del aria-label="ลบแถว">${IC.x}</button></td>` : ""}</tr>`).join("")
+          : `<tr><td colspan="${g.fields.length + (ed ? 3 : 2)}" class="se-muted c" style="padding:16px">ยังไม่มีรายการ</td></tr>`}</tbody></table></div>
+        ${ed ? `<button class="se-btn" data-add="${g.kind}">${IC.plus}เพิ่ม${esc(g.title)}</button>` : ""}</div>`;
+    };
+    const lists = [...new Set(groups.flatMap(g => g.fields.filter(f => f.t === "pick").map(f => f.list)))];
+    const acts = p.actuals.filter(a => a.cat === c.code).sort((a, b) => b.date.localeCompare(a.date));
+    const STA = { pending: ["รอตรวจ", "s-req"], checked: ["ตรวจแล้ว", "s-ok"], rejected: ["ไม่ผ่าน", "s-rev"] };
+    const canAdd = p.status === "locked" && p.list === "active" && can("actual"), canChk = p.list === "active" && can("check");
+    sec.innerHTML = `
+      <a class="se-back" href="#site-expense/${encodeURIComponent(p.id)}/estimate">${IC.back}สรุป Estimate ทุกหมวด</a>
+      <div class="se-catnav">${CATS.map(x => `<a href="${href(x.code)}" class="${x.code === c.code ? "on" : ""}">${x.ic}<span>${esc(x.name)}</span></a>`).join("")}</div>
+      <div class="se-sec-h"><h3 class="se-cat-h">${c.ic}${esc(c.name)} <small>${esc(c.th)}</small></h3>${ed ? `<span class="badge live">แก้ไขได้</span>` : `<span class="badge off">${p.status === "locked" ? "🔒 ล็อกเป็น Budgetary แล้ว" : "อ่านอย่างเดียว"}</span>`}</div>
+      <div class="se-kpis">${kpi("Estimate", baht(est))}${kpi("Budget", bud == null ? "—" : baht(bud))}${kpi("Actual", baht(act))}${kpi("คงเหลือ", bud == null ? "—" : baht(bud - act), bud != null && bud - act < 0 ? "over" : "")}</div>
+      ${lists.map(k => `<datalist id="dl-${k}">${MASTER[k].map(([n, d]) => { const v = typeof d === "function" ? d(p) : d; return `<option value="${esc(n)}">${typeof d === "function" ? (v.rate ? money(v.rate) + " (" + esc(p.destination) + ")" : "ราคาตามจังหวัดปลายทาง") : Object.values(v).filter(x => typeof x === "number").map(money).join(" / ")}</option>`; }).join("")}</datalist>`).join("")}
+      ${groups.map(group).join("")}
+      <div class="se-cat-tot"><span>รวม Estimate หมวด ${esc(c.name)}</span><b id="seCatTot">${baht(est)}</b></div>
+      ${ed ? `<p class="se-hint">พิมพ์หรือเลือกจากรายการ ระบบเติมราคาตาม Master rate ตัวอย่าง · บันทึกอัตโนมัติ</p>` : ""}
+      <div class="se-grp">
+        <div class="se-grp-h"><b>🧾 Actual ในหมวดนี้</b><span class="se-hint">${p.status === "locked" ? (canAdd ? "บันทึกค่าใช้จ่ายจริงของหมวดนี้" : `บันทึกได้เฉพาะ ${namesWith("actual")}`) : "บันทึกได้หลัง Get Award"}</span><span class="se-grp-t">${baht(act)}</span></div>
+        ${canAdd ? `<div class="se-form2">
+          <label class="se-f">วันที่<input type="date" id="cDate" value="${today()}"></label>
+          <label class="se-f w2">รายการ<input id="cDesc" placeholder="เช่น ${esc(c.code === "accommodation" ? "ที่พัก 4 ห้อง × 3 คืน" : c.code === "manpower" ? "ค่าแรงทีมติดตั้ง สัปดาห์ 1" : "รายละเอียดค่าใช้จ่าย")}"></label>
+          <label class="se-f">จำนวนเงิน (บาท)<input id="cAmt" inputmode="decimal" placeholder="0"></label>
+          <label class="se-f">ใบเสร็จ<input type="file" id="cFile" accept="image/*,application/pdf"></label>
+          <div class="se-f"><button class="se-btn primary" id="cAdd">${IC.plus}บันทึก</button></div></div>` : ""}
+        <div class="tbl"><table><thead><tr><th>วันที่</th><th>รายการ</th><th class="r">จำนวนเงิน</th><th>ใบเสร็จ</th><th>ผู้บันทึก</th><th>สถานะ</th><th></th></tr></thead>
+          <tbody>${acts.length ? acts.map(a => `<tr data-a="${a.id}"><td>${fmtD(a.date)}</td><td>${esc(a.desc)}</td><td class="r">${money(num(a.amount))}</td><td>${a.receipt ? `📎 ${esc(a.receipt)}` : `<span class="se-muted">–</span>`}</td><td>${esc(a.by)}</td><td><span class="se-st ${STA[a.status][1]}">${STA[a.status][0]}</span></td>
+            <td><span class="se-rowact">${canChk && a.status === "pending" ? `<button class="se-btn sm" data-chk="checked">✓</button><button class="se-btn sm" data-chk="rejected">✗</button>` : ""}${canAdd && a.status === "pending" ? `<button class="se-x" data-adel aria-label="ลบ">${IC.x}</button>` : ""}</span></td></tr>`).join("")
+            : `<tr><td colspan="7" class="se-muted c" style="padding:16px">ยังไม่มีรายการ</td></tr>`}</tbody></table></div>
+      </div>`;
+    const tot = () => { sec.querySelector("#seCatTot").textContent = baht(sumByCat(p)[c.code]); sec.querySelectorAll(".se-grp[data-kind]").forEach(gEl => { const k = gEl.dataset.kind; gEl.querySelector(".se-grp-t").textContent = baht(p.lines.filter(l => l.cat === c.code && l.kind === k).reduce((a, l) => a + amtOf(l), 0)); }); };
+    sec.querySelectorAll("tr[data-id]").forEach(tr => {
+      const l = p.lines.find(x => x.id === tr.dataset.id); if (!l) return;
+      const upd = () => { save(); tr.querySelector("[data-amt]").textContent = money(amtOf(l)); tot(); };
+      tr.querySelectorAll("input[data-k]").forEach(inp => {
+        if (inp.type === "checkbox") inp.onchange = () => { l[inp.dataset.k] = inp.checked; upd(); };
+        else inp.oninput = () => { l[inp.dataset.k] = inp.value; upd(); };
+        if (inp.dataset.pick) inp.onchange = () => { const m = MASTER[inp.dataset.pick].find(x => x[0] === inp.value); if (m) { Object.assign(l, typeof m[1] === "function" ? m[1](p) : m[1]); save(); redraw(); } };
+      });
+      tr.querySelectorAll("select[data-k]").forEach(s => s.onchange = () => { l[s.dataset.k] = s.value; upd(); });
+      const d = tr.querySelector("[data-del]"); if (d) d.onclick = () => { p.lines = p.lines.filter(x => x !== l); save(); redraw(); };
+    });
+    sec.querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
+      const nl = newLine(c.code, b.dataset.add);
+      if ((nl.kind === "doc" || nl.kind === "air") && peopleOf(p)) nl.qty = peopleOf(p);   // default: whole team
+      if (nl.kind === "mp" || nl.kind === "acc") { const d = daysOf(p); if (d) { if (nl.kind === "mp") nl.days = d; else nl.periods = Math.max(1, d - 1); } }
+      p.lines.push(nl); save(); redraw();
+      const g = document.querySelector(`.se-grp[data-kind="${b.dataset.add}"]`), ins = g && g.querySelectorAll("tbody tr:last-child input");
+      if (ins && ins.length) ins[0].focus();
+    });
+    const add = sec.querySelector("#cAdd");
+    if (add) add.onclick = () => {
+      const g = id => sec.querySelector(id).value.trim(), amount = num(g("#cAmt"));
+      if (!g("#cDate") || !g("#cDesc") || amount <= 0) return toast("กรอกวันที่ รายการ และจำนวนเงิน");
+      const f = sec.querySelector("#cFile").files[0];
+      p.actuals.push({ id: uid(), date: g("#cDate"), cat: c.code, desc: g("#cDesc"), amount, receipt: f ? f.name : "", by: who(), status: "pending" });
+      save(); toast(bud != null && bud - actualBy(p)[c.code] < 0 ? "บันทึกแล้ว · ⚠️ หมวดนี้เกินงบ" : "บันทึกแล้ว · รอตรวจ"); redraw();
+    };
+    sec.querySelectorAll("tr[data-a]").forEach(tr => {
+      const a = p.actuals.find(x => x.id === tr.dataset.a);
+      tr.querySelectorAll("[data-chk]").forEach(b => b.onclick = () => { a.status = b.dataset.chk; save(); redraw(); });
+      const d = tr.querySelector("[data-adel]"); if (d) d.onclick = () => { p.actuals = p.actuals.filter(x => x !== a); save(); redraw(); };
+    });
+  }
+
+  const CSS4 = `
+.se-click{cursor:pointer}.se-click:hover td{background:var(--blush)}.se-click .se-go{color:var(--rak);font-size:12.5px;white-space:nowrap;font-weight:600}
+.se-catnav{display:flex;flex-wrap:wrap;gap:6px}
+.se-catnav a{display:inline-flex;align-items:center;gap:6px;text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:5px 12px 5px 9px;font-size:13px;color:#3d4450;background:#fff}
+.se-catnav a .se-ci{width:16px;height:16px}.se-catnav a:hover{border-color:#f0b9b9}.se-catnav a.on{background:var(--rak);border-color:var(--rak);color:#fff;font-weight:600}
+.se-cat-h{display:flex;align-items:center;gap:8px}.se-cat-h .se-ci{width:22px;height:22px;color:var(--rak)}.se-cat-h small{font-weight:400;color:var(--muted);font-size:13px}
+.se-grp{display:grid;gap:10px;border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#fff}
+.se-grp-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px}.se-grp-h b{font-size:14.5px;font-weight:600}.se-grp-t{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums}
+.se-grp .se-btn{justify-self:start}
+.se-dt{min-width:760px;table-layout:fixed}.se-dt td{padding:5px 6px;vertical-align:middle}.se-dt th{padding:9px 6px;white-space:normal;line-height:1.25}
+.se-dt td .se-in{min-width:0}
+.se-cat-tot{display:flex;justify-content:space-between;align-items:center;background:var(--blush);border:1px solid var(--blush-2);border-radius:10px;padding:10px 14px;font-weight:600}
+.se-cat-tot b{font-size:18px;color:var(--rak)}
+.se-estcat td{vertical-align:middle}.se-estcat .se-brief{color:var(--muted);font-size:12.5px}
+@media (max-width:640px){.se-catnav a span{display:none}.se-catnav a{padding:6px 9px}}`;
+
   /* ---------- store ---------- */
   function seed() {
     const mk = (o) => Object.assign({ jo: "", list: "active", lines: [], history: [], budget: null, lockedAt: null, actuals: [], createdAt: new Date().toISOString() }, o);
-    const L1 = (cat, scope, people, days, qty, unit, rate) => ({ id: uid(), cat, scope, people, days, qty, unit, rate, remark: "" });
-    return { v: 1, user: "dew", projects: [
+    const L1 = (cat, kind, o) => Object.assign(newLine(cat, kind), o);
+    return { v: 2, user: "dew", projects: [
       mk({ id: "ij2610005", ij: "IJ2610005", name: "New Dual EP Line", customer: "ULTRA CLEAN TECHNOLOGY (SINGAPORE)", city: "Singapore",
         start: "2027-05-23", end: "2027-05-30", phases: [{ name: "Phase 1 Installation", start: "2027-05-23", end: "2027-05-30" }], status: "requested",
-        lines: [L1("manpower", "Engineer", 2, 8, "", "manday", 3500), L1("manpower", "Technician", 5, 8, "", "manday", 2500), L1("travel", "ตั๋วเครื่องบินต่างประเทศ", "", "", 7, "ใบ", 25000), L1("accommodation", "ห้องพัก (ต่างประเทศ)", "", "", 28, "คืน", 3500)],
+        destination: "", // from Base44 project IJ2610005 — totals ฿566,350 there and here
+        lines: [
+          L1("manpower", "mp", { position: "Site Engineer", qty: 1, days: 7, day_rate: 2000, ot_hours: 20, ot_rate: 375, overnight: true, note: "SC" }),
+          L1("manpower", "mp", { position: "Team Lead", qty: 2, days: 7, day_rate: 2000, ot_hours: 20, ot_rate: 375, overnight: true }),
+          L1("manpower", "mp", { position: "Technician", qty: 3, days: 7, day_rate: 1000, ot_hours: 20, ot_rate: 187.5, overnight: true }),
+          L1("manpower", "mp", { position: "Programmer", qty: 1, days: 7, day_rate: 5000, ot_hours: 20, ot_rate: 937.5, overnight: true }),
+          L1("subcontract", "sub", { title: "Packing", scope: "Tools packing", lump_qty: 1, lump_rate: 10000 }),
+          L1("subcontract", "sub", { title: "Truck", scope: "CBT", lump_qty: 1, lump_rate: 120000 }),
+          L1("accommodation", "acc", { label: "Single Room", unit_qty: 1, periods: 6, rate: 2500 }),
+          L1("accommodation", "acc", { label: "Twin Room", unit_qty: 3, periods: 6, rate: 2500 }),
+          L1("travel", "air", { for_label: "Site Engineer (SC)", country: "Singapore", airline: "OTHER", qty: 1, fare: 22000 }),
+          L1("travel", "air", { for_label: "Team Lead", country: "Singapore", airline: "OTHER", qty: 2, fare: 22000 }),
+          L1("travel", "air", { for_label: "Technician", country: "Singapore", airline: "OTHER", qty: 3, fare: 22000 }),
+          L1("travel", "air", { for_label: "Programmer", country: "Singapore", airline: "OTHER", qty: 1, fare: 22000 }),
+          L1("travel", "doc", { doc_name: "Travel Insurance", qty: 7, rate: 1500 }),
+          L1("travel", "doc", { doc_name: "Invitation letter / หนังสือเชิญจากปลายทาง", qty: 7, rate: 1000 }),
+          L1("travel", "doc", { doc_name: "Taxi Airport Round trip (Destination)", qty: 1, rate: 4000, note: "Programmer" }),
+          L1("travel", "tground", { description: "รถตู้ (Site Trip)", vehicles_qty: 1, trips: 1, rate: 1000 }),
+          L1("travel", "tground", { description: "Taxi Airport Round trip (Thailand)", vehicles_qty: 2, trips: 6, rate: 1000 }),
+          L1("site_expense", "se", { tier_item: "Pocket money 3 — scope ใหญ่", description: "Pocket Money", qty: 1, rate: 30000, holder_name: "อาร์ต" })],
         history: [{ at: new Date().toISOString(), role: "sc", by: "สปาย", action: "submit", note: "" }] }),
       mk({ id: "ij2604012", ij: "IJ2604012", name: "New Dual EP Line", customer: "ULTRA CLEAN TECHNOLOGY (ISRAEL)", city: "Tel Aviv",
         start: "2027-03-01", end: "2027-03-10", phases: [{ name: "Phase 1 Installation", start: "2027-03-01", end: "2027-03-10" }], status: "draft",
-        lines: [L1("manpower", "Technician", 8, 10, "", "manday", 2500)] }),
+        lines: [L1("manpower", "mp", { position: "Technician", qty: 3, days: 10, day_rate: 1000, ot_hours: 10, ot_rate: 187.5 }), L1("manpower", "mp", { position: "Team Lead", qty: 3, days: 10, day_rate: 2000, ot_hours: 10, ot_rate: 375, overnight: true })] }),
       mk({ id: "ij20602006", ij: "IJ20602006", jo: "03302026", name: "Plating Line & WWTP relocation", customer: "ISOBE", city: "Nagoya",
         start: "2026-11-01", end: "2027-02-04", phases: [{ name: "Dismantle", start: "2026-11-01", end: "2026-11-30" }, { name: "Installation", start: "2026-12-01", end: "2027-01-19" }, { name: "Test & SAT", start: "2027-01-20", end: "2027-02-04" }],
         status: "locked", lockedAt: new Date().toISOString(),
-        lines: [L1("manpower", "Technician", 10, 96, "", "manday", 1000), L1("manpower", "Supervisor", 3, 96, "", "manday", 1500), L1("transportation", "รถ 10 ล้อ", "", "", 10, "trip", 12000), L1("accommodation", "ห้องพัก (ต่างประเทศ)", "", "", 100, "คืน", 3500)],
+        lines: [L1("manpower", "mp", { position: "Technician", qty: 10, days: 96, day_rate: 1000 }), L1("manpower", "mp", { position: "Team Lead", qty: 3, days: 96, day_rate: 2000, overnight: true }),
+          L1("transportation", "veh", { description: "รถ 10 ล้อ เฮี๊ยบติดเครน", vehicles_qty: 2, trips: 5, rate: 8500 }), L1("transportation", "veh", { description: "รถเครน 25 ตัน", vehicles_qty: 1, trips: 4, rate: 9000, signal_crew: 2, signal_rate: 4500 }),
+          L1("accommodation", "acc", { label: "ห้องพัก (ต่างประเทศ)", unit_qty: 13, periods: 96, rate: 3500 })],
         history: [{ at: new Date().toISOString(), role: "sc", by: "อาร์ต", action: "submit", note: "" }, { at: new Date().toISOString(), role: "ssm", by: "ดิว", action: "approve", note: "" }, { at: new Date().toISOString(), role: "md", by: "บี", action: "approve", note: "" }, { at: new Date().toISOString(), role: "ssm", by: "ดิว", action: "award", note: "Job 03302026" }],
         actuals: [
           { id: uid(), date: "2026-11-03", cat: "manpower", desc: "ค่าแรงทีมรื้อถอน สัปดาห์ 1", amount: 182000, receipt: "", by: "อาร์ต", status: "checked" },
@@ -206,7 +402,7 @@
     ].map(p => { if (p.status === "locked") p.budget = sumByCat(p); return p; }) };
   }
   let DB = null;
-  function load() { try { const d = JSON.parse(localStorage.getItem(KEY) || "null"); if (d && d.v === 1) { if (!d.user) d.user = { sc: "spy", ssm: "dew", md: "bee" }[d.role] || "dew"; return d; } } catch (e) {} return seed(); }
+  function load() { try { const d = JSON.parse(localStorage.getItem(KEY) || "null"); if (d && (d.v === 1 || d.v === 2)) { if (!d.user) d.user = { sc: "spy", ssm: "dew", md: "bee" }[d.role] || "dew"; d.projects.forEach(p => p.lines = (p.lines || []).map(migrateLine)); d.v = 2; return d; } } catch (e) {} return seed(); }
   function save() { try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {} }
   const me = () => PEOPLE.find(x => x[0] === DB.user) || PEOPLE[0];
   const can = k => PERMS[k].includes(me()[2]);
@@ -214,10 +410,10 @@
 
   /* ---------- calculations ---------- */
   const qtyOf = l => (l.qty !== "" && l.qty != null) ? num(l.qty) : num(l.people) * num(l.days);
-  const amtOf = l => qtyOf(l) * num(l.rate);
+  const amtOf = l => l.kind && KIND[l.kind] ? KIND[l.kind].amt(l) : qtyOf(l) * num(l.rate);
   const totalOf = p => p.lines.reduce((a, l) => a + amtOf(l), 0);
   function sumByCat(p) { const o = {}; CATS.forEach(c => o[c.code] = 0); p.lines.forEach(l => o[l.cat] = (o[l.cat] || 0) + amtOf(l)); return o; }
-  const peopleOf = p => p.lines.filter(l => l.cat === "manpower").reduce((a, l) => a + num(l.people), 0);
+  const peopleOf = p => p.lines.filter(l => l.kind === "mp").reduce((a, l) => a + num(l.qty), 0);
   const daysOf = p => span(p.start, p.end);
   const plannedOf = p => p.budget ? Object.values(p.budget).reduce((a, b) => a + b, 0) : totalOf(p);
   const actualBy = p => { const o = {}; CATS.forEach(c => o[c.code] = 0); p.actuals.filter(a => a.status !== "rejected").forEach(a => o[a.cat] += num(a.amount)); return o; };
@@ -321,6 +517,7 @@
         <label class="w2">Project name *<input id="fName" value="${esc(v.name)}" placeholder="เช่น New Dual EP Line"></label>
         <label class="w2">Customer<input id="fCus" value="${esc(v.customer)}"></label>
         <label>City / Site<input id="fCity" value="${esc(v.city)}"></label>
+        <label>จังหวัดปลายทาง (ราคารถ)<select id="fDest"><option value="">ต่างประเทศ / อื่นๆ</option>${DESTS.map(d => `<option ${v.destination === d ? "selected" : ""}>${d}</option>`).join("")}</select></label>
         <label>Start<input id="fStart" type="date" value="${esc(v.start)}"></label>
         <label>End<input id="fEnd" type="date" value="${esc(v.end)}"></label>
       </div>
@@ -333,7 +530,7 @@
         if (s && e && e < s) return "วันสิ้นสุดต้องไม่ก่อนวันเริ่ม";
         if (DB.projects.some(x => x.ij.toLowerCase() === ij.toLowerCase() && x !== p && x.list !== "trash")) return "มี IJ นี้อยู่แล้ว";
         const phases = [...mm.querySelectorAll(".se-phr")].map(r => ({ name: r.querySelector('[data-k="name"]').value.trim(), start: r.querySelector('[data-k="start"]').value, end: r.querySelector('[data-k="end"]').value })).filter(x => x.name);
-        const data = { ij, name, customer: g("#fCus"), city: g("#fCity"), start: s, end: e, phases };
+        const data = { ij, name, customer: g("#fCus"), city: g("#fCity"), destination: mm.querySelector("#fDest").value, start: s, end: e, phases };
         if (p) { Object.assign(p, data); save(); toast("บันทึกข้อมูลโปรเจคแล้ว"); window.dispatchEvent(new HashChangeEvent("hashchange")); }
         else {
           const np = Object.assign({ id: ij.toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + uid().slice(0, 4), jo: "", status: "draft", list: "active", lines: [], history: [], budget: null, lockedAt: null, actuals: [], createdAt: new Date().toISOString() }, data);
@@ -351,8 +548,9 @@
     { id: "estimate", no: "2", name: "Estimate", th: "ประเมินจาก Scope of Work", ic: "📝" },
     { id: "actual", no: "3", name: "Actual record", th: "บันทึกค่าใช้จ่ายจริงจากหน้างาน", ic: "🧾" },
   ];
-  function project(el, p, secId) {
-    const cur = SECS.find(s => s.id === secId) || SECS[0];
+  function project(el, p, secId, catCode) {
+    const isCat = secId === "cat" && CATS.some(c => c.code === catCode);
+    const cur = isCat ? SECS[1] : SECS.find(s => s.id === secId) || SECS[0];
     const st = STATUS[p.status];
     const href = s => `#site-expense/${encodeURIComponent(p.id)}${s === "dashboard" ? "" : "/" + s}`;
     const steps = [["draft", "SC ร่าง"], ["requested", "อนุมัติ (ดิว / บี)"], ["approved", "Get Award (Job no.)"], ["locked", "Budgetary 🔒"]];
@@ -376,7 +574,7 @@
         <nav class="se-tabs" aria-label="Section ของโปรเจค">${SECS.map(s => `<a class="se-tab" href="${href(s.id)}" ${s.id === cur.id ? 'aria-current="page"' : ""}><span class="n">${s.ic}</span><b>${s.no}. ${esc(s.name)}</b><small>${esc(s.th)}</small></a>`).join("")}</nav>
         <section class="se-sec" id="seSec"></section>
       </div>`;
-    const redraw = () => project(el, p, cur.id);
+    const redraw = () => project(el, p, isCat ? "cat" : cur.id, catCode);
     wireRole(el, redraw);
     const on = (sel, fn) => { const b = el.querySelector(sel); if (b) b.onclick = fn; };
     on("[data-edit]", () => projectForm(p));
@@ -385,6 +583,7 @@
     on("[data-trash]", () => { if (confirm("ย้ายโปรเจคนี้ไป Trash?")) { p.list = "trash"; save(); toast("ย้ายไป Trash แล้ว"); location.hash = "#site-expense"; } });
     on("[data-restore]", () => { p.list = "active"; save(); toast("กู้คืนแล้ว"); redraw(); });
     const sec = el.querySelector("#seSec");
+    if (isCat) return secCategory(sec, p, redraw, catCode);
     ({ dashboard: secDashboard, estimate: secEstimate, actual: secActual })[cur.id](sec, p, redraw);
   }
 
@@ -448,6 +647,14 @@
     return m;
   }
 
+  // Category rows (Dashboard and Estimate) open that category's detail page
+  function goRows(sec, p) {
+    sec.querySelectorAll("[data-go]").forEach(tr => {
+      const go = () => { location.hash = `#site-expense/${encodeURIComponent(p.id)}/cat/${tr.dataset.go}`; };
+      tr.onclick = go; tr.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } };
+    });
+  }
+
   /* ---------- 1. Dashboard ---------- */
   function secDashboard(sec, p) {
     const bud = p.budget, act = actualBy(p), est = sumByCat(p);
@@ -468,32 +675,19 @@
       </div>
       ${over.length ? `<div class="se-alert">⚠️ หมวดที่ใช้งบถึง 80% ขึ้นไป: ${over.map(c => `<b>${esc(c.name)}</b> (${pct(act[c.code], bud[c.code]).toFixed(0)}%)`).join(", ")}</div>` : ""}
       <div class="tbl"><table><thead><tr><th>หมวดค่าใช้จ่าย</th>${bud ? "" : `<th class="r">Estimate</th>`}<th class="r">Budget</th><th class="r">Actual</th><th class="r">คงเหลือ</th><th>% ใช้ไป</th></tr></thead>
-        <tbody>${CATS.map(c => { const b = bud ? bud[c.code] : 0, a = act[c.code]; return `<tr><td>${catCell(c)}</td>${bud ? "" : `<td class="r">${est[c.code] ? money(est[c.code]) : "–"}</td>`}<td class="r">${bud ? money(b) : "–"}</td><td class="r">${a ? money(a) : "–"}</td><td class="r ${bud && b - a < 0 ? "neg" : ""}">${bud ? money(b - a) : "–"}</td><td class="se-mt">${meter(a, b)}</td></tr>`; }).join("")}</tbody>
+        <tbody>${CATS.map(c => { const b = bud ? bud[c.code] : 0, a = act[c.code]; return `<tr class="se-click" data-go="${c.code}" tabindex="0" title="ดูรายละเอียด ${esc(c.name)}"><td>${catCell(c)}</td>${bud ? "" : `<td class="r">${est[c.code] ? money(est[c.code]) : "–"}</td>`}<td class="r">${bud ? money(b) : "–"}</td><td class="r">${a ? money(a) : "–"}</td><td class="r ${bud && b - a < 0 ? "neg" : ""}">${bud ? money(b - a) : "–"}</td><td class="se-mt">${meter(a, b)} <span class="se-go">›</span></td></tr>`; }).join("")}</tbody>
         <tfoot><tr><td><b>รวม</b></td>${bud ? "" : `<td class="r"><b>${money(totalOf(p))}</b></td>`}<td class="r"><b>${bud ? money(B) : "–"}</b></td><td class="r"><b>${money(A)}</b></td><td class="r"><b>${bud ? money(B - A) : "–"}</b></td><td class="se-mt">${meter(A, B)}</td></tr></tfoot></table></div>
       <div class="se-other">
         <div class="se-box"><b>⏳ สถานะอนุมัติ</b><span>${STATUS[p.status].th} · ${STATUS[p.status].wait}</span></div>
         <div class="se-box"><b>🧾 Actual รอตรวจ</b><span>${pend.length ? `${pend.length} รายการ · ${baht(pend.reduce((a, x) => a + num(x.amount), 0))}` : "ไม่มี"}</span></div>
         <div class="se-box"><b>📅 บันทึกล่าสุด</b><span>${p.actuals.length ? fmtD(p.actuals.map(a => a.date).sort().pop()) : "ยังไม่มีรายการ"}</span></div>
       </div>`;
+    goRows(sec, p);
   }
 
   /* ---------- 2. Estimate ---------- */
   function secEstimate(sec, p, redraw) {
     const ed = editable(p);
-    const rateOpts = (cat, l) => `<option value="">— เลือก rate —</option>` + (RATES[cat] || []).map(([n, u, v], i) => `<option value="${i}" ${l && l.unit === u && num(l.rate) === v && l.scope === n ? "selected" : ""}>${esc(n)} · ${money(v)}/${esc(u)}</option>`).join("");
-    const row = (l, i) => ed ? `<tr data-id="${l.id}">
-        <td class="c se-no">${i + 1}</td>
-        <td><select class="se-in" data-k="cat">${CATS.map(c => `<option value="${c.code}" ${c.code === l.cat ? "selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
-            <select class="se-in se-rate" data-rate aria-label="เลือกจาก Master rate">${rateOpts(l.cat, l)}</select></td>
-        <td><input class="se-in" data-k="scope" value="${esc(l.scope)}" placeholder="รายการงาน / ตำแหน่ง"></td>
-        <td><input class="se-in c" data-k="people" value="${esc(l.people)}" inputmode="decimal"></td>
-        <td><input class="se-in c" data-k="days" value="${esc(l.days)}" inputmode="decimal"></td>
-        <td><input class="se-in c" data-k="qty" value="${esc(l.qty)}" placeholder="${num(l.people) * num(l.days) || ""}" inputmode="decimal" title="ว่างไว้ = คน × วัน"></td>
-        <td><input class="se-in c" data-k="unit" value="${esc(l.unit)}"></td>
-        <td><input class="se-in r" data-k="rate" value="${esc(l.rate)}" inputmode="decimal"></td>
-        <td class="r se-amt" data-amt>${money(amtOf(l))}</td>
-        <td><button class="se-x" data-del aria-label="ลบแถว">${IC.x}</button></td></tr>`
-      : `<tr><td class="c">${i + 1}</td><td>${catCell(catOf(l.cat))}</td><td>${esc(l.scope)}</td><td class="c">${esc(l.people || "–")}</td><td class="c">${esc(l.days || "–")}</td><td class="c">${qtyOf(l) || "–"}</td><td class="c">${esc(l.unit)}</td><td class="r">${money(num(l.rate))}</td><td class="r">${money(amtOf(l))}</td><td></td></tr>`;
     const by = sumByCat(p);
     const actions = [];
     if (p.list === "active") {
@@ -508,31 +702,15 @@
     sec.innerHTML = `
       <div class="se-sec-h"><h3>📝 Estimate · ประเมินจาก Scope of Work</h3>${ed ? `<span class="badge live">แก้ไขได้</span>` : `<span class="badge off">${p.status === "locked" ? "🔒 ล็อกเป็น Budgetary แล้ว" : "อ่านอย่างเดียว"}</span>`}</div>
       ${p.status === "revise" ? `<div class="se-alert">↩ ถูกส่งกลับให้แก้: ${esc((p.history.filter(h => h.action === "back").pop() || {}).note || "-")}</div>` : ""}
-      <div class="tbl se-est"><table><colgroup><col style="width:46px"><col style="width:190px"><col><col style="width:68px"><col style="width:68px"><col style="width:78px"><col style="width:92px"><col style="width:110px"><col style="width:120px"><col style="width:40px"></colgroup><thead><tr><th class="c">No.</th><th>หมวด / Master rate</th><th>Scope of Work</th><th class="c">คน</th><th class="c">วัน</th><th class="c">จำนวน</th><th class="c">หน่วย</th><th class="r">ราคา/หน่วย</th><th class="r">จำนวนเงิน</th><th></th></tr></thead>
-        <tbody>${p.lines.length ? p.lines.map(row).join("") : `<tr><td colspan="10" class="se-muted c" style="padding:22px">ยังไม่มีรายการ${ed ? " · กด ＋ เพิ่มรายการ" : ""}</td></tr>`}</tbody>
-        <tfoot><tr><td colspan="8" class="r"><b>รวมประเมิน</b></td><td class="r"><b id="seTot">${money(totalOf(p))}</b></td><td></td></tr></tfoot></table></div>
-      ${ed ? `<div class="se-actions"><button class="se-btn" data-add>${IC.plus}เพิ่มรายการ</button><span class="se-hint">จำนวน = คน × วัน ถ้าเว้นว่าง · เลือก Master rate แล้วระบบเติมหน่วยและราคาให้ · บันทึกอัตโนมัติ</span></div>` : ""}
-      <div class="se-sum" id="seSum">${CATS.map(c => `<span>${catCell(c)}<b data-cat="${c.code}">${money(by[c.code])}</b></span>`).join("")}</div>
+      <div class="tbl"><table class="se-estcat"><thead><tr><th>หมวดค่าใช้จ่าย</th><th>รายละเอียด</th><th class="c">รายการ</th><th class="r">Estimate</th><th></th></tr></thead>
+        <tbody>${CATS.map(c => { const ls = p.lines.filter(l => l.cat === c.code), b = ls.map(l => KIND[l.kind] ? KIND[l.kind].brief(l) : "").filter(Boolean); return `<tr class="se-click" data-go="${c.code}" tabindex="0" title="${ed ? "กรอก" : "ดู"}รายละเอียด ${esc(c.name)}"><td>${catCell(c)}</td><td class="se-brief">${b.length ? esc(b.slice(0, 3).join(" · ")) + (b.length > 3 ? ` · +${b.length - 3}` : "") : "–"}</td><td class="c">${ls.length || "–"}</td><td class="r"><b>${by[c.code] ? money(by[c.code]) : "–"}</b></td><td class="r"><span class="se-go">${ed ? "กรอกรายละเอียด" : "ดูรายละเอียด"} →</span></td></tr>`; }).join("")}</tbody>
+        <tfoot><tr><td colspan="3"><b>รวมประเมิน</b></td><td class="r"><b>${money(totalOf(p))}</b></td><td></td></tr></tfoot></table></div>
+      ${ed ? `<p class="se-hint">กดที่หมวดเพื่อกรอกรายละเอียด (ตำแหน่ง ค่าแรง OT ที่พัก ตั๋ว รถ ฯลฯ) ระบบคำนวณยอดให้ตามสูตรเดียวกับ SC Site Expense</p>` : ""}
       <div class="se-approve">
         <div class="se-actions">${actions.join("")}${waitMsg}</div>
         <div class="se-hist"><b>ประวัติการอนุมัติ</b>${hist.length ? `<ul>${hist.map(h => `<li><span class="se-who">${esc(ROLE_TH[h.role] || h.role.toUpperCase())}</span>${h.by ? `<b class="se-by">${esc(h.by)}</b>` : ""} ${ACT[h.action] || esc(h.action)}${h.note ? ` · <i>${esc(h.note)}</i>` : ""}<small>${new Date(h.at).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}</small></li>`).join("")}</ul>` : `<p class="se-muted">ยังไม่มี</p>`}</div>
       </div>`;
-    const tot = () => { sec.querySelector("#seTot").textContent = money(totalOf(p)); const b = sumByCat(p); sec.querySelectorAll("[data-cat]").forEach(x => x.textContent = money(b[x.dataset.cat])); };
-    const lineOf = tr => p.lines.find(l => l.id === tr.dataset.id);
-    sec.querySelectorAll("tr[data-id]").forEach(tr => {
-      const l = lineOf(tr);
-      tr.querySelectorAll("input[data-k]").forEach(inp => inp.oninput = () => {
-        l[inp.dataset.k] = inp.value; save();
-        tr.querySelector("[data-amt]").textContent = money(amtOf(l));
-        if (inp.dataset.k === "people" || inp.dataset.k === "days") tr.querySelector('[data-k="qty"]').placeholder = num(l.people) * num(l.days) || "";
-        tot();
-      });
-      tr.querySelector('[data-k="cat"]').onchange = e => { l.cat = e.target.value; save(); redraw(); };
-      tr.querySelector("[data-rate]").onchange = e => { const x = (RATES[l.cat] || [])[e.target.value]; if (!x) return; if (!l.scope) l.scope = x[0]; l.unit = x[1]; l.rate = x[2]; save(); redraw(); };
-      tr.querySelector("[data-del]").onclick = () => { p.lines = p.lines.filter(x => x !== l); save(); redraw(); };
-    });
-    const add = sec.querySelector("[data-add]");
-    if (add) add.onclick = () => { p.lines.push({ id: uid(), cat: "manpower", scope: "", people: "", days: "", qty: "", unit: "manday", rate: "", remark: "" }); save(); redraw(); const ins = sec.querySelectorAll('input[data-k="scope"]'); if (ins.length) ins[ins.length - 1].focus(); };
+    goRows(sec, p);
     const log = (action, note = "") => p.history.push({ at: new Date().toISOString(), role: { submit: "create", lock: "award", award: "award" }[action] || "approve", by: who(), action, note });
     sec.querySelectorAll("[data-act]").forEach(b => b.onclick = () => {
       const a = b.dataset.act;
@@ -666,18 +844,18 @@ td.neg,.neg{color:var(--rak);font-weight:600}
 @media (max-width:760px){.se-form2{grid-template-columns:1fr 1fr}.se-fgrid{grid-template-columns:1fr 1fr}.se-phr{grid-template-columns:1fr 1fr auto}.se-phr input:first-child{grid-column:1/-1}.se-sum{grid-template-columns:1fr 1fr}.se-ph-a{justify-content:flex-start}.se-link{margin-left:0}}`;
 
   function mount(el, sub) {
-    if (!document.getElementById("seCss")) { const s = document.createElement("style"); s.id = "seCss"; s.textContent = CSS + CSS2 + CSS3; document.head.appendChild(s); }
+    if (!document.getElementById("seCss")) { const s = document.createElement("style"); s.id = "seCss"; s.textContent = CSS + CSS2 + CSS3 + CSS4; document.head.appendChild(s); }
     document.querySelectorAll(".se-modal").forEach(m => m.remove());
     if (!DB) {
       DB = load();
       const signed = PEOPLE.find(x => x[2] === ((window.SSM_ME || {}).username || ""));
       if (signed && !DB.picked) DB.user = signed[0]; // start as the signed-in person until someone switches in the test bar
     }
-    const [pid, sec] = (sub || "").split("/").map(decodeURIComponent);
+    const [pid, sec, code] = (sub || "").split("/").map(decodeURIComponent);
     if (!pid) return overview(el);
     const p = DB.projects.find(x => x.id === pid);
     if (!p) { el.innerHTML = `<div class="empty">ไม่พบโปรเจคนี้ · <a class="open" href="#site-expense">กลับ Overview</a></div>`; return; }
-    project(el, p, sec || "dashboard");
+    project(el, p, sec || "dashboard", code);
   }
   window.SiteExpense = { mount };
 })();
