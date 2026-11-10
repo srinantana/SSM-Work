@@ -212,14 +212,16 @@ async function servicePlanApi(cfg, req, url) {
 // SC / PC / SSM (set by Dew, 10 Nov 2026). Matched by username, or by Thai full name when the username is not known yet.
 //   SSM ดิว nantana.s · SC อาร์ต sakkamon.c, หนุ่ม teedanai.h, สปาย prakaikaew.p
 //   PC กอล์ฟ kitisak.s, แพร phattharada.t, ไอซ์ pichayut.k (R69010), ซี napat.t (R69014)
+//   เอ๋ อรอิศรา พงศ์ผาติโรจน์ — same rights as กอล์ฟ (set by Dew, 10 Nov 2026); matched by Thai name
 const MANPOWER_EDIT = {
   usernames: ['nantana.s', 'sakkamon.c', 'teedanai.h', 'prakaikaew.p', 'kitisak.s', 'phattharada.t', 'pichayut.k', 'napat.t'],
   namesTh: ['นันทนา ศรีสกุลเตียว', 'ศักดิ์กมล จันทริมา', 'ธีร์ดนัย ฮุยสูงเนิน', 'ประกายแก้ว ปัญญา',
-    'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์', 'พิชญ์ยุทธ คงดิศ', 'ภัทรลดา ทองสอาด', 'นภัท ทองอำไพ'],
+    'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์', 'พิชญ์ยุทธ คงดิศ', 'ภัทรลดา ทองสอาด', 'นภัท ทองอำไพ',
+    'อรอิศรา พงศ์ผาติโรจน์'],
 };
 const thKey = (s) => String(s || '').replace(/\s+/g, ' ').trim();
-// Milestones (top rows of the board): only ดิว (SSM) and กอล์ฟ (PC) may add / change / delete them (set by Dew, 10 Nov 2026)
-const MILESTONE_EDIT = { usernames: ['nantana.s', 'kitisak.s'], namesTh: ['นันทนา ศรีสกุลเตียว', 'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์'] };
+// Milestones (top rows of the board): only ดิว (SSM), กอล์ฟ (PC) and เอ๋ (same rights as กอล์ฟ) may add / change / delete them (set by Dew, 10 Nov 2026)
+const MILESTONE_EDIT = { usernames: ['nantana.s', 'kitisak.s'], namesTh: ['นันทนา ศรีสกุลเตียว', 'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์', 'อรอิศรา พงศ์ผาติโรจน์'] };
 const canEditManpower = (prof) => MANPOWER_EDIT.usernames.includes(String(prof.username || '').toLowerCase())
   || MANPOWER_EDIT.namesTh.includes(thKey(prof.nameTh));
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;

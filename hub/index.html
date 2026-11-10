@@ -180,6 +180,8 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:#f1f3
   <symbol id="i-plan" viewBox="0 0 24 24"><rect class="d" x="3.5" y="5" width="17" height="15.5" rx="2.6"/><rect class="s" x="3.5" y="5" width="17" height="15.5" rx="2.6"/><path class="s" d="M3.5 9.5h17M8 3v4M16 3v4"/><path class="s" d="M14.6 12.4a2.3 2.3 0 0 0-2.9 2.9l-2.4 2.4a.9.9 0 0 0 1.3 1.3l2.4-2.4a2.3 2.3 0 0 0 2.9-2.9l-1.3 1.3-1.2-.3-.3-1.2z"/></symbol>
   <!-- Manpower: two people with a hard hat -->
   <symbol id="i-team" viewBox="0 0 24 24"><circle class="d" cx="9" cy="9" r="3.4"/><path class="d" d="M3 19.5a6 6 0 0 1 12 0z"/><circle class="s" cx="9" cy="9.6" r="2.8"/><path class="s" d="M5.6 8.4a3.4 3.4 0 0 1 6.8 0zM9 4.6v.9M3 19.5a6 6 0 0 1 12 0M16 7.2a2.6 2.6 0 1 1 0 5.2M17.2 14.4a5 5 0 0 1 3.8 5.1"/></symbol>
+  <!-- Manual: open book -->
+  <symbol id="i-book" viewBox="0 0 24 24"><path class="d" d="M3.5 5.5c3-1 6-1 8.5.8 2.5-1.8 5.5-1.8 8.5-.8v13c-3-1-6-1-8.5.8-2.5-1.8-5.5-1.8-8.5-.8z"/><path class="s" d="M3.5 5.5c3-1 6-1 8.5.8 2.5-1.8 5.5-1.8 8.5-.8v13c-3-1-6-1-8.5.8-2.5-1.8-5.5-1.8-8.5-.8zM12 6.3v13"/><path class="s" d="M6.5 9.3c1.3-.3 2.5-.2 3.5.3M14 9.6c1-.5 2.2-.6 3.5-.3"/></symbol>
   <!-- Punch List: clipboard with ticks -->
   <symbol id="i-punch" viewBox="0 0 24 24"><rect class="d" x="5" y="5" width="14" height="16" rx="2.5"/><rect class="s" x="5" y="5" width="14" height="16" rx="2.5"/><rect class="s" x="9" y="3" width="6" height="3.6" rx="1.2" style="fill:#fff"/><path class="s" d="m8.3 11.2 1.3 1.3 2.2-2.4M13.5 11.4h2.4M8.3 16l1.3 1.3 2.2-2.4M13.5 16.2h2.4"/></symbol>
   <!-- Customer: little factory -->
@@ -212,6 +214,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:#f1f3
 <script src="/site-expense/app.js"></script>
 <script src="/service-plan/app.js"></script>
 <script src="/manpower/app.js"></script>
+<script src="/manual/app.js"></script>
 <script>
 "use strict";
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -230,11 +233,13 @@ const MODULES = [
      plan:["ปฏิทินรายวัน / สัปดาห์ / เดือน / ปี จาก Google Sheet ใบขอคน","กดดูรายละเอียดงาน + ทะเบียนรถ","แจ้งเตือนก่อนถึงกำหนดเข้าบริการ","บันทึกผลการบริการ"]},
   {id:"manpower",    icon:"i-team",    live:true, name:"Manpower",     th:"วางแผนกำลังคน",              desc:"Planning Board คน × วัน แทน Google Sheet ตารางงานและวันหยุดช่าง · ใครอยู่งานไหน ลา หรือว่าง · Milestone โปรเจกต์",
      plan:["Planning Board คน × วัน แยกหน่วยงาน ME / PP / EE / PC / SC (ดูอย่างเดียว)","ลงงาน แก้ไข และบันทึกการลา โดย SC / PC / SSM พร้อมเตือนจองซ้ำ","Overview, Project Timeline, ค้นหาคนว่าง และ export","เชื่อม Service Plan และ Site Expense (man-day × rate)"]},
+  // Manual stays the LAST menu: open to every signed-in user, always sorted to the bottom (see visibleModules).
+  {id:"manual",      icon:"i-book",    live:true, always:true, name:"คู่มือการใช้งาน", th:"คู่มือ SSM Work",       desc:"วิธีใช้งาน SSM Work ทีละเมนู · เข้าระบบ เปลี่ยนรหัสผ่าน และสิทธิ์การใช้งาน"},
 ];
 let REG = {customers:[]};
 let ME = null; // from /auth/me: {email, name, role, modules:[...]} — the server enforces the same rules
-const allowed = id => id === "home" || !!(ME && (ME.modules || []).includes(id));
-const visibleModules = () => MODULES.filter(m => allowed(m.id));
+const allowed = id => id === "home" || (id === "manual" && ME !== null) || !!(ME && (ME.modules || []).includes(id));
+const visibleModules = () => MODULES.filter(m => allowed(m.id)).sort((a, b) => (a.id === "manual") - (b.id === "manual")); // manual always last
 
 function rows(){
   const out = [];
@@ -291,7 +296,7 @@ function customerBlocks(list, q){
 }
 
 function pageHome(){
-  const mine = visibleModules().filter(m => m.id !== "home");
+  const mine = visibleModules().filter(m => m.id !== "home" && m.id !== "manual");
   const quote = `<figure class="quote" title="นโยบายคุณภาพ RAK Engineering Co., Ltd.">
     <figcaption class="q-label">${icon("i-spark","ic")} นโยบายคุณภาพ</figcaption>
     <blockquote>“มุ่งมั่นผลิตสินค้าที่มีคุณภาพ ส่งมอบตรงเวลา และมีประสิทธิภาพในการบริการ เพื่อสร้างความพึงพอใจให้กับลูกค้า”</blockquote></figure>`;
@@ -333,13 +338,15 @@ function render(){
   const se = id === "site-expense" && ME !== null && allowed(id) && window.SiteExpense;
   const pl = id === "service-plan" && ME !== null && allowed(id) && window.ServicePlan;
   const mp = id === "manpower" && ME !== null && allowed(id) && window.Manpower;
-  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : sp ? (subRoute() ? "" : hero(m)) + `<div id="spRoot"></div>` : se ? (subRoute() ? "" : hero(m)) + `<div id="seRoot"></div>` : pl ? `<div id="plRoot" class="spc-root"></div>` : mp ? `<div id="mpRoot" class="mp-root"></div>` : allowed(id) ? pageModule(m) : pageDenied(m))
+  const mn = id === "manual" && ME !== null && window.Manual;
+  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : mn ? hero(m) + `<div id="mnRoot"></div>` : sp ? (subRoute() ? "" : hero(m)) + `<div id="spRoot"></div>` : se ? (subRoute() ? "" : hero(m)) + `<div id="seRoot"></div>` : pl ? `<div id="plRoot" class="spc-root"></div>` : mp ? `<div id="mpRoot" class="mp-root"></div>` : allowed(id) ? pageModule(m) : pageDenied(m))
     + `<div class="foot"><span>RAK Engineering Co., Ltd. · Site &amp; Service Management</span><span>${REG.updated ? "อัปเดตรายการ " + esc(REG.updated) : ""}</span></div>`;
   renderNav();
   if (sp) window.SparePart.mount(document.getElementById("spRoot"), subRoute());
   if (se) window.SiteExpense.mount(document.getElementById("seRoot"), subRoute());
   if (pl) window.ServicePlan.mount(document.getElementById("plRoot"), subRoute());
   if (mp) window.Manpower.mount(document.getElementById("mpRoot"), subRoute());
+  if (mn) window.Manual.mount(document.getElementById("mnRoot"), subRoute());
   const q = document.getElementById("q");
   if (q) q.addEventListener("input", () => { document.getElementById("list").innerHTML = customerBlocks(rows(), q.value.trim().toLowerCase()); });
   setMenu(false);
