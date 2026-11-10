@@ -358,6 +358,52 @@
     wireWp(sec, p, redraw);
   }
 
+  /* ---------- related documents (like ProjectAttachment in the SC Site Expense app) ---------- */
+  const DOC_TYPES = [["SOW", "📄", "Scope of Work"], ["Layout", "📐", "Layout"], ["Overview plant", "🏭", "Overview plant"], ["P&ID", "🧭", "P&ID"], ["Drawing", "📏", "Drawing"],
+    ["Quotation", "💲", "Quotation"], ["MOM", "📝", "MOM"], ["KOM", "🚩", "KOM"], ["Photo", "📷", "Photo"], ["Other", "📎", "อื่นๆ"]];
+  const KEY_DOCS = ["SOW", "Layout", "Overview plant"];
+  const docIc = t => (DOC_TYPES.find(x => x[0] === t) || DOC_TYPES[DOC_TYPES.length - 1])[1];
+  const canDocs = p => p.list === "active" && (can("create") || can("award"));
+  const safeUrl = u => /^https?:\/\//i.test(u || "") ? u : "";
+  function docsBox(p) {
+    const docs = p.docs || [], ed = canDocs(p);
+    const missing = KEY_DOCS.filter(t => !docs.some(d => d.type === t));
+    const chip = d => { const u = safeUrl(d.link); return `<span class="se-doc" title="${esc([d.type, d.note, d.file ? "ไฟล์: " + d.file : "", d.by ? "เพิ่มโดย " + d.by : ""].filter(Boolean).join(" · "))}">
+      ${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">` : "<span>"}<i>${docIc(d.type)}</i><b>${esc(d.type)}</b>${d.title && d.title !== d.type ? `<span>${esc(d.title)}</span>` : ""}${d.file && !u ? `<small>${esc(d.file)}</small>` : ""}${u ? `<em>↗</em></a>` : "</span>"}
+      ${ed ? `<button class="se-x" data-docdel="${d.id}" aria-label="ลบเอกสาร ${esc(d.title || d.type)}">${IC.x}</button>` : ""}</span>`; };
+    return `<div class="se-docs"><span class="se-docs-h">📎 เอกสารที่เกี่ยวข้อง</span>
+      ${docs.map(chip).join("")}
+      ${ed ? missing.map(t => `<button class="se-doc add" data-docadd="${esc(t)}">${docIc(t)} + ${esc(t)}</button>`).join("") + `<button class="se-doc add" data-docadd="">${IC.plus}เพิ่มเอกสาร</button>` : (docs.length ? "" : `<span class="se-muted">ยังไม่มีเอกสาร</span>`)}</div>`;
+  }
+  function wireDocs(el, p, redraw) {
+    el.querySelectorAll("[data-docadd]").forEach(b => b.onclick = () => docForm(p, b.dataset.docadd, redraw));
+    el.querySelectorAll("[data-docdel]").forEach(b => b.onclick = () => {
+      const d = (p.docs || []).find(x => x.id === b.dataset.docdel);
+      if (d && confirm(`ลบเอกสาร ${d.title || d.type}?`)) { p.docs = p.docs.filter(x => x !== d); save(); redraw(); }
+    });
+  }
+  function docForm(p, type, redraw) {
+    const m = modal("เพิ่มเอกสารที่เกี่ยวข้อง · " + p.ij, `
+      <div class="se-fgrid">
+        <label>ประเภท *<select id="dType">${DOC_TYPES.map(([t, ic, th]) => `<option value="${esc(t)}" ${t === (type || "SOW") ? "selected" : ""}>${ic} ${esc(th)}</option>`).join("")}</select></label>
+        <label class="w2">ชื่อเอกสาร<input id="dTitle" placeholder="เช่น SOW Rev.2, Layout Line 3"></label>
+        <label class="w3">ลิงก์ (Google Drive / SharePoint / URL)<input id="dLink" type="url" placeholder="https://drive.google.com/..."></label>
+        <label class="w3">หรือแนบไฟล์<input id="dFile" type="file"></label>
+        <label class="w3">หมายเหตุ<input id="dNote" placeholder="เช่น ฉบับที่ลูกค้าส่งมา 5 Nov"></label>
+      </div>
+      <p class="se-hint" style="margin:0">โหมดทดลองเก็บแค่ชื่อไฟล์ ยังไม่อัปโหลดจริง · แนะนำใส่ลิงก์ Google Drive ของ Job เพื่อให้ทุกคนเปิดได้</p>`,
+      mm => {
+        const g = id => mm.querySelector(id).value.trim(), f = mm.querySelector("#dFile").files[0];
+        const link = g("#dLink");
+        if (!link && !f) return "ใส่ลิงก์หรือแนบไฟล์อย่างน้อย 1 อย่าง";
+        if (link && !safeUrl(link)) return "ลิงก์ต้องขึ้นต้นด้วย http:// หรือ https://";
+        p.docs = p.docs || [];
+        p.docs.push({ id: uid(), type: g("#dType"), title: g("#dTitle") || (f ? f.name.replace(/\.[^.]+$/, "") : ""), link, file: f ? f.name : "", note: g("#dNote"), by: who(), at: new Date().toISOString() });
+        save(); toast("เพิ่มเอกสารแล้ว"); redraw();
+      }, "เพิ่มเอกสาร");
+    return m;
+  }
+
   /* ---------- category detail page ---------- */
   function secCategory(sec, p, redraw, code) {
     const c = catOf(code), ed = editable(p), groups = FORMS[c.code];
@@ -733,6 +779,7 @@
             <h2>${esc(p.name)}</h2><div class="se-cu">${esc(p.customer)}${p.city ? " · " + esc(p.city) : ""} · ${fmtD(p.start)} – ${fmtD(p.end)}</div></div>
           <div class="se-ph-r"><span><small>ระยะเวลา</small><b>${daysOf(p)} days</b></span><span><small>คน</small><b>${peopleOf(p)}</b></span><span><small>${p.budget ? "Budget" : "Planned"}</small><b>${baht(plannedOf(p))}</b></span></div>
           ${p.award ? `<div class="se-award"><span class="se-aw-ic">🏆</span><span><b>Awarded</b> · ${esc(p.ij)} → <b class="se-jo">Job ${esc(p.jo)}</b> · ${fmtD(p.award.date)}${p.award.value ? ` · มูลค่างาน ${baht(p.award.value)}` : ""}${p.award.by ? ` · เปิด Job โดย ${esc(p.award.by)}` : ""}${p.award.note || p.award.source ? `<small>${[p.award.note, p.award.source].filter(Boolean).map(esc).join(" · ")}${p.award.estimate && Math.round(Object.values(p.award.estimate).reduce((x, y) => x + y, 0)) !== Math.round(plannedOf(p)) ? ` · ปรับจาก Estimate ${baht(Object.values(p.award.estimate).reduce((x, y) => x + y, 0))}` : ""}</small>` : ""}</span><span class="se-aw-b">Budget control ${baht(plannedOf(p))} 🔒</span></div>` : ""}
+          ${docsBox(p)}
           <div class="se-ph-a">${p.status === "approved" && p.list === "active" ? (can("award") ? `<button class="se-btn award" data-award>🏆 Get Award</button>` : `<span class="se-hint" style="margin-right:auto">รอ ${namesWith("award")} กด Get Award และกำหนด Budget control</span>`) : ""}${editable(p) ? `<button class="se-btn" data-edit>${IC.edit}แก้ไขข้อมูล</button>` : ""}${p.list === "active" ? `<button class="se-btn" data-arch>${IC.box}Archive</button><button class="se-btn danger" data-trash>${IC.trash}Trash</button>` : ""}</div>
         </div>
         <div class="se-steps">${stepper}</div>
@@ -747,6 +794,7 @@
     on("[data-arch]", () => { p.list = "archived"; save(); toast("ย้ายไป Archived แล้ว"); redraw(); });
     on("[data-trash]", () => { if (confirm("ย้ายโปรเจคนี้ไป Trash?")) { p.list = "trash"; save(); toast("ย้ายไป Trash แล้ว"); location.hash = "#site-expense"; } });
     on("[data-restore]", () => { p.list = "active"; save(); toast("กู้คืนแล้ว"); redraw(); });
+    wireDocs(el, p, redraw);
     const sec = el.querySelector("#seSec");
     if (isCat) return secCategory(sec, p, redraw, catCode);
     ({ dashboard: secDashboard, estimate: secEstimate, actual: secActual })[cur.id](sec, p, redraw);
@@ -955,6 +1003,15 @@
 .se-btn.primary{background:var(--rak);border-color:var(--rak);color:#fff;font-weight:600}.se-btn.primary:hover{background:var(--rak-dark)}
 .se-btn.danger{color:var(--rak)}.se-btn.sm{padding:2px 9px;font-size:13px}
 .se-x{display:inline-grid;place-items:center;border:0;background:none;color:#9aa2ad;border-radius:6px;padding:3px;cursor:pointer}.se-x:hover{background:var(--blush);color:var(--rak)}.se-x .se-ci{width:16px;height:16px}
+.se-docs{display:flex;flex-wrap:wrap;align-items:center;gap:8px;width:100%;border-top:1px dashed var(--line);padding-top:12px}
+.se-docs-h{font-size:13px;font-weight:600;color:#424a57;margin-right:4px}
+.se-doc{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:10px;background:#fafbfc;font-size:13px;padding:3px 4px 3px 10px;max-width:100%}
+.se-doc>a,.se-doc>span{display:inline-flex;align-items:center;gap:6px;color:inherit;text-decoration:none;min-width:0}
+.se-doc>a:hover b{color:var(--rak);text-decoration:underline}.se-doc i{font-style:normal}.se-doc b{font-weight:600}
+.se-doc span span,.se-doc a span{color:#5d6673;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px}.se-doc small{color:var(--muted)}.se-doc em{font-style:normal;color:var(--muted);margin-right:6px}
+.se-doc .se-x{padding:2px}
+.se-doc.add{border-style:dashed;background:#fff;color:var(--muted);padding:5px 12px;cursor:pointer;font:inherit;font-size:13px}.se-doc.add:hover{border-color:var(--rak);color:var(--rak)}.se-doc.add .se-ci{width:15px;height:15px}
+.se-fgrid .w3{grid-column:1/-1}
 .se-ph{position:relative}.se-ph-a{display:flex;gap:8px;flex-wrap:wrap;width:100%;justify-content:flex-end;border-top:1px dashed var(--line);padding-top:10px}
 .se-steps .se-step.done i{background:var(--green);color:#fff}.se-steps .se-step.now{border-color:var(--rak);background:var(--blush);color:var(--rak);font-weight:600}.se-steps .se-step.now i{background:var(--rak);color:#fff}
 .se-sec-h{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.se-sec-h h3{margin:0;font-size:17px;font-weight:600}
