@@ -114,7 +114,7 @@
     const can = DATA && DATA.canEdit;
     return `<div class="mp-head">
       <div class="mp-title"><h2>วางแผนกำลังคน</h2>${DATA && DATA.canEdit ? `<nav class="mp-tabs"><a href="#manpower" class="${S.page === "board" ? "on" : ""}">Planning Board</a><a href="#manpower/data" class="${S.page === "data" ? "on" : ""}">ข้อมูลหลัก</a><a href="#manpower/log" class="${S.page === "log" ? "on" : ""}">ประวัติการแก้ไข</a></nav>` : ""}<span class="mp-badge ${can ? "ed" : ""}">${can ? "SC / PC / SSM · ลงงาน / แก้ไข / Confirm ได้" : "ดูอย่างเดียว"}</span></div>
-      <div class="mp-nav">${range()[0] <= MIN ? `<span class="mp-btn off">‹</span>` : `<a class="mp-btn" href="${href(S.zoom, step(-1))}" aria-label="ก่อนหน้า">‹</a>`}<a class="mp-btn" href="${href(S.zoom, today())}">วันนี้</a>${range()[1] >= MAX ? `<span class="mp-btn off">›</span>` : `<a class="mp-btn" href="${href(S.zoom, step(1))}" aria-label="ถัดไป">›</a>`}<b>${esc(title())}</b><span class="mp-zoom">${zoom}</span></div>
+      <div class="mp-nav">${range()[0] <= MIN ? `<span class="mp-btn off">‹</span>` : `<a class="mp-btn" href="${href(S.zoom, step(-1))}" aria-label="ก่อนหน้า">‹</a>`}<a class="mp-btn" href="${href(S.zoom, today())}">วันนี้</a>${range()[1] >= MAX ? `<span class="mp-btn off">›</span>` : `<a class="mp-btn" href="${href(S.zoom, step(1))}" aria-label="ถัดไป">›</a>`}<b>${esc(title())}</b><span class="mp-zoom">${zoom}</span><button type="button" class="mp-btn mp-fs" id="mpFull" title="${isFull() ? "ออกจากเต็มจอ (Esc)" : "ขยายเต็มจอ"}">${isFull() ? "✕ ออกจากเต็มจอ" : "⛶ เต็มจอ"}</button></div>
       <div class="mp-filters">${units}
         <span class="mp-fl"><select id="mpCust" aria-label="1. ลูกค้า"><option value="">ลูกค้า: ทั้งหมด</option>${custs}</select><i>›</i><select id="mpProj" aria-label="2. ชื่องาน"><option value="">${S.cust ? "งานของ " + esc(S.cust) + ": ทั้งหมด" : "ชื่องาน: ทั้งหมด"}</option>${projs}</select></span>
         <select id="mpPerson" aria-label="ชื่อคน"><option value="">ชื่อคน: ทุกคน</option>${ppl}</select>
@@ -269,7 +269,7 @@
       } catch (err) { msg.textContent = "บันทึกไม่สำเร็จ (" + err.message + ")"; el.querySelectorAll(".mp-ok").forEach(x => { x.disabled = false; }); }
     });
     document.addEventListener("keydown", onKey);
-    document.body.appendChild(el);
+    (document.fullscreenElement || document.body).appendChild(el);
     el.querySelector(".mp-x").focus();
   }
 
@@ -366,7 +366,7 @@
     const onKey = e => { if (e.key === "Escape") close(); };
     el.addEventListener("click", e => { if (e.target === el || e.target.closest(".mp-x")) close(); });
     document.addEventListener("keydown", onKey);
-    document.body.appendChild(el);
+    (document.fullscreenElement || document.body).appendChild(el);
     wireForms(el, { ids, from, to }, close);
     el.querySelector(".mp-x").focus();
   }
@@ -504,8 +504,27 @@
     mf.addEventListener("submit", e => { e.preventDefault(); go(() => post("/api/manpower/milestone", { project_code: mf.project_code.value, day: mf.day.value, label: mf.label.value }), "เพิ่มแล้ว"); });
     el.addEventListener("click", e => { if (e.target === el || e.target.closest(".mp-x")) close(); });
     document.addEventListener("keydown", onKey);
-    document.body.appendChild(el);
+    (document.fullscreenElement || document.body).appendChild(el);
     (list.length ? el.querySelector(".mp-mrow input") : mf.label).focus();
+  }
+
+  /* ---------- full screen: Fullscreen API where available, else a fixed overlay (iPhone / iPad Safari) ---------- */
+  const isFull = () => !!ROOT && (document.fullscreenElement === ROOT || ROOT.classList.contains("mp-full"));
+  function toggleFull() {
+    if (!ROOT) return;
+    if (isFull()) {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      ROOT.classList.remove("mp-full"); document.body.classList.remove("mp-noscroll");
+    } else if (ROOT.requestFullscreen && document.fullscreenEnabled) {
+      ROOT.requestFullscreen().catch(() => { ROOT.classList.add("mp-full"); document.body.classList.add("mp-noscroll"); draw(); });
+    } else { ROOT.classList.add("mp-full"); document.body.classList.add("mp-noscroll"); }
+    setTimeout(draw, 60);
+  }
+  if (!window.__mpFs) {
+    window.__mpFs = true;
+    document.addEventListener("fullscreenchange", () => { if (ROOT && document.body.contains(ROOT)) draw(); });
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && ROOT && ROOT.classList.contains("mp-full") && !document.querySelector(".mp-modal")) toggleFull(); });
+    window.addEventListener("hashchange", () => { if (ROOT && ROOT.classList.contains("mp-full") && !location.hash.startsWith("#manpower")) { ROOT.classList.remove("mp-full"); document.body.classList.remove("mp-noscroll"); } });
   }
 
   function draw() {
@@ -516,6 +535,8 @@
     ROOT.innerHTML = toolbar() + legend() + grid()
       + `<p class="mp-note">ข้อมูลตั้งแต่ 1 ม.ค. 2026 นำเข้าจาก Google Sheet "ตารางงานและวันหยุดช่าง 2569" ครั้งเดียว · งาน SP มาจาก Service Plan (ใบขอคน สถานะ Confirm / Complete)${DATA.serviceUpdated ? " อัปเดต " + esc(new Date(DATA.serviceUpdated).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })) : ""} · กดช่องเพื่อดูรายละเอียด</p>`;
     bind();
+    const sc0 = ROOT.querySelector(".mp-scroll");
+    if (sc0 && isFull()) ROOT.style.setProperty("--mp-top", Math.ceil(sc0.getBoundingClientRect().top - ROOT.getBoundingClientRect().top + 16) + "px");
     const t = ROOT.querySelector("th.mp-d.td"), sc = ROOT.querySelector(".mp-scroll"), nc = ROOT.querySelector(".mp-corner");
     if (t && sc && nc) sc.scrollLeft = Math.max(0, t.offsetLeft - nc.offsetWidth - 2 * t.offsetWidth);
   }
@@ -528,6 +549,7 @@
     const q = ROOT.querySelector("#mpQ"); if (q) q.addEventListener("change", () => { S.q = q.value.trim(); draw(); });
     const l = ROOT.querySelector("#mpLeft"); if (l) l.addEventListener("change", () => { S.left = l.checked; draw(); });
     const m = ROOT.querySelector("#mpMiles"); if (m) m.addEventListener("change", () => { S.miles = m.checked; draw(); });
+    const fs = ROOT.querySelector("#mpFull"); if (fs) fs.addEventListener("click", toggleFull);
     ROOT.querySelectorAll(".mp-lg[data-p]").forEach(b => b.addEventListener("click", () => { const on = S.project === b.dataset.p; S.project = on ? "" : b.dataset.p; S.cust = on ? "" : custOf(b.dataset.p); draw(); }));
     const g = ROOT.querySelector(".mp-grid");
     if (g && DATA && DATA.canMilestone) g.addEventListener("click", e => {
@@ -665,6 +687,15 @@ button.mp-lg:hover,.mp-lg.on{border-color:var(--rak);color:var(--rak)}.mp-lg b{f
 .mp-mlist{padding:10px 16px;display:grid;gap:6px;border-bottom:1px solid var(--line)}.mp-mrow{display:flex;gap:6px;align-items:center}
 .mp-mrow input{font:inherit;font-size:13px;border:1px solid #dce1e8;border-radius:7px;padding:5px 8px}.mp-mrow input[name=label]{flex:1;min-width:0}
 .mp-mform{padding-top:12px}.mp-mform h4{margin:0;font-size:13px}.mp-mform select{font:inherit;font-size:13.5px;border:1px solid #dce1e8;border-radius:8px;padding:6px 8px;width:100%}
+.mp-fs{margin-left:6px;cursor:pointer;font:inherit;font-size:13px;white-space:nowrap}
+.mp-root:fullscreen,.mp-root.mp-full{background:var(--bg,#f5f6f8);padding:12px 14px;overflow:auto;gap:10px}
+.mp-root.mp-full{position:fixed;inset:0;z-index:50}
+body.mp-noscroll{overflow:hidden}
+.mp-root:fullscreen .mp-scroll,.mp-root.mp-full .mp-scroll{max-height:none;height:calc(100vh - var(--mp-top,230px))}
+.mp-root:fullscreen .mp-head,.mp-root.mp-full .mp-head{padding:10px 14px;gap:8px}
+.mp-root:fullscreen .mp-note,.mp-root.mp-full .mp-note{display:none}
+.mp-root:fullscreen .mp-legend,.mp-root.mp-full .mp-legend{flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px}.mp-root:fullscreen .mp-lg,.mp-root.mp-full .mp-lg{white-space:nowrap;flex:none}
+.mp-root:fullscreen .mp-um,.mp-root.mp-full .mp-um{display:none}
 @media (max-width:640px){.mp-legend{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.mp-lg{white-space:nowrap;flex:none}.mp-mon span{left:120px}.mp-name{min-width:112px;max-width:112px}.mp-name small{display:none}.mp-zoom{margin-left:0}.mp-scroll{max-height:none}}
 `;
 
