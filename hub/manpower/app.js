@@ -608,11 +608,11 @@
     const tg = new Map();
     N.assignments.filter(a => a.tentative).forEach(a => { if (!tg.has(a.text)) tg.set(a.text, { text: a.text, code: a.project_code, ppl: new Set(), lo: a.day, hi: a.day, n: 0 }); const g = tg.get(a.text); g.ppl.add(a.worker_id); g.n++; if (a.day < g.lo) g.lo = a.day; if (a.day > g.hi) g.hi = a.day; });
     const tList = [...tg.values()].sort((a, b) => a.lo < b.lo ? -1 : 1).slice(0, 10);
-    const kpi = (lab, v, sub, cls) => `<div class="mp-kpi ${cls || ""}"><span>${lab}</span><b>${v}</b><small>${sub || ""}</small></div>`;
+    const kpi = (id, lab, v, sub, cls) => `<button type="button" class="mp-kpi ${cls || ""}" data-kpi="${id}" title="กดเพื่อดูรายละเอียด"><span>${lab}</span><b>${v}</b><small>${sub || ""} <em>ดูรายละเอียด ›</em></small></button>`;
     box.innerHTML = pageHead("Manpower", can) + `
       <div class="mp-dash-top"><div><h3>ภาพรวมกำลังคน</h3><p class="mp-hint">${esc(DS[t.getDay()])}. ${t.getDate()} ${MF[t.getMonth()]} ${t.getFullYear()}${offToday ? " · วันนี้เป็นวันหยุด" : ""}</p></div>
         <a class="mp-go" href="#manpower/board">วางแผนกำลังคน →</a></div>
-      <div class="mp-kpis">${kpi("ช่างทั้งหมด", act.length, "คนที่ทำงานอยู่")}${kpi("ทำงานวันนี้", working, "มีงานลงไว้ / Service Plan", "g")}${kpi("ลาวันนี้", onLeave, "ลาป่วย / พักร้อน / ลากิจ", "a")}${kpi("ว่างวันนี้", offToday ? "–" : free, "ยังไม่ได้ลงงาน", "r")}${kpi("Utilization วันนี้", util + "%", "ทำงาน ÷ คนที่ไม่ลา")}${kpi("งานจองรอ Confirm", tentN, "ช่องใน 30 วันข้างหน้า", "t")}</div>
+      <div class="mp-kpis">${kpi("all", "ช่างทั้งหมด", act.length, "คนที่ทำงานอยู่")}${kpi("work", "ทำงานวันนี้", working, "มีงานลงไว้ / Service Plan", "g")}${kpi("leave", "ลาวันนี้", onLeave, "ลาป่วย / พักร้อน / ลากิจ", "a")}${kpi("free", "ว่างวันนี้", offToday ? "–" : free, "ยังไม่ได้ลงงาน", "r")}${kpi("util", "Utilization วันนี้", util + "%", "ทำงาน ÷ คนที่ไม่ลา")}${kpi("tent", "งานจองรอ Confirm", tentN, "ช่องใน 30 วันข้างหน้า", "t")}</div>
       <div class="mp-card"><div class="mp-ch"><h4>คนว่าง 14 วันข้างหน้า <small>จำนวนคนที่ยังไม่ได้ลงงานและไม่ได้ลา · กดวันที่เพื่อเปิดตาราง</small></h4></div>
         <div class="mp-capw"><table class="mp-cap"><thead><tr><th></th>${d14.map(d => `<th><a href="#manpower/week/${key(d)}">${DS[d.getDay()]}<br>${d.getDate()}/${d.getMonth() + 1}</a></th>`).join("")}</tr></thead>
         <tbody>${cap.map(r => `<tr><th>${esc(r.u)} <small>${r.n} คน</small></th>${r.free.map(v => heat(v, r.n)).join("")}</tr>`).join("")}<tr class="tot"><th>รวม</th>${capTot.map(v => heat(v, act.length)).join("")}</tr></tbody></table></div></div>
@@ -623,6 +623,56 @@
           <div><h5>รายสัปดาห์</h5><div class="mp-wk">${weeks.map(([k2, n]) => `<div title="สัปดาห์ ${esc(fmtD(k2))} · ${n} man-day"><b style="height:${(n / wmax * 100).toFixed(1)}%"></b><span>${fromKey(k2).getDate()}/${fromKey(k2).getMonth() + 1}</span></div>`).join("")}</div></div></div></div>
       <div class="mp-g2"><div class="mp-card"><h4>Milestone 30 วันข้างหน้า</h4>${ms.length ? `<ul class="mp-ul">${ms.map(m => { const p = N.P.get(m.project_code); return `<li><span class="d">${esc(fmtD(m.day))}</span><i style="background:${esc(p ? p.color : "#999")}"></i><b>${esc(m.label)}</b> <span>${esc(p ? p.name : m.project_code)}</span></li>`; }).join("")}</ul>` : `<p class="mp-hint">ยังไม่มี Milestone ใน 30 วันข้างหน้า</p>`}</div>
         <div class="mp-card"><h4>งานจองรอ Confirm <small>30 วันข้างหน้า</small></h4>${tList.length ? `<ul class="mp-ul">${tList.map(g => `<li><span class="d">${esc(fmtD(g.lo))}${g.hi !== g.lo ? " – " + esc(fmtD(g.hi)) : ""}</span><b>${esc(g.text.replace(/^จอง\s*/, ""))}</b> <span>${g.ppl.size} คน · ${g.n} ช่อง</span> <a href="#manpower/${(fromKey(g.hi) - fromKey(g.lo)) / 864e5 < 14 ? "week" : "month"}/${esc(g.lo)}" data-gt="${esc(g.text)}" data-gc="${esc(g.code || "")}">เปิด</a></li>`).join("")}</ul>` : `<p class="mp-hint">ไม่มีงานจองค้างอยู่</p>`}</div></div>`;
+    // ---- KPI boxes → detail popup ----
+    const nm = w => `<b>${esc(w.nickname || w.name_th)}</b> <span class="mp-m">${esc(w.name_th)}${w.trade ? " · " + esc(w.trade) : ""}</span>`;
+    const byUnit = (list, row) => UNITS.map(([u, l]) => { const ws = list.filter(x => (x.w || x).unit === u); return ws.length ? `<h5>${esc(l)} <small>${ws.length} คน</small></h5><ul class="mp-dlist">${ws.map(row).join("")}</ul>` : ""; }).join("") || `<p class="mp-hint">ไม่มีรายการ</p>`;
+    const jobOf = (w) => {
+      const a = N.A.get(w.id + "|" + tk), sv = N.SV.get(w.id + "|" + tk) || [];
+      const p = a && a.project_code ? N.P.get(a.project_code) : null;
+      const job = a ? `<i class="mp-dot" style="background:${esc(p ? p.color : "#999")}"></i>${esc(a.text)}${p && p.customer ? ` <span class="mp-m">· ${esc(p.customer)}</span>` : ""}${a.tentative ? ` <em class="mp-tg">จอง</em>` : ""}${a.work_type && WTL[a.work_type] && a.work_type !== "other" ? ` <span class="mp-m">· ${esc(WTL[a.work_type])}</span>` : ""}` : "";
+      const sp = sv.map(j => `<span class="mp-sp in">SP</span>${esc([j.type, j.customer, j.job].filter(Boolean).join(" · "))}`).join(" ");
+      return [job, sp].filter(Boolean).join("<br>");
+    };
+    const openLink = (g) => `<a class="mp-open" href="#manpower/${(fromKey(g.hi) - fromKey(g.lo)) / 864e5 < 14 ? "week" : "month"}/${esc(g.lo)}" data-gt="${esc(g.text)}" data-gc="${esc(g.code || "")}">เปิดในตาราง ›</a>`;
+    function kpiDetail(id) {
+      const ws = act.map(w => ({ w }));
+      if (id === "all") return ["ช่างทั้งหมด " + act.length + " คน", byUnit(ws, x => `<li>${nm(x.w)}${x.w.emp_code ? ` <span class="mp-m">${esc(x.w.emp_code)}</span>` : ""}</li>`)];
+      if (id === "work") { const list = ws.filter(x => N.A.has(x.w.id + "|" + tk) || N.SV.has(x.w.id + "|" + tk)); return ["ทำงานวันนี้ " + list.length + " คน", byUnit(list, x => `<li>${nm(x.w)}<div class="mp-dj">${jobOf(x.w)}</div></li>`)]; }
+      if (id === "leave") { const list = ws.filter(x => isLeave(N.X.get(x.w.id + "|" + tk))); return ["ลาวันนี้ " + list.length + " คน", byUnit(list, x => { const l = N.X.get(x.w.id + "|" + tk); return `<li>${nm(x.w)}<div class="mp-dj"><em class="mp-lvt">${esc(ABS[l.type][2])}</em>${l.note ? " · " + esc(l.note) : ""}</div></li>`; })]; }
+      if (id === "free") {
+        if (offToday) return ["ว่างวันนี้", `<p class="mp-hint">วันนี้เป็นวันหยุด</p>`];
+        const list = ws.filter(x => !N.A.has(x.w.id + "|" + tk) && !N.X.has(x.w.id + "|" + tk) && !N.SV.has(x.w.id + "|" + tk));
+        return ["ว่างวันนี้ " + list.length + " คน", `<p class="mp-hint">ยังไม่ได้ลงงานและไม่ได้ลา · ${can ? "กดชื่อเพื่อลงงานในตาราง" : ""}</p>` + byUnit(list, x => `<li>${nm(x.w)}${can ? ` <a class="mp-open" href="#manpower/week/${tk}" data-person="${esc(x.w.id)}">ลงงาน ›</a>` : ""}</li>`)];
+      }
+      if (id === "util") {
+        const rows = UNITS.map(([u, l]) => { const us = act.filter(w => w.unit === u); if (!us.length) return ""; const lv = us.filter(w => isLeave(N.X.get(w.id + "|" + tk))).length, wk = us.filter(w => N.A.has(w.id + "|" + tk) || N.SV.has(w.id + "|" + tk)).length, av = us.length - lv, pc = av ? Math.round(wk / av * 100) : 0;
+          return `<tr><th>${esc(l)}</th><td>${us.length}</td><td>${lv}</td><td>${wk}</td><td><div class="mp-ub"><b style="width:${pc}%"></b></div></td><td><b>${pc}%</b></td></tr>`; }).join("");
+        return ["Utilization วันนี้ " + util + "%", `<p class="mp-hint">Utilization = คนที่มีงานวันนี้ ÷ คนที่ไม่ได้ลา</p><table class="mp-mt mp-ut"><thead><tr><th>หน่วยงาน</th><th>คน</th><th>ลา</th><th>มีงาน</th><th></th><th>%</th></tr></thead><tbody>${rows}</tbody></table>`];
+      }
+      if (id === "tent") {
+        const all = [...tg.values()].sort((a, b) => a.lo < b.lo ? -1 : 1);
+        return ["งานจองรอ Confirm · " + all.length + " งาน · " + tentN + " ช่อง", all.length ? `<p class="mp-hint">30 วันข้างหน้า · เปิดในตารางแล้วกดช่องจอง → Confirm ทั้งทีม</p><ul class="mp-dlist">${all.map(g => { const p = N.P.get(g.code);
+          return `<li><div class="mp-dh"><b>${esc(g.text.replace(/^จอง\s*/, ""))}</b> ${openLink(g)}</div><div class="mp-dj">${esc(fmtD(g.lo))}${g.hi !== g.lo ? " – " + esc(fmtD(g.hi)) : ""} · ${g.ppl.size} คน · ${g.n} ช่อง${p ? ` · <i class="mp-dot" style="background:${esc(p.color)}"></i>${esc(p.name)}` : ""}</div><div class="mp-dj mp-m">${[...g.ppl].map(id2 => { const w = W.get(id2); return esc(w ? w.nickname || w.name_th : id2); }).join(", ")}</div></li>`; }).join("")}</ul>` : `<p class="mp-hint">ไม่มีงานจองค้างอยู่</p>`];
+      }
+      return ["", ""];
+    }
+    const wireOpen = (root, close) => {
+      root.querySelectorAll("[data-gt]").forEach(a => a.addEventListener("click", () => { const c = a.dataset.gc; S.project = c; S.cust = c ? (N.P.get(c) || {}).customer || "" : ""; S.person = ""; S.q = a.dataset.gt; if (close) close(); }));
+      root.querySelectorAll("[data-person]").forEach(a => a.addEventListener("click", () => { S.project = S.cust = S.q = ""; S.person = a.dataset.person; S.zoom = "week"; if (close) close(); }));
+    };
+    box.querySelectorAll("[data-kpi]").forEach(b => b.addEventListener("click", () => {
+      const [title, html] = kpiDetail(b.dataset.kpi);
+      const el = document.createElement("div");
+      el.className = "mp-modal";
+      el.innerHTML = `<div class="mp-dlg mp-wide" role="dialog" aria-modal="true" aria-label="${esc(title)}"><header><div><b>${esc(title)}</b><div class="mp-when">${esc(DS[t.getDay()])}. ${t.getDate()} ${MF[t.getMonth()]} ${t.getFullYear()}</div></div><button type="button" class="mp-x" aria-label="ปิด">✕</button></header><div class="mp-dbody">${html}</div></div>`;
+      const close = () => { el.remove(); document.removeEventListener("keydown", onKey); };
+      const onKey = e => { if (e.key === "Escape") close(); };
+      el.addEventListener("click", e => { if (e.target === el || e.target.closest(".mp-x")) close(); });
+      document.addEventListener("keydown", onKey);
+      wireOpen(el, close);
+      (document.fullscreenElement || document.body).appendChild(el);
+      el.querySelector(".mp-x").focus();
+    }));
     box.querySelectorAll("[data-per]").forEach(b => b.addEventListener("click", () => { S.dper = b.dataset.per; box.querySelectorAll("[data-per]").forEach(x => x.classList.toggle("on", x === b)); box.classList.add("mp-busy"); dashPage(box).finally(() => box.classList.remove("mp-busy")); }));
     // open the board already filtered: a job (man-day summary) or one booking (job + its wording → only the people booked)
     box.querySelectorAll("[data-go]").forEach(a => a.addEventListener("click", () => { S.project = a.dataset.go; S.cust = (D.P.get(a.dataset.go) || {}).customer || ""; S.person = ""; S.q = ""; S.zoom = "month"; }));
@@ -825,6 +875,15 @@ a.mp-bar:hover .mp-bl{color:var(--rak)}
 .mp-cap tr.tot th,.mp-cap tr.tot td{font-weight:700}
 .mp-ul{list-style:none;margin:0;padding:0;display:grid;gap:6px;font-size:12.5px}.mp-ul li{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.mp-ul .d{color:var(--muted);min-width:88px;font-variant-numeric:tabular-nums}
 .mp-ul i{width:9px;height:9px;border-radius:2px}.mp-ul li>span:not(.d){color:var(--muted)}.mp-ul a{color:var(--rak);font-size:12px;margin-left:auto}
+button.mp-kpi{font:inherit;text-align:left;cursor:pointer;transition:border-color .15s,box-shadow .15s}button.mp-kpi:hover{border-color:#f0b9b9;box-shadow:0 4px 14px -8px rgba(0,0,0,.25)}
+.mp-kpi small em{font-style:normal;color:var(--rak);opacity:0;transition:opacity .15s;margin-left:4px}button.mp-kpi:hover small em{opacity:1}
+.mp-dlg.mp-wide{width:min(640px,100%)}.mp-dbody{padding:4px 16px 16px;max-height:70vh;overflow:auto}.mp-dbody h5{margin:12px 0 4px;font-size:12.5px;color:#424a57}.mp-dbody h5 small{font-weight:400;color:var(--muted)}
+.mp-dlist{list-style:none;margin:0;padding:0;display:grid;gap:2px}.mp-dlist li{padding:6px 0;border-bottom:1px solid #f0f1f4;font-size:13px}
+.mp-m{color:var(--muted);font-size:12px}.mp-dj{font-size:12.5px;color:#4a515c;margin-top:2px;line-height:1.5}.mp-dj .mp-dot{margin-right:4px;vertical-align:middle}
+.mp-dh{display:flex;gap:8px;align-items:baseline;justify-content:space-between}
+.mp-tg{font-style:normal;font-size:11px;border:1px dashed #9aa1ab;border-radius:4px;padding:0 4px;color:#4a515c}.mp-lvt{font-style:normal;color:var(--amber);font-weight:600}
+.mp-open{color:var(--rak);font-size:12px;white-space:nowrap;margin-left:6px}
+.mp-ut td,.mp-ut th{font-size:13px}.mp-ub{background:#f1f3f6;border-radius:4px;height:10px;width:140px;overflow:hidden}.mp-ub b{display:block;height:100%;background:var(--green)}
 @media (max-width:640px){.mp-legend{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.mp-lg{white-space:nowrap;flex:none}.mp-mon span{left:120px}.mp-name{min-width:112px;max-width:112px}.mp-name small{display:none}.mp-zoom{margin-left:0}.mp-scroll{max-height:none}}
 `;
 
