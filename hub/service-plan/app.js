@@ -10,7 +10,8 @@
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const SHEET = "https://docs.google.com/spreadsheets/d/1jubBroZnav3iWEVN74yMM1A5OKmsvZkmIUxpWWvnPmQ/edit";
   const DEFAULT_GID = 384071614;
-  const TYPES = ["IS", "SO", "IN", "WR"];
+  const SHEET_TYPES = ["IS", "SO", "IN", "WR"];           // rows kept from the sheet
+  const TYPES = ["IS", "SO", "IN", "WR", "IJ", "JO"];   // IJ / JO come from requests made in the app (ขอคน) only
   const STATUSES = ["New", "Checking", "Confirm", "Complete"];
   const ST_CLS = { New: "n", Checking: "k", Confirm: "c", Complete: "d" };
   const VIEWS = [["day", "วัน"], ["week", "สัปดาห์"], ["month", "เดือน"], ["year", "ปี"]];
@@ -53,7 +54,7 @@
     (rows || []).forEach(r => {
       const v = r.v || [];
       const type = clean(v[4]).toUpperCase(), status = statusOf(v[8]);
-      if (!TYPES.includes(type) || !status) return;
+      if (!SHEET_TYPES.includes(type) || !status) return;
       let start = parseDate(v[15]), end = parseDate(v[16]);
       if (!start && end) start = end;
       if (start && (!end || end < start)) end = start;
@@ -65,6 +66,23 @@
     });
     dated.sort((a, b) => a.start - b.start || a.n - b.n);
     return { dated, undated };
+  }
+
+  // Requests made in the app (ขอคน, hub/sp-request/app.js) join the calendar: รอ PC → New colour, partly confirmed →
+  // Checking colour, all confirmed → Confirm colour; rejected / cancelled requests are left out.
+  async function appJobs(force) {
+    if (!window.SPRequest) return [];
+    const d = await window.SPRequest.load(force !== false).catch(() => null);
+    if (!d) return [];
+    const map = { p: "New", m: "Checking", c: "Confirm" };
+    return d.requests.map(r => {
+      const [label, cls] = window.SPRequest.status(r), ld = r.people.find(p => p.is_leader);
+      if (!map[cls]) return null;
+      const ss = ld ? (ld.nick || ld.name.split(" ")[0]) : "";
+      return { id: "q" + r.id, rid: r.id, app: true, n: 1e6 + r.id, job: r.job_no || r.job_name, type: r.type, customer: r.customer, desc: [r.job_name, r.description].filter(Boolean).join("\n"), car: r.vehicle || "",
+        status: map[cls], ss, start: fromKey(r.date_from), end: fromKey(r.date_to),
+        subject: [label, r.type, r.customer, r.job_no || r.job_name].filter(Boolean).join(" | ") + (ss ? " — " + ss : "") + " · " + r.people.length + " คน" };
+    }).filter(j => j && j.start && j.end);
   }
 
   /* ---------- load ---------- */
@@ -81,7 +99,7 @@
     }
     if (!data) { META = { src: "none", why }; JOBS = []; UNDATED = []; return; }
     const { dated, undated } = toJobs(data.rows);
-    JOBS = dated; UNDATED = undated;
+    JOBS = dated.concat(await appJobs(force)).sort((a, b) => a.start - b.start); UNDATED = undated;
     META = { src, why, updated: data.updated ? new Date(data.updated) : null, fetched: new Date(), gid: data.gid || DEFAULT_GID, sheet: data.sheet || "" };
   }
   function ensure(force) {
@@ -137,7 +155,9 @@
       : META.src === "snapshot"
         ? `<span class="spc-src snap">● ข้อมูลสำรอง</span> ณ ${esc(META.updated ? META.updated.toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) : "–")}${META.why ? " · " + esc(META.why) : ""}`
         : `<span class="spc-src snap">● โหลดข้อมูลไม่สำเร็จ</span>`;
-    return `<div class="spc-bar">
+    const nq = window.SPRequest ? window.SPRequest.pending() : 0;
+    return `<div class="spc-bar spc-rq"><b>ขอคน <small>ทดลองใช้</small></b><button type="button" class="spc-btn pri" id="spcNew">+ ขอคน</button><a class="spc-btn" href="#service-plan/req">คำขอคน / Confirm${nq ? ` <i>${nq}</i>` : ""}</a><span>กรอกคำขอ เลือกคนจากแผน Manpower แล้วรอ PC (กอล์ฟ / โจ้) Confirm</span></div>
+    <div class="spc-bar">
       <div class="spc-nav"><a class="spc-btn" href="${href(S.view, step(-1))}" aria-label="ก่อนหน้า">‹</a><a class="spc-btn" href="${href(S.view, today())}">วันนี้</a><a class="spc-btn" href="${href(S.view, step(1))}" aria-label="ถัดไป">›</a><h2>${esc(title())}</h2></div>
       <div class="spc-views" role="tablist">${VIEWS.map(([v, t]) => `<a role="tab" aria-selected="${v === S.view}" href="${href(v, S.date)}">${t}</a>`).join("")}</div>
     </div>
@@ -240,6 +260,12 @@
   /* ---------- render ---------- */
   function draw() {
     if (!ROOT || !document.body.contains(ROOT)) return;
+    if (S.page === "req") {
+      ROOT.innerHTML = `<div class="spc-bar"><div class="spc-nav"><a class="spc-btn" href="#service-plan">‹ ปฏิทิน Service Plan</a><h2>คำขอคน <small style="font-weight:500;color:var(--muted);font-size:13px">ทดลองใช้</small></h2></div></div><div id="spcReq"></div>`;
+      if (window.SPRequest) window.SPRequest.page(ROOT.querySelector("#spcReq"), () => { JOBS = null; });
+      return;
+    }
+    if (!JOBS) { ROOT.innerHTML = `<div class="empty">กำลังโหลดแผนงาน…</div>`; ensure(false).then(draw); return; }
     const body = S.view === "day" ? viewDay() : S.view === "week" ? viewWeek() : S.view === "year" ? viewYear() : viewMonth();
     const qFocus = document.activeElement && document.activeElement.id === "spcQ", pos = qFocus ? document.activeElement.selectionStart : 0;
     ROOT.innerHTML = toolbar() + `<div class="spc-body v-${S.view}">${body}</div>` + undated();
@@ -248,7 +274,8 @@
   function bind(el) {
     el.addEventListener("click", e => {
       const ev = e.target.closest("[data-j]");
-      if (ev) { const id = ev.dataset.j; const j = JOBS.concat(UNDATED).find(x => x.id === id); if (j) detail(j); return; }
+      if (ev) { const id = ev.dataset.j; const j = JOBS.concat(UNDATED).find(x => x.id === id); if (j && j.app) window.SPRequest.open(j.rid, () => ensure(true).then(draw)); else if (j) detail(j); return; }
+      if (e.target.closest("#spcNew")) return void window.SPRequest.form(() => ensure(true).then(draw));
       const f = e.target.closest("[data-st],[data-ty]");
       if (f) {
         const set = f.dataset.st ? S.st : S.ty, v = f.dataset.st || f.dataset.ty;
@@ -267,17 +294,20 @@
     if (!document.getElementById("spcCss")) { const s = document.createElement("style"); s.id = "spcCss"; s.textContent = CSS; document.head.appendChild(s); }
     document.querySelectorAll(".spc-modal").forEach(m => m.remove());
     const [v, d] = (sub || "").split("/");
-    S.view = VIEWS.some(x => x[0] === v) ? v : "month";
-    S.date = fromKey(d) || today();
+    S.page = v === "req" ? "req" : "cal";
+    if (S.page === "cal") { S.view = VIEWS.some(x => x[0] === v) ? v : "month"; S.date = fromKey(d) || today(); }
     ROOT = el; bind(el);
+    if (S.page === "req") return draw();
     if (JOBS) return draw();
     el.innerHTML = `<div class="empty">กำลังโหลดแผนงานจาก Google Sheet…</div>`;
     ensure(false).then(draw);
-    if (!TIMER) TIMER = setInterval(() => { if (ROOT && document.body.contains(ROOT) && !document.querySelector(".spc-modal")) ensure(true).then(draw); }, 5 * 60 * 1000);
+    if (!TIMER) TIMER = setInterval(() => { if (ROOT && document.body.contains(ROOT) && !document.querySelector(".spc-modal,.spr-modal") && S.page !== "req") ensure(true).then(draw); }, 5 * 60 * 1000);
   }
 
   const CSS = `
 .spc-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.spc-rq{justify-content:flex-start;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 14px}.spc-rq b small{font-weight:500;color:var(--amber);font-size:11.5px}.spc-rq span{font-size:12px;color:var(--muted)}
+.spc-btn.pri{background:var(--rak);border-color:var(--rak);color:#fff;font-weight:600;cursor:pointer}.spc-btn.pri:hover{color:#fff}.spc-btn i{font-style:normal;background:var(--rak);color:#fff;border-radius:999px;font-size:11px;padding:0 6px;margin-left:6px}
 .spc-nav{display:flex;align-items:center;gap:6px}.spc-nav h2{margin:0 0 0 8px;font-size:19px;font-weight:600}
 .spc-btn{display:inline-grid;place-items:center;min-width:36px;height:34px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:#fff;text-decoration:none;color:var(--ink);font-size:13.5px}
 .spc-btn:hover{border-color:#f0b9b9;color:var(--rak)}

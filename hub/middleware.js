@@ -647,8 +647,225 @@ async function manpowerApi(cfg, req, url, prof) {
   const sp = await call(cfg, SPL_TABLE + '?select=data,updated_at&id=eq.main', { method: 'GET', admin: true }).catch(() => null);
   const spRow = sp && sp.ok && Array.isArray(sp.data) ? sp.data[0] : null;
   const overlay = serviceOverlay(spRow && spRow.data, workers, from, to);
-  return json({ from, to, canEdit: canEditManpower(prof), canMilestone: canEditMilestone(prof), workers, projects, milestones: milestones || [], assignments: rows || [], absences: absences || [], holidays: holidays || [], needsMigration,
+  const [rq, canApprove] = await Promise.all([sprBoard(cfg, from, to), sprCanApprove(cfg, prof).catch(() => false)]);
+  return json({ from, to, requests: rq.requests, pendingRequests: rq.pendingRequests, canApprove, canEdit: canEditManpower(prof), canMilestone: canEditMilestone(prof), workers, projects, milestones: milestones || [], assignments: rows || [], absences: absences || [], holidays: holidays || [], needsMigration,
     service: overlay.service, serviceUnmatched: overlay.serviceUnmatched, serviceUpdated: spRow ? (spRow.data && spRow.data.updated) || spRow.updated_at : null });
+}
+
+// ---------- Service Plan · ขอคน (manpower requests, trial — set by Dew, 10 Nov 2026) ----------
+// Anyone who can open Service Plan or Manpower asks for people in the app (the requester is the signed-in user):
+// type IS/SO/IN/WR/IJ/JO, customer, job name, date range, vehicle, people. Availability is read from the Manpower plan:
+//   f free · h held by a "จอง" booking · b busy (confirmed work, or a confirmed ใบขอคน job) · a asked by another pending
+//   request · o off (Sunday, company holiday, the person's day off / leave)
+// A person who is free is asked for directly ("book"); a person with h / b days is a swap request ("swap", a reason is
+// required when confirmed work is hit). Only กอล์ฟ and โจ้ confirm or reject — from Service Plan or from Manpower, the
+// status is the same row (sp_request_people.status). Confirm writes the person's working days in the range into
+// mp_assignments (work_type service, source 'sp', not tentative) and replaces what was planned there (kept in mp_change_log).
+// Tables: database/service_plan_requests.sql. API under /api/service-plan/req/ (list, avail, create, decide, cancel).
+const SPR_TYPES = ['IS', 'SO', 'IN', 'WR', 'IJ', 'JO'];
+const SPR_APPROVE = { usernames: ['kitisak.s'], namesTh: ['กิติศักดิ์ สุ่นศักดิ์สวัสดิ์'], nicknames: ['กอล์ฟ', 'โจ้'] };
+async function sprCanApprove(cfg, prof) {
+  if (SPR_APPROVE.usernames.includes(String(prof.username || '').toLowerCase()) || SPR_APPROVE.namesTh.includes(thKey(prof.nameTh))) return true;
+  const th = thKey(prof.nameTh);
+  if (!th) return false;
+  const r = await call(cfg, `/rest/v1/mp_workers?select=nickname&name_th=eq.${encodeURIComponent(th)}`, { method: 'GET', admin: true }).catch(() => null);
+  return !!(r && r.ok && Array.isArray(r.data) && r.data.some((w) => String(w.nickname || '').split(/[\/,]/).some((n) => SPR_APPROVE.nicknames.includes(n.trim()))));
+}
+const sprNo = (r) => { const d = new Date(r.created_at || Date.now()); return `SPR-${String(d.getUTCFullYear()).slice(2)}${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(r.id).padStart(4, '0')}`; };
+const sprLabel = (r) => [r.type, r.customer, r.job_name].filter(Boolean).join(' · ');
+// Open (not cancelled) requests that overlap [from, to], with their people.
+async function sprOverlap(cfg, from, to, statuses) {
+  const reqs = await restAll(cfg, `/rest/v1/sp_requests?select=id,type,customer,job_name,date_from,date_to,requested_by,created_at&cancelled=is.false&date_from=lte.${to}&date_to=gte.${from}`);
+  if (!reqs || !reqs.length) return { reqs: reqs || [], people: [] };
+  const people = await restAll(cfg, `/rest/v1/sp_request_people?select=id,request_id,worker_id,status,mode&request_id=in.(${reqs.map((r) => r.id).join(',')})&status=in.(${statuses.join(',')})`);
+  return { reqs, people: people || [] };
+}
+// Availability of every active worker for each day of [from, to]; exclude = request id to leave out of "asked".
+async function sprAvail(cfg, from, to, exclude) {
+  const span = `day=gte.${from}&day=lte.${to}`;
+  const [workers, asg, abs, hol, sp, ov] = await Promise.all([
+    restAll(cfg, '/rest/v1/mp_workers?select=id,name_th,nickname,unit,trade,sort&active=is.true&order=sort.asc'),
+    restAll(cfg, `/rest/v1/mp_assignments?select=worker_id,day,text,tentative&${span}`),
+    restAll(cfg, `/rest/v1/mp_absences?select=worker_id,day,type&${span}`),
+    restAll(cfg, `/rest/v1/mp_holidays?select=day,name&${span}`),
+    call(cfg, SPL_TABLE + '?select=data&id=eq.main', { method: 'GET', admin: true }).catch(() => null),
+    sprOverlap(cfg, from, to, ['pending']),
+  ]);
+  if (!workers) return null;
+  const days = mpDays(from, to), H = new Map((hol || []).map((h) => [h.day, h.name || 'วันหยุดบริษัท']));
+  const cell = new Map(); // "wid|day" → [state, text]
+  const put = (k, s, t) => { const cur = cell.get(k); if (!cur || 'ahb'.indexOf(s) > 'ahb'.indexOf(cur[0])) cell.set(k, [s, t]); }; // b beats h beats a
+  const R = new Map(ov.reqs.map((r) => [r.id, r]));
+  for (const p of ov.people) { const r = R.get(p.request_id); if (!r || r.id === exclude) continue; for (const d of mpDays(r.date_from < from ? from : r.date_from, r.date_to > to ? to : r.date_to)) put(p.worker_id + '|' + d, 'a', 'มีคำขอรอ PC: ' + sprLabel(r)); }
+  for (const a of asg || []) put(a.worker_id + '|' + a.day, a.tentative ? 'h' : 'b', a.text);
+  const spRow = sp && sp.ok && Array.isArray(sp.data) ? sp.data[0] : null;
+  for (const s of serviceOverlay(spRow && spRow.data, workers, from, to).service) put(s.worker_id + '|' + s.day, 'b', ['ใบขอคน', s.type, s.customer, s.job].filter(Boolean).join(' '));
+  for (const x of abs || []) cell.set(x.worker_id + '|' + x.day, ['o', x.type]);
+  const off = days.map((d) => H.has(d) ? H.get(d) : new Date(d + 'T00:00:00Z').getUTCDay() === 0 ? 'วันอาทิตย์' : '');
+  const out = workers.map((w) => {
+    let c = ''; const t = {};
+    days.forEach((d, i) => {
+      const v = cell.get(w.id + '|' + d);
+      if (v && v[0] === 'o') { c += 'o'; t[i] = v[1]; }
+      else if (off[i] && (!v || v[0] === 'a')) { c += 'o'; t[i] = off[i]; }
+      else if (v) { c += v[0]; t[i] = v[1]; }
+      else c += 'f';
+    });
+    return { id: w.id, name: w.name_th, nick: w.nickname || '', unit: w.unit, trade: w.trade || '', c, t };
+  });
+  return { from, to, days, off, workers: out };
+}
+async function sprList(cfg, prof) {
+  const reqs = await call(cfg, '/rest/v1/sp_requests?select=*&order=id.desc&limit=400', { method: 'GET', admin: true });
+  if (!reqs.ok) return json({ error: 'no_table' }, 503);
+  const ids = reqs.data.map((r) => r.id);
+  const [people, workers, projects, sp, canApprove] = await Promise.all([
+    ids.length ? restAll(cfg, `/rest/v1/sp_request_people?select=*&request_id=in.(${ids.join(',')})&order=id.asc`) : [],
+    restAll(cfg, '/rest/v1/mp_workers?select=id,name_th,nickname,unit'),
+    restAll(cfg, '/rest/v1/mp_projects?select=customer'),
+    call(cfg, SPL_TABLE + '?select=data&id=eq.main', { method: 'GET', admin: true }).catch(() => null),
+    sprCanApprove(cfg, prof),
+  ]);
+  const W = new Map((workers || []).map((w) => [w.id, w]));
+  const by = new Map();
+  for (const p of people || []) { const w = W.get(p.worker_id) || {}; if (!by.has(p.request_id)) by.set(p.request_id, []); by.get(p.request_id).push({ ...p, name: w.name_th || p.worker_id, nick: w.nickname || '', unit: w.unit || '' }); }
+  // vehicles: plates already used in ใบขอคน (column H), most used first
+  const cnt = new Map(), spRow = sp && sp.ok && Array.isArray(sp.data) ? sp.data[0] : null;
+  for (const r of (spRow && spRow.data && spRow.data.rows) || []) for (const v of String((r.v || [])[7] || '').split(/[\n,\/+]| และ /)) { const k = v.replace(/\s+/g, ' ').trim(); if (k.length >= 3 && k.length <= 20 && /\d/.test(k)) cnt.set(k, (cnt.get(k) || 0) + 1); }
+  for (const r of reqs.data) { const k = String(r.vehicle || '').trim(); if (k) cnt.set(k, (cnt.get(k) || 0) + 1); }
+  const vehicles = [...cnt].sort((a, b) => b[1] - a[1]).slice(0, 40).map((x) => x[0]);
+  const customers = [...new Set((projects || []).map((p) => p.customer).concat(reqs.data.map((r) => r.customer)).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'th'));
+  return json({ me: { username: prof.username || prof.email, name: prof.nameTh || prof.name }, canApprove, vehicles, customers,
+    requests: reqs.data.map((r) => ({ ...r, req_no: sprNo(r), people: by.get(r.id) || [] })) });
+}
+async function sprCreate(cfg, req, prof) {
+  const d = await mpBody(req);
+  if (!d) return json({ error: 'json' }, 400);
+  const type = String(d.type || '').toUpperCase(), customer = mpStr(d.customer, 120), job = mpStr(d.job_name, 160);
+  const from = mpStr(d.from, 10), to = mpStr(d.to || d.from, 10);
+  if (!SPR_TYPES.includes(type) || !customer || !job || !ISO_DAY.test(from) || !ISO_DAY.test(to) || to < from) return json({ error: 'กรอกประเภท ลูกค้า ชื่องาน และช่วงวันให้ครบ' }, 400);
+  if ((Date.parse(to) - Date.parse(from)) / 864e5 > 61) return json({ error: 'ช่วงวันยาวเกิน 62 วัน แบ่งเป็นหลายคำขอ' }, 400);
+  const want = (Array.isArray(d.people) ? d.people : []).slice(0, 40).map((p) => ({ id: mpStr(p && p.worker_id, 20), leader: !!(p && p.is_leader), reason: mpStr(p && p.reason, 300) })).filter((p) => MP_ID.test(p.id));
+  if (!want.length) return json({ error: 'เลือกคนอย่างน้อย 1 คน' }, 400);
+  const av = await sprAvail(cfg, from, to, 0);
+  if (!av) return json({ error: 'no_table' }, 503);
+  const A = new Map(av.workers.map((w) => [w.id, w])), rows = [], seen = new Set();
+  for (const p of want) {
+    if (seen.has(p.id)) continue; seen.add(p.id);
+    const w = A.get(p.id);
+    if (!w) return json({ error: 'ไม่พบรายชื่อ ' + p.id }, 404);
+    if (!/[^o]/.test(w.c)) return json({ error: `${w.nick || w.name} ลา / หยุดตลอดช่วงที่ขอ เลือกคนอื่น` }, 409);
+    const conflicts = [];
+    av.days.forEach((day, i) => { if ('hba'.includes(w.c[i])) conflicts.push({ day, s: w.c[i], t: String(w.t[i] || '').slice(0, 160) }); });
+    const busy = /b/.test(w.c), swap = /[hb]/.test(w.c);
+    if (busy && !p.reason) return json({ error: `${w.nick || w.name} มีงานที่ยืนยันแล้ว ต้องใส่เหตุผลที่ขอสลับ` }, 400);
+    rows.push({ worker_id: p.id, is_leader: p.leader, mode: swap ? 'swap' : 'book', reason: p.reason || null, conflicts: conflicts.slice(0, 62), status: 'pending' });
+  }
+  if (rows.filter((r) => r.is_leader).length > 1) return json({ error: 'เลือกหัวหน้าทีม (SS) ได้ 1 คน' }, 400);
+  const who = prof.username || prof.email, H = { ...authHeaders(cfg.service), prefer: 'return=representation' };
+  const ins = await fetch(cfg.url + '/rest/v1/sp_requests', { method: 'POST', headers: H, body: JSON.stringify({ type, customer, job_name: job, job_no: mpStr(d.job_no, 40) || null,
+    description: String(d.description || '').trim().slice(0, 2000) || null, vehicle: mpStr(d.vehicle, 60) || null, date_from: from, date_to: to, requested_by: who, requested_name: prof.nameTh || prof.name || who }) });
+  if (!ins.ok) return json({ error: ins.status === 404 ? 'no_table' : 'supabase' }, ins.status === 404 ? 503 : 502);
+  const r = (await ins.json())[0];
+  const pp = await fetch(cfg.url + '/rest/v1/sp_request_people', { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'return=minimal' }, body: JSON.stringify(rows.map((x) => ({ ...x, request_id: r.id }))) });
+  if (!pp.ok) { await fetch(cfg.url + `/rest/v1/sp_requests?id=eq.${r.id}`, { method: 'DELETE', headers: authHeaders(cfg.service) }).catch(() => {}); return json({ error: 'supabase' }, 502); }
+  await mpLog(cfg, who, 'sp-request', { id: r.id, req_no: sprNo(r), type, customer, job, from, to, people: rows.map((x) => ({ worker_id: x.worker_id, mode: x.mode })) });
+  return json({ ok: true, id: r.id, req_no: sprNo(r), swaps: rows.filter((x) => x.mode === 'swap').length });
+}
+// existing project with the same customer + job name, or a new one
+async function sprProject(cfg, customer, job, jobNo) {
+  const all = await restAll(cfg, '/rest/v1/mp_projects?select=code,name,customer,job_no,sort');
+  if (!all) return null;
+  const low = (x) => String(x || '').toLowerCase();
+  const hit = all.find((p) => low(p.name) === low(job) && low(p.customer) === low(customer));
+  if (hit) return hit.code;
+  const code = 'P' + Date.now().toString(36).toUpperCase();
+  const res = await fetch(cfg.url + '/rest/v1/mp_projects', { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'return=minimal' },
+    body: JSON.stringify({ code, name: job, customer, job_no: jobNo || null, status: 'active', color: MP_COLORS[all.length % MP_COLORS.length], sort: all.reduce((m, p) => Math.max(m, p.sort || 0), 0) + 10 }) });
+  return res.ok ? code : null;
+}
+// POST /api/service-plan/req/decide {ids:[sp_request_people.id], action:'confirm'|'reject', note} — กอล์ฟ / โจ้ only
+async function sprDecide(cfg, req, prof) {
+  if (!(await sprCanApprove(cfg, prof))) return json({ error: 'Confirm / Reject ได้เฉพาะกอล์ฟและโจ้' }, 403);
+  const d = await mpBody(req);
+  const ids = [...new Set((Array.isArray(d && d.ids) ? d.ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 60);
+  const action = d && d.action, note = mpStr(d && d.note, 300);
+  if (!ids.length || !['confirm', 'reject'].includes(action)) return json({ error: 'input' }, 400);
+  const people = await restAll(cfg, `/rest/v1/sp_request_people?select=*&id=in.(${ids.join(',')})&status=eq.pending`);
+  if (!people) return json({ error: 'no_table' }, 503);
+  if (!people.length) return json({ error: 'รายการนี้ถูกตัดสินไปแล้ว รีเฟรชหน้า' }, 409);
+  const reqs = await restAll(cfg, `/rest/v1/sp_requests?select=*&id=in.(${[...new Set(people.map((p) => p.request_id))].join(',')})&cancelled=is.false`);
+  const R = new Map((reqs || []).map((r) => [r.id, r]));
+  const who = prof.username || prof.email, now = new Date().toISOString(), H = { ...authHeaders(cfg.service), prefer: 'return=minimal' };
+  let done = 0, cells = 0; const replaced = [];
+  for (const p of people) {
+    const r = R.get(p.request_id);
+    if (!r) continue;
+    if (action === 'confirm') {
+      const code = await sprProject(cfg, r.customer, r.job_name, r.job_no);
+      if (!code) return json({ error: 'supabase' }, 502);
+      const days = (await mpWorkDays(cfg, [p.worker_id], r.date_from, r.date_to, true, null)).get(p.worker_id) || [];
+      const one = days.length ? days : mpDays(r.date_from, r.date_to).slice(0, 1);
+      const old = await restAll(cfg, `/rest/v1/mp_assignments?select=worker_id,day,project_code,text,tentative,work_type&worker_id=eq.${encodeURIComponent(p.worker_id)}&day=in.(${one.join(',')})`);
+      replaced.push(...(old || []));
+      const text = [r.type, r.customer, r.job_name].filter(Boolean).join(' ').slice(0, 200);
+      const res = await fetch(cfg.url + '/rest/v1/mp_assignments?on_conflict=worker_id,day', { method: 'POST', headers: { ...H, prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(one.map((day) => ({ worker_id: p.worker_id, day, project_code: code, kind: 'work', work_type: 'service', text, tentative: false, source: 'sp', updated_by: who, updated_at: now }))) });
+      if (!res.ok) return json({ error: res.status === 400 ? 'run database/manpower-002.sql' : 'supabase' }, 502);
+      cells += one.length;
+    }
+    const up = await fetch(cfg.url + `/rest/v1/sp_request_people?id=eq.${p.id}&status=eq.pending`, { method: 'PATCH', headers: H,
+      body: JSON.stringify({ status: action === 'confirm' ? 'confirmed' : 'rejected', decided_by: who, decided_name: prof.nameTh || prof.name || who, decided_at: now, decision_note: note || null }) });
+    if (!up.ok) return json({ error: 'supabase' }, 502);
+    done++;
+  }
+  await mpLog(cfg, who, action === 'confirm' ? 'sp-confirm' : 'sp-reject', { people: people.map((p) => ({ id: p.id, request_id: p.request_id, worker_id: p.worker_id })), note, cells, replaced });
+  return json({ ok: true, done, cells, replaced: replaced.length });
+}
+// POST /api/service-plan/req/cancel {id} — the requester (or กอล์ฟ / โจ้) while nobody is confirmed yet
+async function sprCancel(cfg, req, prof) {
+  const d = await mpBody(req), id = Number(d && d.id) || 0;
+  if (!id) return json({ error: 'input' }, 400);
+  const r = await call(cfg, `/rest/v1/sp_requests?select=*&id=eq.${id}`, { method: 'GET', admin: true });
+  if (!r.ok) return json({ error: 'no_table' }, 503);
+  const row = r.data[0], who = prof.username || prof.email;
+  if (!row) return json({ error: 'not found' }, 404);
+  if (row.requested_by !== who && !(await sprCanApprove(cfg, prof))) return json({ error: 'ยกเลิกได้เฉพาะผู้ขอ' }, 403);
+  const people = await restAll(cfg, `/rest/v1/sp_request_people?select=id,status&request_id=eq.${id}`);
+  if ((people || []).some((p) => p.status === 'confirmed')) return json({ error: 'มีคนที่ PC Confirm แล้ว ติดต่อ PC เพื่อแก้แผน' }, 409);
+  const H = { ...authHeaders(cfg.service), prefer: 'return=minimal' }, now = new Date().toISOString();
+  const a = await fetch(cfg.url + `/rest/v1/sp_requests?id=eq.${id}`, { method: 'PATCH', headers: H, body: JSON.stringify({ cancelled: true, updated_at: now }) });
+  if (!a.ok) return json({ error: 'supabase' }, 502);
+  await fetch(cfg.url + `/rest/v1/sp_request_people?request_id=eq.${id}&status=eq.pending`, { method: 'PATCH', headers: H, body: JSON.stringify({ status: 'cancelled', decided_by: who, decided_at: now }) });
+  await mpLog(cfg, who, 'sp-cancel', { id });
+  return json({ ok: true });
+}
+async function sprApi(cfg, req, url, prof) {
+  const p = url.pathname.slice('/api/service-plan/req/'.length);
+  if (p === 'list') return req.method === 'GET' ? sprList(cfg, prof) : json({ error: 'method' }, 405);
+  if (p === 'avail') {
+    if (req.method !== 'GET') return json({ error: 'method' }, 405);
+    const from = url.searchParams.get('from') || '', to = url.searchParams.get('to') || '';
+    if (!ISO_DAY.test(from) || !ISO_DAY.test(to) || to < from || (Date.parse(to) - Date.parse(from)) / 864e5 > 130) return json({ error: 'range' }, 400);
+    const av = await sprAvail(cfg, from, to, 0);
+    return av ? json(av) : json({ error: 'no_table' }, 503);
+  }
+  const post = { create: sprCreate, decide: sprDecide, cancel: sprCancel }[p];
+  if (!post) return json({ error: 'not found' }, 404);
+  return req.method === 'POST' ? post(cfg, req, prof) : json({ error: 'method' }, 405);
+}
+// Requests laid over the Manpower board: one entry per person per day (pending → "ขอ" flag, confirmed → "✓").
+async function sprBoard(cfg, from, to) {
+  try {
+    const ov = await sprOverlap(cfg, from, to, ['pending', 'confirmed']);
+    const R = new Map(ov.reqs.map((r) => [r.id, r])), out = [];
+    for (const p of ov.people) {
+      const r = R.get(p.request_id);
+      if (r) for (const day of mpDays(r.date_from < from ? from : r.date_from, r.date_to > to ? to : r.date_to)) out.push({ worker_id: p.worker_id, day, rid: r.id, status: p.status, mode: p.mode, label: sprLabel(r), req_no: sprNo(r) });
+    }
+    const pend = await call(cfg, '/rest/v1/sp_request_people?select=id&status=eq.pending&limit=500', { method: 'GET', admin: true });
+    return { requests: out, pendingRequests: pend.ok ? pend.data.length : 0 };
+  } catch { return { requests: [], pendingRequests: 0 }; }
 }
 
 // Site Expense permissions are fixed by username (set by Dew, 9 Nov 2026), not by the admin checkboxes.
@@ -1290,6 +1507,14 @@ export default async function middleware(req) {
     if (!live) return json({ error: 'login required' }, 401);
     if (!canOpen(live, 'manpower')) return json({ error: 'no access' }, 403);
     try { return await manpowerApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
+  }
+
+  if (path.startsWith('/api/service-plan/req/')) { // ขอคน: open to Service Plan and Manpower users
+    if (!signedIn) return json({ error: 'login required' }, 401);
+    const live = await liveProfile(cfg, user);
+    if (!live) return json({ error: 'login required' }, 401);
+    if (!canOpen(live, 'service-plan') && !canOpen(live, 'manpower')) return json({ error: 'no access' }, 403);
+    try { return await sprApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
   }
 
   if (path.startsWith('/api/service-plan/')) {
