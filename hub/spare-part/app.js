@@ -42,6 +42,8 @@
     return true;
   }
   const upsert = p => { const i = PROJECTS.findIndex(x => x.id === p.id); i < 0 ? PROJECTS.unshift(p) : (PROJECTS[i] = p); };
+  // URL of a project: #spare-part/sp-<Job No.>  e.g. #spare-part/sp-04202026
+  const slugOf = p => "sp-" + (String(p.jo || "").trim().replace(/[^\w-]+/g, "-") || p.id);
   const uid = () => "sp-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
   /* ---------- spare part suggestions (rules per equipment category) ---------- */
@@ -107,7 +109,7 @@
     return `<div class="tbl"><table><thead><tr><th>Job No.</th><th>Customer</th><th>Project name</th><th>รายการอะไหล่</th><th>สถานะ</th><th>อัปเดต</th><th></th></tr></thead><tbody>${rows.map(p => `
       <tr class="${p.status === "inactive" ? "sp-off" : ""}"><td><span class="jo">${esc(p.jo)}</span></td><td>${esc(p.customerShort || p.customer)}<div class="sub">${esc(p.site || "")}</div></td>
       <td>${esc(p.name)}</td><td>${(p.lines || []).length}</td><td>${pill(p.status)}</td><td class="sub">${fmtDate(p.updated)}</td>
-      <td><a class="open" href="#spare-part/${encodeURIComponent(p.id)}">เปิด →</a></td></tr>`).join("")}</tbody></table></div>`;
+      <td><a class="open" href="#spare-part/${encodeURIComponent(slugOf(p))}">เปิด →</a></td></tr>`).join("")}</tbody></table></div>`;
   }
 
   function pageList() {
@@ -177,7 +179,7 @@
       const p = { id: uid(), ...WIZ.head, ij: j.ij, status: "draft", created: new Date().toISOString(), createdBy: (window.SSM_ME && window.SSM_ME.email) || "",
         refs: { folder: j.folder, joFile: j.joFile, pid: j.pid, layout: j.layout || [], pipeline: SRC.sources?.pipeline },
         equipment: eqs, lines: suggest(j, eqs) };
-      const saved = await save(p); closeWizard(); location.hash = "#spare-part/" + encodeURIComponent(saved.id);
+      const saved = await save(p); closeWizard(); location.hash = "#spare-part/" + encodeURIComponent(slugOf(saved));
     }
   }
 
@@ -282,7 +284,7 @@
       if (a === "zone") { const n = prompt("ชื่อโซนใหม่ (Process tank หรือ System)", "Zone " + String.fromCharCode(65 + zones.length) + " – "); if (n && n.trim()) { p.zones = [...(p.zones || []), n.trim()]; p.lines.push(blank(n.trim())); redraw(); } }
       if (a === "adddoc") { df.hidden = false; df.title.focus(); }
       if (a === "canceldoc") { df.hidden = true; df.reset(); ROOT.querySelector("#spDocErr").textContent = ""; }
-      if (a === "edithead" && isAdmin()) editHead(p, async () => { await save(p); pageProject(p); ROOT.querySelector("#spSaved").textContent = "บันทึกรายละเอียดโปรเจคแล้ว " + new Date().toLocaleTimeString("th-TH"); });
+      if (a === "edithead" && isAdmin()) editHead(p, async () => { await save(p); const h = "#spare-part/" + encodeURIComponent(slugOf(p)); if (location.hash !== h) history.replaceState(null, "", h); pageProject(p); ROOT.querySelector("#spSaved").textContent = "บันทึกรายละเอียดโปรเจคแล้ว " + new Date().toLocaleTimeString("th-TH"); });
       if (a === "csv") exportCsv(p);
       if (a === "import") openImport(p, (n, how) => { redraw(); ROOT.querySelector("#spSaved").textContent = `นำเข้า ${n} รายการ (${how === "replace" ? "แทนที่" : "เพิ่มต่อท้าย"}) · กด บันทึก เพื่อเก็บ`; });
       if (a === "save") { p.zones = zonesOf(p); await save(p); ROOT.querySelector("#spSaved").textContent = "บันทึกแล้ว " + new Date().toLocaleTimeString("th-TH") + (MODE === "local" ? " (ในเบราว์เซอร์นี้)" : ""); }
@@ -413,6 +415,7 @@
     m.querySelector('[data-h="ok"]').onclick = () => {
       const v = {}; m.querySelectorAll("[data-f]").forEach(i => { v[i.dataset.f] = i.value.trim(); });
       if (!v.jo || !v.name) { alert("ต้องมี Job No. และ Project name"); return; }
+      if (PROJECTS.some(x => x.id !== p.id && String(x.jo).trim() === v.jo)) { alert("Job No. " + v.jo + " มีโปรเจค Spare Part อยู่แล้ว"); return; }
       Object.assign(p, v); close(); done();
     };
     m.querySelector("[data-f]").focus();
@@ -488,7 +491,8 @@ option.p-critical,option.p-recommended,option.p-consumable{font-weight:600}
     await loadAll();
     if (ROOT !== el) return;
     if (sub) {
-      const p = PROJECTS.find(x => x.id === decodeURIComponent(sub));
+      const key = decodeURIComponent(sub);
+      const p = PROJECTS.find(x => slugOf(x) === key) || PROJECTS.find(x => x.id === key); // old links used the internal id
       if (p) return pageProject(JSON.parse(JSON.stringify(p)));
       el.innerHTML = `<div class="empty">ไม่พบโปรเจคนี้ · <a class="open" href="#spare-part">กลับรายการ</a></div>`; return;
     }
