@@ -116,6 +116,7 @@ const MENUS = [
   { id: 'site-expense', name: 'Site Expense' },
   { id: 'spare-part', name: 'Spare Part' },
   { id: 'punch-list', name: 'Punch List' },
+  { id: 'service-plan', name: 'Service Plan' },
 ];
 const MENU_IDS = MENUS.map((m) => m.id);
 function menuOfPath(path) {
