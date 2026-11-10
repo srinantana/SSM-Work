@@ -14,8 +14,8 @@
 //   ALLOWED_DOMAIN                   – rak.co.th
 //   SUPER_ADMIN                      – nantana.s@rak.co.th (always admin; cannot be disabled or deleted)
 //   DEFAULT_PASSWORD                 – first-login password for new / reset accounts
-//   SERVICE_PLAN_TOKEN               – shared secret the n8n workflow sends (header x-ssm-token) to
-//                                      POST /api/service-plan/sync (scripts/n8n-service-plan-sync.json)
+//   SERVICE_PLAN_TOKEN               – shared secret the Apps Script sends (header x-ssm-token) to
+//                                      POST /api/service-plan/sync (scripts/service-plan-push.gs)
 // If a required value is missing the site stays locked (fails closed).
 
 export const config = { matcher: ['/((?!favicon\\.ico).*)'] };
@@ -170,8 +170,8 @@ async function sparePartApi(cfg, req, url, prof) {
   return res.ok ? json(p) : json({ error: res.status === 404 ? 'no_table' : 'supabase' }, res.status === 404 ? 503 : 502);
 }
 
-// Service Plan: an n8n workflow (scripts/n8n-service-plan-sync.json) watches tab "ใบขอคน 2026" of the sheet
-// "ใบร้องขอคนจากฝ่ายผลิต" and, whenever a row is added or changed, posts columns A–Q of every row to
+// Service Plan: a Google Apps Script (scripts/service-plan-push.gs, "On change" trigger) watches tab "ใบขอคน 2026"
+// of the sheet "ใบร้องขอคนจากฝ่ายผลิต" and, whenever a row is added or changed, posts columns A–Q of every row to
 // POST /api/service-plan/sync (header x-ssm-token = SERVICE_PLAN_TOKEN). The rows are kept in Supabase table
 // public.service_plan_snapshot (database/service_plan.sql); GET /api/service-plan/jobs returns them to signed-in users.
 // hub/service-plan/app.js keeps only IS/SO/IN/WR rows with status New/Checking/Confirm/Complete.
