@@ -135,13 +135,17 @@
     ds.forEach(d => { const m = d.getFullYear() * 100 + d.getMonth(); if (m !== cur) { flush(); cur = m; span = 0; } span++; });
     flush();
     const dayHead = ds.map(d => { const k = key(d), h = DATA.H.get(k); return `<th class="mp-d ${dayOff(k, d) ? "we" : ""} ${k === tk ? "td" : ""}" title="${esc(h ? (h.name || ABS[h.type]?.[2] || h.type) : "")}"><span>${DS[d.getDay()]}</span>${d.getDate()}</th>`; }).join("");
-    // milestones
+    // milestones — ดิว and กอล์ฟ (canMilestone) click a cell to add / change / delete
     let miles = "";
-    if (S.miles && DATA.milestones.length) {
+    const cm = !!DATA.canMilestone;
+    if (S.miles && (DATA.milestones.length || cm)) {
       const byP = new Map();
-      DATA.milestones.forEach(m => { if (matchM(m.project_code)) { if (!byP.has(m.project_code)) byP.set(m.project_code, new Map()); const x = byP.get(m.project_code); x.set(m.day, (x.get(m.day) ? x.get(m.day) + " · " : "") + m.label); } });
-      const rows = DATA.projects.filter(p => byP.has(p.code)).map(p => `<tr class="mp-ms"><th class="mp-name"><i style="background:${esc(p.color)}"></i>${esc(p.name)}${p.status !== "active" ? ` <em>${esc(p.status)}</em>` : ""}</th>${ds.map(d => { const t = byP.get(p.code).get(key(d)); return t ? `<td class="mp-c ms" style="--c:${esc(p.color)}" title="${esc(t)}"><span>◆ ${esc(t)}</span></td>` : `<td class="mp-c ${dayOff(key(d), d) ? "we" : ""}"></td>`; }).join("")}</tr>`).join("");
-      if (rows) miles = `<tr class="mp-grp"><th class="mp-name">◆ Milestone โปรเจกต์</th><td colspan="${ds.length}"></td></tr>` + rows;
+      DATA.milestones.forEach(m => { if (matchM(m.project_code)) { if (!byP.has(m.project_code)) byP.set(m.project_code, new Map()); const x = byP.get(m.project_code); if (!x.has(m.day)) x.set(m.day, []); x.get(m.day).push(m.label); } });
+      const rows = DATA.projects.filter(p => byP.has(p.code)).map(p => `<tr class="mp-ms"><th class="mp-name"><i style="background:${esc(p.color)}"></i>${esc(p.name)}${p.status !== "active" ? ` <em>${esc(p.status)}</em>` : ""}</th>${ds.map(d => {
+        const k = key(d), t = byP.get(p.code).get(k), dm = cm ? ` data-m="${esc(p.code + "|" + k)}"` : "";
+        return t ? `<td class="mp-c ms" style="--c:${esc(p.color)}" title="${esc(t.join(" · "))}"${dm}><span>◆ ${esc(t.join(" · "))}</span></td>` : `<td class="mp-c ${dayOff(k, d) ? "we" : ""}${cm ? " ed" : ""}"${dm}></td>`;
+      }).join("")}</tr>`).join("");
+      if (rows || cm) miles = `<tr class="mp-grp"><th class="mp-name">◆ Milestone${cm ? ` <button type="button" class="mp-madd" title="เพิ่ม Milestone">+ เพิ่ม</button>` : ""}</th><td colspan="${ds.length}"></td></tr>` + rows;
     }
     // people grouped by unit (CUR.W = on-screen order, used by drag-select)
     CUR.W = UNITS.flatMap(([u]) => W.filter(w => w.unit === u).map(w => w.id));
@@ -444,7 +448,7 @@
     if (hf) hf.addEventListener("submit", e => { e.preventDefault(); done(() => post("/api/manpower/master/holiday", { day: hf.day.value, name: hf.name.value, type: hf.type.value }), "เพิ่มวันหยุดแล้ว"); });
     box.querySelectorAll(".mp-hd").forEach(b => b.addEventListener("click", () => done(() => post("/api/manpower/master/holiday-delete", { day: b.dataset.day }), "ลบวันหยุดแล้ว")));
   }
-  const ACT = { assign: "ลงงาน", clear: "ลบงาน", confirm: "Confirm งานจอง", leave: "ลงวันลา", "leave-clear": "ยกเลิกวันลา", "worker-add": "เพิ่มช่าง", "worker-edit": "แก้ข้อมูลช่าง", "project-add": "เพิ่มงาน", "project-edit": "แก้ข้อมูลงาน", holiday: "เพิ่มวันหยุด", "holiday-delete": "ลบวันหยุด" };
+  const ACT = { assign: "ลงงาน", clear: "ลบงาน", confirm: "Confirm งานจอง", leave: "ลงวันลา", "leave-clear": "ยกเลิกวันลา", "worker-add": "เพิ่มช่าง", "worker-edit": "แก้ข้อมูลช่าง", "project-add": "เพิ่มงาน", "project-edit": "แก้ข้อมูลงาน", holiday: "เพิ่มวันหยุด", "holiday-delete": "ลบวันหยุด", "milestone-add": "เพิ่ม Milestone", "milestone-edit": "แก้ Milestone", "milestone-delete": "ลบ Milestone" };
   function logSummary(r) {
     const d = r.detail || {}, nm = id => { const w = DATA.workers.find(x => x.id === id); return w ? w.nickname || w.name_th : id; };
     const span = list => { const s2 = [...new Set(list)].sort(); return s2.length ? (s2.length === 1 ? fmtD(s2[0]) : `${fmtD(s2[0])} – ${fmtD(s2[s2.length - 1])} (${s2.length} วัน)`) : ""; };
@@ -457,6 +461,7 @@
     if (r.action.startsWith("worker")) return `${d.name_th || ""}${d.newId && d.newId !== d.old_id ? " · รหัส " + (d.old_id ? d.old_id + " → " : "") + d.newId : ""}${d.active === false ? " · ไม่ได้ทำงานแล้ว" : ""}`;
     if (r.action.startsWith("project")) return [d.customer, d.name, d.job_no, d.status].filter(Boolean).join(" / ");
     if (r.action.startsWith("holiday")) return `${fmtD(d.day)} ${d.name || ""}`;
+    if (r.action.startsWith("milestone")) { const m = r.action === "milestone-delete" ? (d.removed || [])[0] || {} : d; const pj = DATA.P.get(m.project_code); return m.day ? `${pj ? pj.name : m.project_code || ""} · ${fmtD(m.day)} · ${m.label || ""}` : ""; }
     return "";
   }
   async function logPage(box, before) {
@@ -469,6 +474,38 @@
     const more = box.querySelector(".mp-more");
     more.innerHTML = rows.length === 100 ? `<button type="button" class="mp-rs">โหลดเพิ่ม</button>` : "";
     const b = more.querySelector("button"); if (b) b.addEventListener("click", () => logPage(box, rows[rows.length - 1].id));
+  }
+
+  /* ---------- Milestone (ดิว / กอล์ฟ) ---------- */
+  function milestoneDialog(code, day) {
+    const list = code && day ? DATA.milestones.filter(m => m.project_code === code && m.day === day) : [];
+    const p = code ? DATA.P.get(code) : null;
+    const projOpts = DATA.projects.filter(x => x.status !== "cancelled" || x.code === code).map(x => `<option value="${esc(x.code)}" ${x.code === code ? "selected" : ""}>${esc((x.customer ? x.customer + " · " : "") + x.name)}</option>`).join("");
+    const SUG = ["FAB", "Assembly", "FAT", "รื้อ", "Pack", "Delivery", "ติดตั้ง", "Commissioning", "SAT", "Handover"];
+    const el = document.createElement("div");
+    el.className = "mp-modal";
+    el.innerHTML = `<div class="mp-dlg" role="dialog" aria-modal="true" aria-label="Milestone"><header><div><b>◆ Milestone</b> <span>${esc(p ? p.name : "เพิ่มใหม่")}</span>${day ? `<div class="mp-when">${esc(fmtD(day))}</div>` : ""}</div><button type="button" class="mp-x" aria-label="ปิด">✕</button></header>
+      ${list.length ? `<div class="mp-mlist">${list.map(m => `<form class="mp-mrow" data-id="${m.id}"><input name="label" value="${esc(m.label)}" required><input type="date" name="day" value="${esc(m.day)}" min="2026-01-01" max="2027-12-31"><button type="submit" class="mp-rs">บันทึก</button><button type="button" class="mp-hd mp-mdel">ลบ</button></form>`).join("")}</div>` : ""}
+      <form class="mp-form mp-mform" autocomplete="off"><h4 class="wide">${list.length ? "เพิ่มอีก Milestone" : "เพิ่ม Milestone"}</h4>
+        <label class="wide">งาน<select name="project_code" required><option value="">เลือกงาน</option>${projOpts}</select></label>
+        <label>วันที่<input type="date" name="day" value="${esc(day || key(today()))}" min="2026-01-01" max="2027-12-31" required></label>
+        <label>Milestone<input name="label" list="mpMsL" placeholder="เช่น FAT, Delivery, SAT" required></label>
+        <datalist id="mpMsL">${SUG.map(x => `<option value="${x}">`).join("")}</datalist>
+        <div class="mp-fbtn"><button type="submit" class="mp-save">เพิ่ม</button></div></form><div class="mp-msg" role="status"></div></div>`;
+    const msg = el.querySelector(".mp-msg");
+    const close = () => { el.remove(); document.removeEventListener("keydown", onKey); };
+    const onKey = e => { if (e.key === "Escape") close(); };
+    const go = async (fn, ok) => { msg.textContent = "กำลังบันทึก…"; try { await fn(); msg.textContent = ok; if (DATA) DATA.want = ""; await ensure(); draw(); setTimeout(close, 500); } catch (err) { msg.textContent = "ไม่สำเร็จ (" + err.message + ")"; } };
+    el.querySelectorAll(".mp-mrow").forEach(f => {
+      f.addEventListener("submit", e => { e.preventDefault(); go(() => post("/api/manpower/milestone", { id: f.dataset.id, project_code: code, day: f.day.value, label: f.label.value }), "บันทึกแล้ว"); });
+      f.querySelector(".mp-mdel").addEventListener("click", () => go(() => post("/api/manpower/milestone-delete", { id: f.dataset.id }), "ลบแล้ว"));
+    });
+    const mf = el.querySelector(".mp-mform");
+    mf.addEventListener("submit", e => { e.preventDefault(); go(() => post("/api/manpower/milestone", { project_code: mf.project_code.value, day: mf.day.value, label: mf.label.value }), "เพิ่มแล้ว"); });
+    el.addEventListener("click", e => { if (e.target === el || e.target.closest(".mp-x")) close(); });
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(el);
+    (list.length ? el.querySelector(".mp-mrow input") : mf.label).focus();
   }
 
   function draw() {
@@ -493,6 +530,10 @@
     const m = ROOT.querySelector("#mpMiles"); if (m) m.addEventListener("change", () => { S.miles = m.checked; draw(); });
     ROOT.querySelectorAll(".mp-lg[data-p]").forEach(b => b.addEventListener("click", () => { const on = S.project === b.dataset.p; S.project = on ? "" : b.dataset.p; S.cust = on ? "" : custOf(b.dataset.p); draw(); }));
     const g = ROOT.querySelector(".mp-grid");
+    if (g && DATA && DATA.canMilestone) g.addEventListener("click", e => {
+      if (e.target.closest(".mp-madd")) return milestoneDialog(null, null);
+      const td = e.target.closest("td[data-m]"); if (td) { const [c, d] = td.dataset.m.split("|"); milestoneDialog(c, d); }
+    });
     if (g && DATA && DATA.canEdit) bindDrag(g);
     else if (g) g.addEventListener("click", e => { const td = e.target.closest("td[data-k]"); if (td) detail(td.dataset.k); });
   }
@@ -619,6 +660,11 @@ button.mp-lg:hover,.mp-lg.on{border-color:var(--rak);color:var(--rak)}.mp-lg b{f
 .mp-hd{border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;font-size:12px}.mp-hd:hover{color:var(--rak)}
 .mp-hadd{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.mp-hint{font-size:12px;color:var(--muted);margin:6px 0 10px}.mp-card h4{margin:14px 0 4px;font-size:13px}
 .mp-pmsg{padding:0;font-size:13px}.mp-more{padding-top:10px}
+.mp-madd{margin-left:8px;border:1px solid var(--rak);background:#fff;color:var(--rak);border-radius:6px;padding:1px 8px;font:inherit;font-size:11px;cursor:pointer}.mp-madd:hover{background:var(--rak);color:#fff}
+.mp-ms td[data-m]{cursor:pointer}.mp-ms td[data-m].ed:hover{background:#fff6f6;box-shadow:inset 0 0 0 1px #f0b9b9}
+.mp-mlist{padding:10px 16px;display:grid;gap:6px;border-bottom:1px solid var(--line)}.mp-mrow{display:flex;gap:6px;align-items:center}
+.mp-mrow input{font:inherit;font-size:13px;border:1px solid #dce1e8;border-radius:7px;padding:5px 8px}.mp-mrow input[name=label]{flex:1;min-width:0}
+.mp-mform{padding-top:12px}.mp-mform h4{margin:0;font-size:13px}.mp-mform select{font:inherit;font-size:13.5px;border:1px solid #dce1e8;border-radius:8px;padding:6px 8px;width:100%}
 @media (max-width:640px){.mp-legend{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.mp-lg{white-space:nowrap;flex:none}.mp-mon span{left:120px}.mp-name{min-width:112px;max-width:112px}.mp-name small{display:none}.mp-zoom{margin-left:0}.mp-scroll{max-height:none}}
 `;
 
