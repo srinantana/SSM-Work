@@ -20,7 +20,9 @@
   const KIND = { admin: ["#6d7582", "ประชุม / อบรม / ธุรการ"], internal: ["#9a7b4f", "งานภายใน"], other: ["#b3b8c2", "อื่นๆ (ตรวจสอบ)"] };
 
   let ROOT = null, DATA = null, LOADING = null, ERR = "";
-  const S = { zoom: "month", date: new Date(), units: new Set(UNITS.map(u => u[0])), project: "", q: "", left: false, miles: true };
+  const S = { zoom: "month", date: new Date(), units: new Set(UNITS.map(u => u[0])), cust: "", project: "", person: "", q: "", left: false, miles: true };
+  const WT = [["fab", "Fab"], ["assembly", "Assembly"], ["install", "Install"], ["service", "Service"], ["other", "Other"]];
+  const WTL = Object.fromEntries(WT);
 
   /* ---------- dates ---------- */
   const pad = n => String(n).padStart(2, "0");
@@ -62,7 +64,9 @@
       d.A = new Map(d.assignments.map(x => [x.worker_id + "|" + x.day, x]));
       d.X = new Map(d.absences.map(x => [x.worker_id + "|" + x.day, x]));
       d.H = new Map(d.holidays.map(x => [x.day, x]));
-      d.busy = new Set(d.assignments.concat(d.absences.filter(x => !["H", "PH", "EX"].includes(x.type))).map(x => x.worker_id));
+      d.SV = new Map();
+      (d.service || []).forEach(x => { const k = x.worker_id + "|" + x.day; if (!d.SV.has(k)) d.SV.set(k, []); d.SV.get(k).push(x); });
+      d.busy = new Set(d.assignments.concat(d.absences.filter(x => !["H", "PH", "EX"].includes(x.type)), d.service || []).map(x => x.worker_id));
       DATA = d;
     } catch { ERR = "โหลดข้อมูลไม่สำเร็จ ลองรีเฟรชหน้า"; DATA = null; }
   }
@@ -73,9 +77,25 @@
   const colorOf = a => a.project_code && DATA.P.get(a.project_code) ? DATA.P.get(a.project_code).color : (KIND[a.kind] || KIND.other)[0];
   const projName = a => a.project_code && DATA.P.get(a.project_code) ? DATA.P.get(a.project_code).name : (KIND[a.kind] || KIND.other)[1];
   function days() { const [a, b] = range(), out = []; for (let d = a; d <= b; d = addDays(d, 1)) out.push(d); return out; }
+  // Two-level job filter: customer first, then a job of that customer. Service Plan cells match by their customer name.
+  const custOf = code => { const p = code && DATA.P.get(code); return p ? (p.customer || "") : ""; };
+  const lc = x => String(x || "").toLowerCase().trim();
+  const matchA = a => S.project ? a.project_code === S.project : S.cust ? lc(custOf(a.project_code)) === lc(S.cust) : true;
+  const matchSv = list => S.project ? S.project === "SERVICE" || list.some(j => lc(j.job) === lc((DATA.P.get(S.project) || {}).job_no)) : S.cust ? list.some(j => lc(j.customer).includes(lc(S.cust)) || lc(S.cust).includes(lc(j.customer))) || lc(custOf("SERVICE")) === lc(S.cust) : true;
+  const matchM = code => S.project ? code === S.project : S.cust ? lc(custOf(code)) === lc(S.cust) : true;
+  function customers() {
+    const set = new Map();
+    DATA.projects.forEach(p => { if (p.customer) set.set(lc(p.customer), p.customer); });
+    return [...set.values()].sort((a, b) => a.localeCompare(b, "th"));
+  }
   function visibleWorkers() {
     const q = norm(S.q);
-    return DATA.workers.filter(w => S.units.has(w.unit) && (w.active || (S.left && DATA.busy.has(w.id))) && (!q || norm(w.name_th + w.nickname + w.trade).includes(q)
+    const busyIn = new Set();
+    if (S.cust || S.project) {
+      DATA.assignments.forEach(a => { if (matchA(a)) busyIn.add(a.worker_id); });
+      DATA.SV.forEach((v, k) => { if (matchSv(v)) busyIn.add(k.split("|")[0]); });
+    }
+    return DATA.workers.filter(w => S.units.has(w.unit) && (!S.person || w.id === S.person) && (!(S.cust || S.project) || busyIn.has(w.id) || w.id === S.person) && (w.active || (S.left && DATA.busy.has(w.id)) || w.id === S.person) && (!q || norm(w.name_th + w.nickname + w.trade).includes(q)
       || (DATA.assignments.some(a => a.worker_id === w.id && norm(a.text).includes(q)))));
   }
   const dayOff = (k, d) => DATA.H.has(k) || d.getDay() === 0;
@@ -85,14 +105,18 @@
     const [a] = range();
     const zoom = ZOOMS.map(([z, t]) => `<a href="${href(z, S.date)}" class="${S.zoom === z ? "on" : ""}">${t}</a>`).join("");
     const units = UNITS.map(([u]) => `<label class="mp-chk"><input type="checkbox" data-unit="${u}" ${S.units.has(u) ? "checked" : ""}>${u}</label>`).join("");
-    const projs = DATA ? DATA.projects.map(p => `<option value="${esc(p.code)}" ${S.project === p.code ? "selected" : ""}>${esc(p.name)}${p.status !== "active" ? " (" + esc(p.status) + ")" : ""}</option>`).join("") : "";
+    const custs = DATA ? customers().map(c => `<option value="${esc(c)}" ${lc(S.cust) === lc(c) ? "selected" : ""}>${esc(c)}</option>`).join("") : "";
+    const projs = DATA ? DATA.projects.filter(p => !S.cust || lc(p.customer) === lc(S.cust)).map(p => `<option value="${esc(p.code)}" ${S.project === p.code ? "selected" : ""}>${esc(p.name)}${p.job_no ? " · " + esc(p.job_no) : ""}${p.status !== "active" ? " (" + esc(p.status) + ")" : ""}</option>`).join("") : "";
+    const ppl = DATA ? UNITS.map(([u, l]) => `<optgroup label="${esc(l)}">${DATA.workers.filter(w => w.unit === u && (w.active || S.left)).map(w => `<option value="${esc(w.id)}" ${S.person === w.id ? "selected" : ""}>${esc(w.nickname || w.name_th)} · ${esc(w.name_th)}</option>`).join("")}</optgroup>`).join("") : "";
     const can = DATA && DATA.canEdit;
     return `<div class="mp-head">
-      <div class="mp-title"><h2>วางแผนกำลังคน</h2><span class="mp-badge ${can ? "ed" : ""}">${can ? "สิทธิ์แก้ไข (SC / PC / SSM) · เปิดแก้ไขใน Phase 2" : "ดูอย่างเดียว"}</span></div>
+      <div class="mp-title"><h2>วางแผนกำลังคน</h2><span class="mp-badge ${can ? "ed" : ""}">${can ? "SC / PC / SSM · ลงงาน / แก้ไข / Confirm ได้" : "ดูอย่างเดียว"}</span></div>
       <div class="mp-nav"><a class="mp-btn" href="${href(S.zoom, step(-1))}" aria-label="ก่อนหน้า">‹</a><a class="mp-btn" href="${href(S.zoom, today())}">วันนี้</a><a class="mp-btn" href="${href(S.zoom, step(1))}" aria-label="ถัดไป">›</a><b>${esc(title())}</b><span class="mp-zoom">${zoom}</span></div>
       <div class="mp-filters">${units}
-        <select id="mpProj" aria-label="กรองโปรเจกต์"><option value="">ทุกโปรเจกต์</option>${projs}</select>
+        <span class="mp-fl"><select id="mpCust" aria-label="1. ลูกค้า"><option value="">ลูกค้า: ทั้งหมด</option>${custs}</select><i>›</i><select id="mpProj" aria-label="2. ชื่องาน"><option value="">${S.cust ? "งานของ " + esc(S.cust) + ": ทั้งหมด" : "ชื่องาน: ทั้งหมด"}</option>${projs}</select></span>
+        <select id="mpPerson" aria-label="ชื่อคน"><option value="">ชื่อคน: ทุกคน</option>${ppl}</select>
         <input id="mpQ" type="search" placeholder="ค้นหาชื่อ / งาน" value="${esc(S.q)}" aria-label="ค้นหา">
+        ${S.cust || S.project || S.person || S.q ? `<button type="button" class="mp-clr" id="mpClr">ล้างตัวกรอง</button>` : ""}
         <label class="mp-chk"><input type="checkbox" id="mpLeft" ${S.left ? "checked" : ""}>แสดงคนที่ลาออก</label>
         <label class="mp-chk"><input type="checkbox" id="mpMiles" ${S.miles ? "checked" : ""}>Milestone</label></div>
     </div>`;
@@ -111,7 +135,7 @@
     let miles = "";
     if (S.miles && DATA.milestones.length) {
       const byP = new Map();
-      DATA.milestones.forEach(m => { if (!S.project || m.project_code === S.project) { if (!byP.has(m.project_code)) byP.set(m.project_code, new Map()); const x = byP.get(m.project_code); x.set(m.day, (x.get(m.day) ? x.get(m.day) + " · " : "") + m.label); } });
+      DATA.milestones.forEach(m => { if (matchM(m.project_code)) { if (!byP.has(m.project_code)) byP.set(m.project_code, new Map()); const x = byP.get(m.project_code); x.set(m.day, (x.get(m.day) ? x.get(m.day) + " · " : "") + m.label); } });
       const rows = DATA.projects.filter(p => byP.has(p.code)).map(p => `<tr class="mp-ms"><th class="mp-name"><i style="background:${esc(p.color)}"></i>${esc(p.name)}${p.status !== "active" ? ` <em>${esc(p.status)}</em>` : ""}</th>${ds.map(d => { const t = byP.get(p.code).get(key(d)); return t ? `<td class="mp-c ms" style="--c:${esc(p.color)}" title="${esc(t)}"><span>◆ ${esc(t)}</span></td>` : `<td class="mp-c ${dayOff(key(d), d) ? "we" : ""}"></td>`; }).join("")}</tr>`).join("");
       if (rows) miles = `<tr class="mp-grp"><th class="mp-name">◆ Milestone โปรเจกต์</th><td colspan="${ds.length}"></td></tr>` + rows;
     }
@@ -129,46 +153,157 @@
     // daily summary
     const act = W.filter(w => w.active);
     const sum = (f, lab, c) => `<tr class="mp-sum ${c}"><th class="mp-name">${lab}</th>${ds.map(d => { const n = f(key(d), d); return `<td class="mp-c">${n || ""}</td>`; }).join("")}</tr>`;
-    const working = (k) => act.filter(w => { const a = DATA.A.get(w.id + "|" + k); return a && (!S.project || a.project_code === S.project); }).length;
+    const working = (k) => act.filter(w => { const a = DATA.A.get(w.id + "|" + k), sv = DATA.SV.get(w.id + "|" + k); return (a && matchA(a)) || (sv && !a && matchSv(sv)); }).length;
     const leave = (k) => act.filter(w => { const x = DATA.X.get(w.id + "|" + k); return x && ABS[x.type] && ABS[x.type][1] === "lv"; }).length;
-    const free = (k, d) => dayOff(k, d) ? 0 : act.filter(w => !DATA.A.has(w.id + "|" + k) && !DATA.X.has(w.id + "|" + k)).length;
-    const foot = sum(working, S.project ? "คนในโปรเจกต์" : "มีงาน", "w") + sum(leave, "ลา", "l") + sum(free, "ว่าง (ยังไม่ลงงาน)", "f");
-    if (!W.length) return `<div class="mp-empty">ไม่พบรายชื่อตามตัวกรอง</div>`;
+    const free = (k, d) => dayOff(k, d) ? 0 : act.filter(w => !DATA.A.has(w.id + "|" + k) && !DATA.X.has(w.id + "|" + k) && !DATA.SV.has(w.id + "|" + k)).length;
+    const foot = sum(working, S.project || S.cust ? "คนในงานที่เลือก" : "มีงาน", "w") + sum(leave, "ลา", "l") + sum(free, "ว่าง (ยังไม่ลงงาน)", "f");
+    if (!W.length) return `<div class="mp-empty">${S.cust || S.project ? "ไม่มีใครลงงานนี้ในช่วงที่เลือก ลองเปลี่ยนเดือนหรือซูม 3 เดือน" : "ไม่พบรายชื่อตามตัวกรอง"}</div>`;
     return `<div class="mp-scroll ${cls}"><table class="mp-grid"><thead><tr><th class="mp-name mp-corner" rowspan="2">ชื่อ</th>${months}</tr><tr>${dayHead}</tr></thead>
       <tbody>${miles}${body}</tbody><tfoot>${foot}</tfoot></table></div>`;
   }
 
+  const spText = j => [j.type, j.customer].filter(Boolean).join(" ") || j.job;
+  const spColor = () => (DATA.P.get("SERVICE") || { color: "#2f6fd6" }).color;
   function cell(w, d) {
-    const k = key(d), id = w.id + "|" + k, a = DATA.A.get(id), x = DATA.X.get(id), we = dayOff(k, d);
+    const k = key(d), id = w.id + "|" + k, a = DATA.A.get(id), x = DATA.X.get(id), we = dayOff(k, d), sv = DATA.SV.get(id);
     const base = `mp-c${we ? " we" : ""}${k === key(today()) ? " td" : ""}`;
-    if (a && (!S.project || a.project_code === S.project)) {
+    // Service Plan (Confirm) next to a different plan for the same person/day → flag, never hide either one
+    const clash = sv && ((a && a.project_code !== "SERVICE") || (x && ABS[x.type] && ABS[x.type][1] === "lv"));
+    const flag = sv ? `<b class="mp-sp${clash ? " x" : ""}" title="${esc(clash ? "ชนกับงานจาก Service Plan: " : "Service Plan: ") + esc(sv.map(spText).join(", "))}">${clash ? "!" : "SP"}</b>` : "";
+    if (a && matchA(a)) {
       const c = colorOf(a);
-      return `<td class="${base} job${a.tentative ? " tent" : ""}" style="--c:${esc(c)}" data-k="${esc(id)}" title="${esc(a.text)}"><span>${esc(a.text)}</span></td>`;
+      return `<td class="${base} job${a.tentative ? " tent" : ""}" style="--c:${esc(c)}" data-k="${esc(id)}" title="${esc(a.text)}"><span>${esc(a.text)}</span>${flag}</td>`;
     }
+    if (sv && !a && !(x && ABS[x.type] && ABS[x.type][1] === "lv") && matchSv(sv)) {
+      return `<td class="${base} job sv" style="--c:${esc(spColor())}" data-k="${esc(id)}" title="${esc(sv.map(spText).join(", "))}"><span>${esc(sv.map(spText).join(" / "))}</span>${flag}</td>`;
+    }
+    if (x && sv) { const t = ABS[x.type] || [x.type, "lv", x.type]; return `<td class="${base} ab ${t[1]}" data-k="${esc(id)}" title="${esc(t[2])}"><span>${esc(t[0])}</span>${flag}</td>`; }
     if (a) return `<td class="${base} dim" data-k="${esc(id)}" title="${esc(a.text)}"></td>`;
+    const ed = DATA.canEdit ? ` data-k="${esc(id)}"` : "";
     if (x) { const t = ABS[x.type] || [x.type, "lv", x.type]; return `<td class="${base} ab ${t[1]}" data-k="${esc(id)}" title="${esc(t[2])}"><span>${esc(t[0])}</span></td>`; }
-    return `<td class="${base}"></td>`;
+    return `<td class="${base}${DATA.canEdit ? " ed" : ""}"${ed}${DATA.canEdit ? ' title="กดเพื่อลงงาน"' : ""}></td>`;
   }
 
   function legend() {
     const n = new Map();
     DATA.assignments.forEach(a => { const c = a.project_code || "_" + a.kind; n.set(c, (n.get(c) || 0) + 1); });
+    let spOnly = 0;
+    DATA.SV.forEach((v, k) => { if (!DATA.A.has(k)) spOnly++; });
+    if (spOnly) n.set("SERVICE", (n.get("SERVICE") || 0) + spOnly);
     const items = DATA.projects.filter(p => n.has(p.code)).sort((a, b) => n.get(b.code) - n.get(a.code))
       .map(p => `<button type="button" class="mp-lg ${S.project === p.code ? "on" : ""}" data-p="${esc(p.code)}"><i style="background:${esc(p.color)}"></i>${esc(p.name)} <b>${n.get(p.code)}</b></button>`)
       .concat(Object.keys(KIND).filter(k => n.has("_" + k)).map(k => `<span class="mp-lg"><i style="background:${KIND[k][0]}"></i>${KIND[k][1]} <b>${n.get("_" + k)}</b></span>`));
-    return `<div class="mp-legend"><span class="mp-lt">Man-day ในช่วงนี้</span>${items.join("")}<span class="mp-lg"><i class="tent-i"></i>จอง (ยังไม่ยืนยัน)</span><span class="mp-lg"><i class="lv-i"></i>ลา</span><span class="mp-lg"><i class="off-i"></i>H / PH วันหยุด</span></div>`;
+    const um = DATA.serviceUnmatched || [];
+    const review = um.length && DATA.canEdit ? `<details class="mp-um"><summary>ชื่อใน Service Plan ที่จับคู่กับช่างไม่ได้ ${um.length} งาน</summary><ul>${um.map(j => `<li><b>${esc(j.job || "แถว " + j.row)}</b> ${esc(j.customer)} · ${esc(j.status)} — ${j.names.map(esc).join(", ")}</li>`).join("")}</ul><p>แก้ชื่อในใบขอคนให้ตรงกับชื่อจริงของช่าง (ถ้าชื่อซ้ำให้ใส่ต้นนามสกุล เช่น "สัญญา สม") แล้ว board จะอัปเดตเอง</p></details>` : "";
+    return `<div class="mp-legend"><span class="mp-lt">Man-day ในช่วงนี้</span>${items.join("")}<span class="mp-lg"><i class="tent-i"></i>จอง (ยังไม่ยืนยัน)</span><span class="mp-lg"><b class="mp-sp in">SP</b>Confirm จาก Service Plan</span><span class="mp-lg"><b class="mp-sp x in">!</b>ชนกับ Service Plan</span><span class="mp-lg"><i class="lv-i"></i>ลา</span><span class="mp-lg"><i class="off-i"></i>H / PH วันหยุด</span></div>${review}`;
   }
 
+  // Contiguous "จอง" run of the same text for one person (gaps of days off / blank Sundays allowed).
+  function runOf(wid, day, text) {
+    const days = [day];
+    for (const dir of [-1, 1]) {
+      let d = fromKey(day), gap = 0;
+      while (gap < 3) {
+        d = addDays(d, dir); const k = key(d), a = DATA.A.get(wid + "|" + k);
+        if (k < DATA.from || k > DATA.to) break;
+        if (a && a.tentative && a.text === text) { days.push(k); gap = 0; } else if (!a) gap++; else break;
+      }
+    }
+    return days.sort();
+  }
   function detail(k) {
-    const [wid, day] = k.split("|"), w = DATA.workers.find(x => x.id === wid), a = DATA.A.get(k), x = DATA.X.get(k), d = fromKey(day);
-    const body = a ? `<dl class="mp-dl"><dt>งาน</dt><dd>${esc(a.text)}</dd><dt>โปรเจกต์</dt><dd><i class="mp-dot" style="background:${esc(colorOf(a))}"></i>${esc(projName(a))}</dd><dt>สถานะ</dt><dd>${a.tentative ? "จอง (ยังไม่ยืนยัน)" : "ยืนยันแล้ว"}</dd></dl>`
+    const [wid, day] = k.split("|"), w = DATA.workers.find(x => x.id === wid), a = DATA.A.get(k), x = DATA.X.get(k), sv = DATA.SV.get(k) || [], d = fromKey(day);
+    let body = a ? `<dl class="mp-dl"><dt>งาน</dt><dd>${esc(a.text)}</dd><dt>โปรเจกต์</dt><dd><i class="mp-dot" style="background:${esc(colorOf(a))}"></i>${esc(projName(a))}</dd>${a.project_code && DATA.P.get(a.project_code) && DATA.P.get(a.project_code).customer ? `<dt>ลูกค้า</dt><dd>${esc(DATA.P.get(a.project_code).customer)}</dd>` : ""}${a.project_code && DATA.P.get(a.project_code) && DATA.P.get(a.project_code).job_no ? `<dt>Job no.</dt><dd>${esc(DATA.P.get(a.project_code).job_no)}</dd>` : ""}<dt>ประเภทงาน</dt><dd>${esc(WTL[a.work_type] || "—")}</dd><dt>สถานะ</dt><dd>${a.tentative ? "จอง (ยังไม่ยืนยัน)" : "ยืนยันแล้ว"}</dd></dl>`
       : x ? `<dl class="mp-dl"><dt>ประเภท</dt><dd>${esc((ABS[x.type] || [0, 0, x.type])[2])}</dd></dl>` : "";
+    let actions = "";
+    if (a && a.tentative) {
+      const run = runOf(wid, day, a.text), lo = run[0], hi = run[run.length - 1];
+      const team = DATA.assignments.filter(y => y.tentative && y.text === a.text && y.day >= lo && y.day <= hi);
+      const teamN = new Set(team.map(y => y.worker_id)).size;
+      actions = DATA.canEdit ? `<div class="mp-act"><span>Confirm Manpower</span>
+        <button type="button" class="mp-ok" data-scope="day">วันนี้</button>
+        ${run.length > 1 ? `<button type="button" class="mp-ok" data-scope="run">ทั้งช่วงของคนนี้ (${run.length} วัน)</button>` : ""}
+        ${teamN > 1 ? `<button type="button" class="mp-ok" data-scope="team">ทั้งทีม (${teamN} คน · ${team.length} ช่อง)</button>` : ""}
+        <small>${esc(fromKey(lo).getDate() + " " + MS[fromKey(lo).getMonth()])} – ${esc(fromKey(hi).getDate() + " " + MS[fromKey(hi).getMonth()])} · คำว่า "จอง" จะถูกตัดออก</small></div>`
+        : `<p class="mp-ro">ยืนยันได้เฉพาะ SC / PC / SSM</p>`;
+      actions += `<script type="application/json" class="mp-run">${JSON.stringify({ text: a.text, run, team: team.map(y => [y.worker_id, y.day]) }).replace(/</g, "\\u003c")}</script>`;
+    }
+    if (sv.length) body += `<div class="mp-svd"><h4><b class="mp-sp in">SP</b> Confirm จาก Service Plan</h4>${sv.map(j => `<dl class="mp-dl"><dt>Job no.</dt><dd>${esc(j.job)} · ${esc(j.type)}</dd><dt>ลูกค้า</dt><dd>${esc(j.customer)}</dd><dt>งาน</dt><dd>${esc(j.desc.split("\n")[0])}</dd><dt>สถานะ</dt><dd>${esc(j.status)}</dd></dl>`).join("")}<p class="mp-ro">ข้อมูลมาจากใบขอคนอัตโนมัติ แก้ที่ Service Plan / ใบขอคน${(a && a.project_code !== "SERVICE") ? " · ⚠ วันนี้มีงานอื่นลงไว้แล้ว ตรวจสอบว่าคนนี้ไปงานไหน" : ""}</p></div>`;
+    // ---- add / edit work (SC / PC / SSM) ----
+    let form = "";
+    if (DATA.canEdit) {
+      const pj = a && a.project_code ? DATA.P.get(a.project_code) : null;
+      const cust = pj ? pj.customer || "" : (S.cust || ""), job = pj ? pj.name : "", jno = pj ? pj.job_no || "" : "";
+      const wt = a ? (a.work_type || "other") : (pj && pj.code === "SERVICE" ? "service" : "");
+      const note = a && pj && a.text !== pj.name ? a.text.replace(/^จอง\s*/, "") : (a && !pj ? a.text : "");
+      form = `<details class="mp-fwrap" ${a ? "" : "open"}><summary>${a ? "แก้ไขงานวันนี้" : "ลงงาน"}</summary><form class="mp-form" autocomplete="off">
+        <label>ลูกค้า<input name="customer" list="mpCustL" value="${esc(cust)}" placeholder="เช่น UCT, Ham-Let, SMT" required></label>
+        <label>ชื่องาน<input name="job" list="mpJobL" value="${esc(job)}" placeholder="เลือกงานเดิมหรือพิมพ์ชื่องานใหม่" required></label>
+        <label>Job no.<input name="job_no" value="${esc(jno)}" placeholder="เช่น 04002026"></label>
+        <fieldset><legend>ประเภทงาน</legend>${WT.map(([v, l]) => `<label class="mp-wt"><input type="radio" name="work_type" value="${v}" ${wt === v ? "checked" : ""} required>${l}</label>`).join("")}</fieldset>
+        <label class="wide">รายละเอียด (ไม่บังคับ)<input name="note" value="${esc(note)}" placeholder="เช่น ประกอบถัง T-05, เดินสายตู้ MCC"></label>
+        <label>ถึงวันที่<input type="date" name="to" value="${esc(day)}" min="${esc(day)}"></label>
+        <div class="mp-chks"><label><input type="checkbox" name="skip" checked> ข้ามวันอาทิตย์ / วันหยุด / วันลา</label><label><input type="checkbox" name="tentative" ${a && a.tentative ? "checked" : ""}> จอง (ยังไม่ยืนยัน)</label></div>
+        <div class="mp-fbtn"><button type="submit" class="mp-save">บันทึก</button>${a ? `<button type="button" class="mp-del">ลบงานวันนี้</button>` : ""}</div>
+        <datalist id="mpCustL">${customers().map(c => `<option value="${esc(c)}">`).join("")}</datalist><datalist id="mpJobL"></datalist>
+      </form></details>`;
+    }
     const el = document.createElement("div");
     el.className = "mp-modal";
-    el.innerHTML = `<div class="mp-dlg" role="dialog" aria-modal="true" aria-label="รายละเอียด"><header><div><b>${esc(w ? (w.nickname || w.name_th) : wid)}</b> <span>${esc(w ? w.name_th : "")}</span><div class="mp-when">${DS[d.getDay()]}. ${d.getDate()} ${MF[d.getMonth()]} ${d.getFullYear()}</div></div><button type="button" class="mp-x" aria-label="ปิด">✕</button></header>${body}</div>`;
+    el.innerHTML = `<div class="mp-dlg" role="dialog" aria-modal="true" aria-label="รายละเอียด"><header><div><b>${esc(w ? (w.nickname || w.name_th) : wid)}</b> <span>${esc(w ? w.name_th : "")}</span><div class="mp-when">${DS[d.getDay()]}. ${d.getDate()} ${MF[d.getMonth()]} ${d.getFullYear()}</div></div><button type="button" class="mp-x" aria-label="ปิด">✕</button></header>${body}${actions}${form}<div class="mp-msg" role="status"></div></div>`;
+    const reload = () => { if (DATA) DATA.want = ""; return ensure().then(draw); };
+    const f = el.querySelector(".mp-form");
+    if (f) {
+      const jobsFor = () => { const c = lc(f.customer.value); el.querySelector("#mpJobL").innerHTML = DATA.projects.filter(p => !c || lc(p.customer) === c).map(p => `<option value="${esc(p.name)}">${esc(p.job_no || "")}</option>`).join(""); };
+      jobsFor();
+      f.customer.addEventListener("input", jobsFor);
+      f.job.addEventListener("change", () => {
+        const hit = DATA.projects.find(p => lc(p.name) === lc(f.job.value) && (!f.customer.value || lc(p.customer) === lc(f.customer.value)));
+        if (hit) { if (!f.customer.value) f.customer.value = hit.customer || ""; if (hit.job_no && !f.job_no.value) f.job_no.value = hit.job_no; if (hit.code === "SERVICE" && !f.querySelector("[name=work_type]:checked")) f.querySelector("[value=service]").checked = true; }
+      });
+      f.addEventListener("submit", async e => {
+        e.preventDefault();
+        const msg = el.querySelector(".mp-msg"), btn = f.querySelector(".mp-save");
+        btn.disabled = true; msg.textContent = "กำลังบันทึก…";
+        try {
+          const r = await fetch("/api/manpower/assign", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+            worker_id: wid, from: day, to: f.to.value || day, customer: f.customer.value, job: f.job.value, job_no: f.job_no.value,
+            work_type: (f.querySelector("[name=work_type]:checked") || {}).value, note: f.note.value, tentative: f.tentative.checked, skip_off: f.skip.checked }) });
+          const res = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(res.error || r.status);
+          msg.textContent = `บันทึกแล้ว ${res.saved} วัน`;
+          await reload(); setTimeout(close, 500);
+        } catch (err) { msg.textContent = "บันทึกไม่สำเร็จ (" + err.message + ")"; btn.disabled = false; }
+      });
+      const del = f.querySelector(".mp-del");
+      if (del) del.addEventListener("click", async () => {
+        const msg = el.querySelector(".mp-msg"); del.disabled = true; msg.textContent = "กำลังลบ…";
+        try {
+          const r = await fetch("/api/manpower/clear", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ worker_id: wid, days: [day] }) });
+          if (!r.ok) throw new Error(r.status);
+          await reload(); close();
+        } catch (err) { msg.textContent = "ลบไม่สำเร็จ (" + err.message + ")"; del.disabled = false; }
+      });
+    }
     const close = () => { el.remove(); document.removeEventListener("keydown", onKey); };
     const onKey = e => { if (e.key === "Escape") close(); };
-    el.addEventListener("click", e => { if (e.target === el || e.target.closest(".mp-x")) close(); });
+    el.addEventListener("click", async e => {
+      if (e.target === el || e.target.closest(".mp-x")) return close();
+      const b = e.target.closest(".mp-ok"); if (!b) return;
+      const info = JSON.parse(el.querySelector(".mp-run").textContent), scope = b.dataset.scope;
+      const cells = scope === "day" ? [[wid, day]] : scope === "run" ? info.run.map(dd => [wid, dd]) : info.team;
+      const by = new Map(); cells.forEach(([w2, d2]) => { if (!by.has(w2)) by.set(w2, []); by.get(w2).push(d2); });
+      el.querySelectorAll(".mp-ok").forEach(x => { x.disabled = true; });
+      const msg = el.querySelector(".mp-msg"); msg.textContent = "กำลังบันทึก…";
+      try {
+        const r = await fetch("/api/manpower/confirm", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: info.text, items: [...by].map(([worker_id, days]) => ({ worker_id, days })) }) });
+        const res = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(res.error || r.status);
+        cells.forEach(([w2, d2]) => { const y = DATA.A.get(w2 + "|" + d2); if (y && y.tentative && y.text === info.text) { y.tentative = false; y.text = res.text; } });
+        msg.textContent = `ยืนยันแล้ว ${res.confirmed} ช่อง`;
+        draw(); setTimeout(close, 700);
+      } catch (err) { msg.textContent = "บันทึกไม่สำเร็จ (" + err.message + ")"; el.querySelectorAll(".mp-ok").forEach(x => { x.disabled = false; }); }
+    });
     document.addEventListener("keydown", onKey);
     document.body.appendChild(el);
     el.querySelector(".mp-x").focus();
@@ -178,18 +313,21 @@
     if (!ROOT) return;
     if (!DATA) { ROOT.innerHTML = toolbar() + `<div class="mp-empty">${esc(ERR || "กำลังโหลด…")}</div>`; bind(); return; }
     ROOT.innerHTML = toolbar() + legend() + grid()
-      + `<p class="mp-note">ข้อมูลตั้งแต่ 1 ม.ค. 2026 นำเข้าจาก Google Sheet "ตารางงานและวันหยุดช่าง 2569" ครั้งเดียว · จากนี้ใช้ SSM Work เป็นที่วางแผนที่เดียว · กดช่องเพื่อดูรายละเอียด</p>`;
+      + `<p class="mp-note">ข้อมูลตั้งแต่ 1 ม.ค. 2026 นำเข้าจาก Google Sheet "ตารางงานและวันหยุดช่าง 2569" ครั้งเดียว · งาน SP มาจาก Service Plan (ใบขอคน สถานะ Confirm / Complete)${DATA.serviceUpdated ? " อัปเดต " + esc(new Date(DATA.serviceUpdated).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })) : ""} · กดช่องเพื่อดูรายละเอียด</p>`;
     bind();
     const t = ROOT.querySelector("th.mp-d.td"), sc = ROOT.querySelector(".mp-scroll"), nc = ROOT.querySelector(".mp-corner");
     if (t && sc && nc) sc.scrollLeft = Math.max(0, t.offsetLeft - nc.offsetWidth - 2 * t.offsetWidth);
   }
   function bind() {
     ROOT.querySelectorAll("[data-unit]").forEach(c => c.addEventListener("change", () => { c.checked ? S.units.add(c.dataset.unit) : S.units.delete(c.dataset.unit); draw(); }));
+    const c = ROOT.querySelector("#mpCust"); if (c) c.addEventListener("change", () => { S.cust = c.value; S.project = ""; draw(); });
     const p = ROOT.querySelector("#mpProj"); if (p) p.addEventListener("change", () => { S.project = p.value; draw(); });
+    const pp = ROOT.querySelector("#mpPerson"); if (pp) pp.addEventListener("change", () => { S.person = pp.value; draw(); });
+    const cl = ROOT.querySelector("#mpClr"); if (cl) cl.addEventListener("click", () => { S.cust = S.project = S.person = S.q = ""; draw(); });
     const q = ROOT.querySelector("#mpQ"); if (q) q.addEventListener("change", () => { S.q = q.value.trim(); draw(); });
     const l = ROOT.querySelector("#mpLeft"); if (l) l.addEventListener("change", () => { S.left = l.checked; draw(); });
     const m = ROOT.querySelector("#mpMiles"); if (m) m.addEventListener("change", () => { S.miles = m.checked; draw(); });
-    ROOT.querySelectorAll(".mp-lg[data-p]").forEach(b => b.addEventListener("click", () => { S.project = S.project === b.dataset.p ? "" : b.dataset.p; draw(); }));
+    ROOT.querySelectorAll(".mp-lg[data-p]").forEach(b => b.addEventListener("click", () => { const on = S.project === b.dataset.p; S.project = on ? "" : b.dataset.p; S.cust = on ? "" : custOf(b.dataset.p); draw(); }));
     const g = ROOT.querySelector(".mp-grid"); if (g) g.addEventListener("click", e => { const td = e.target.closest("td[data-k]"); if (td) detail(td.dataset.k); });
   }
 
@@ -266,6 +404,34 @@ button.mp-lg:hover,.mp-lg.on{border-color:var(--rak);color:var(--rak)}.mp-lg b{f
 .mp-dlg header span{color:var(--muted);font-size:12.5px}.mp-when{font-size:12.5px;color:#4a515c;margin-top:2px}
 .mp-x{border:0;background:#f3f4f6;border-radius:8px;width:30px;height:30px;flex:none}
 .mp-dl{display:grid;grid-template-columns:90px 1fr;gap:6px 12px;margin:0;padding:14px 16px}.mp-dl dt{color:var(--muted)}.mp-dl dd{margin:0;display:flex;gap:6px;align-items:center}
+.mp-sp{position:absolute;top:1px;right:1px;font-size:8px;line-height:1;font-weight:700;color:#fff;background:var(--c,#2f6fd6);border-radius:3px;padding:2px 3px}
+.mp-sp.x{background:var(--rak)}.mp-sp.in{position:static;display:inline-block;background:#2f6fd6;margin-right:4px}.mp-sp.x.in{background:var(--rak)}
+.mp-c.sv{box-shadow:inset 3px 0 0 var(--c),inset 0 0 0 1px color-mix(in srgb,var(--c) 35%,#fff)}
+.mp-z-quarter .mp-sp{display:none}
+.mp-um{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:12px;color:#4a515c}
+.mp-um summary{cursor:pointer;color:var(--amber);font-weight:600}.mp-um ul{margin:8px 0;padding-left:18px;max-height:220px;overflow:auto}.mp-um li{margin:2px 0}.mp-um p{margin:4px 0 0;color:var(--muted)}
+.mp-act{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 16px;border-top:1px solid var(--line);background:#f7fbf8}
+.mp-act>span{font-weight:600;font-size:13px;width:100%}.mp-act small{width:100%;color:var(--muted);font-size:11.5px}
+.mp-ok{border:1px solid var(--green);background:#fff;color:var(--green);border-radius:8px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+.mp-ok:hover{background:var(--green);color:#fff}.mp-ok:disabled{opacity:.5;cursor:wait}
+.mp-ro{margin:0;padding:0 16px 12px;font-size:12px;color:var(--muted)}
+.mp-svd{border-top:1px solid var(--line)}.mp-svd h4{margin:12px 16px 0;font-size:13px}.mp-svd .mp-dl{padding-bottom:8px}
+.mp-msg{padding:0 16px 12px;font-size:12.5px;color:var(--green)}.mp-msg:empty{display:none}
+.mp-dlg{max-height:calc(100vh - 32px);overflow:auto}
+.mp-fl{display:inline-flex;align-items:center;gap:4px}.mp-fl i{font-style:normal;color:var(--muted)}
+.mp-clr{border:0;background:none;color:var(--rak);font:inherit;font-size:13px;cursor:pointer;padding:0}
+.mp-c.ed:hover{background:#fff6f6;box-shadow:inset 0 0 0 1px #f0b9b9;cursor:copy}
+.mp-fwrap{border-top:1px solid var(--line)}.mp-fwrap summary{cursor:pointer;padding:12px 16px;font-weight:600;font-size:13.5px;color:var(--rak)}
+.mp-form{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;padding:0 16px 14px;font-size:12.5px;color:#4a515c}
+.mp-form label{display:grid;gap:4px;min-width:0}.mp-form input{box-sizing:border-box;width:100%;min-width:0}.mp-form input[type=radio],.mp-form input[type=checkbox]{width:auto}.mp-form label.wide,.mp-form fieldset,.mp-chks,.mp-fbtn{grid-column:1/-1}
+.mp-form input[type=text],.mp-form input:not([type]),.mp-form input[type=date]{font:inherit;font-size:13.5px;border:1px solid #dce1e8;border-radius:8px;padding:6px 10px;color:var(--ink)}
+.mp-form fieldset{border:0;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:6px}.mp-form legend{padding:0;margin-bottom:4px}
+.mp-wt{display:inline-flex!important;align-items:center;gap:5px;border:1px solid var(--line);border-radius:999px;padding:4px 12px;cursor:pointer;font-size:13px}
+.mp-wt:has(input:checked){border-color:var(--rak);background:#fff1f1;color:var(--rak)}.mp-wt input{margin:0}
+.mp-chks{display:flex;flex-wrap:wrap;gap:6px 16px}.mp-chks label{display:inline-flex;align-items:center;gap:6px}
+.mp-fbtn{display:flex;gap:8px}.mp-save{background:var(--rak);color:#fff;border:0;border-radius:8px;padding:8px 18px;font:inherit;font-weight:600;cursor:pointer}
+.mp-del{background:#fff;color:var(--rak);border:1px solid #f0b9b9;border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer}.mp-save:disabled,.mp-del:disabled{opacity:.5}
+@media (max-width:640px){.mp-form{grid-template-columns:1fr}}
 @media (max-width:640px){.mp-legend{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.mp-lg{white-space:nowrap;flex:none}.mp-mon span{left:120px}.mp-name{min-width:112px;max-width:112px}.mp-name small{display:none}.mp-zoom{margin-left:0}.mp-scroll{max-height:none}}
 `;
 
