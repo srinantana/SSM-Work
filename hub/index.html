@@ -211,6 +211,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:#f1f3
 <script src="/spare-part/app.js"></script>
 <script src="/site-expense/app.js"></script>
 <script src="/service-plan/app.js"></script>
+<script src="/manpower/app.js"></script>
 <script>
 "use strict";
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -227,8 +228,8 @@ const MODULES = [
      plan:["บันทึกรายการพร้อมรูปถ่ายและผู้รับผิดชอบ","สถานะ Open / In progress / Closed","รายงานให้ลูกค้าก่อน SAT","สรุปจำนวนงานค้างรายโปรเจค"]},
   {id:"service-plan",icon:"i-plan",    live:true, name:"Service Plan", th:"แผนงานบริการลูกค้า",         desc:"ปฏิทินงานบริการ IS / SO / IN / WR จากใบร้องขอคน (Google Sheet) · มุมมองรายวัน สัปดาห์ เดือน ปี",
      plan:["ปฏิทินรายวัน / สัปดาห์ / เดือน / ปี จาก Google Sheet ใบขอคน","กดดูรายละเอียดงาน + ทะเบียนรถ","แจ้งเตือนก่อนถึงกำหนดเข้าบริการ","บันทึกผลการบริการ"]},
-  {id:"manpower",    icon:"i-team",    name:"Manpower",     th:"กำลังคนและทีมหน้างาน",       desc:"ดูว่าใครอยู่งานไหน วันไหน ว่างหรือไม่ว่าง และวางคนให้แต่ละงาน",
-     plan:["รายชื่อทีมหน้างาน แยกตำแหน่ง (SS / ช่าง / ผู้ช่วย)","ตารางคนรายวัน: ใครอยู่งานไหน ว่างหรือไม่ว่าง","จัดคนให้งานจาก Service Plan และ Site Expense","สรุป man-day ต่อคนและต่อโปรเจค"]},
+  {id:"manpower",    icon:"i-team",    live:true, name:"Manpower",     th:"วางแผนกำลังคน",              desc:"Planning Board คน × วัน แทน Google Sheet ตารางงานและวันหยุดช่าง · ใครอยู่งานไหน ลา หรือว่าง · Milestone โปรเจกต์",
+     plan:["Planning Board คน × วัน แยกหน่วยงาน ME / PP / EE / PC / SC (ดูอย่างเดียว)","ลงงาน แก้ไข และบันทึกการลา โดย SC / PC / SSM พร้อมเตือนจองซ้ำ","Overview, Project Timeline, ค้นหาคนว่าง และ export","เชื่อม Service Plan และ Site Expense (man-day × rate)"]},
 ];
 let REG = {customers:[]};
 let ME = null; // from /auth/me: {email, name, role, modules:[...]} — the server enforces the same rules
@@ -331,12 +332,14 @@ function render(){
   const sp = id === "spare-part" && ME !== null && allowed(id) && window.SparePart;
   const se = id === "site-expense" && ME !== null && allowed(id) && window.SiteExpense;
   const pl = id === "service-plan" && ME !== null && allowed(id) && window.ServicePlan;
-  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : sp ? (subRoute() ? "" : hero(m)) + `<div id="spRoot"></div>` : se ? (subRoute() ? "" : hero(m)) + `<div id="seRoot"></div>` : pl ? `<div id="plRoot" class="spc-root"></div>` : allowed(id) ? pageModule(m) : pageDenied(m))
+  const mp = id === "manpower" && ME !== null && allowed(id) && window.Manpower;
+  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : sp ? (subRoute() ? "" : hero(m)) + `<div id="spRoot"></div>` : se ? (subRoute() ? "" : hero(m)) + `<div id="seRoot"></div>` : pl ? `<div id="plRoot" class="spc-root"></div>` : mp ? `<div id="mpRoot" class="mp-root"></div>` : allowed(id) ? pageModule(m) : pageDenied(m))
     + `<div class="foot"><span>RAK Engineering Co., Ltd. · Site &amp; Service Management</span><span>${REG.updated ? "อัปเดตรายการ " + esc(REG.updated) : ""}</span></div>`;
   renderNav();
   if (sp) window.SparePart.mount(document.getElementById("spRoot"), subRoute());
   if (se) window.SiteExpense.mount(document.getElementById("seRoot"), subRoute());
   if (pl) window.ServicePlan.mount(document.getElementById("plRoot"), subRoute());
+  if (mp) window.Manpower.mount(document.getElementById("mpRoot"), subRoute());
   const q = document.getElementById("q");
   if (q) q.addEventListener("input", () => { document.getElementById("list").innerHTML = customerBlocks(rows(), q.value.trim().toLowerCase()); });
   setMenu(false);

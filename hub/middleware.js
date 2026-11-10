@@ -206,6 +206,50 @@ async function servicePlanApi(cfg, req, url) {
   return row && row.data ? json(row.data) : json({ error: 'no_data' }, 503);
 }
 
+// Manpower (วางแผนกำลังคน) replaces the Google Sheet "26 (PD)- ตารางงานและวันหยุดช่าง 2569" (retired after a one-time
+// import, scripts/manpower-import.py). Tables mp_* (database/manpower.sql) have RLS on and no policies: only this
+// middleware (service key) reads them. Anyone granted the Manpower menu may view; editing (Phase 2) is limited to
+// SC / PC / SSM (set by Dew, 10 Nov 2026). Matched by username, or by Thai full name when the username is not known yet.
+//   SSM ดิว nantana.s · SC อาร์ต sakkamon.c, หนุ่ม teedanai.h, สปาย prakaikaew.p · PC กอล์ฟ, ไอซ์, แพร, ซี
+const MANPOWER_EDIT = {
+  usernames: ['nantana.s', 'sakkamon.c', 'teedanai.h', 'prakaikaew.p', 'kitisak.s', 'phattharada.t'],
+  namesTh: ['นันทนา ศรีสกุลเตียว', 'ศักดิ์กมล จันทริมา', 'ธีร์ดนัย ฮุยสูงเนิน', 'ประกายแก้ว ปัญญา',
+    'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์', 'พิชญ์ยุทธ คงดิศ', 'ภัทรลดา ทองสอาด', 'นภัท ทองอำไพ'],
+};
+const thKey = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+const canEditManpower = (prof) => MANPOWER_EDIT.usernames.includes(String(prof.username || '').toLowerCase())
+  || MANPOWER_EDIT.namesTh.includes(thKey(prof.nameTh));
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+// PostgREST returns at most 1000 rows per request; page through with limit/offset.
+async function restAll(cfg, path, max = 40000) {
+  const out = [];
+  for (let off = 0; off < max; off += 1000) {
+    const r = await call(cfg, `${path}${path.includes('?') ? '&' : '?'}limit=1000&offset=${off}`, { method: 'GET', admin: true });
+    if (!r.ok) return null;
+    out.push(...r.data);
+    if (r.data.length < 1000) break;
+  }
+  return out;
+}
+async function manpowerApi(cfg, req, url, prof) {
+  if (url.pathname !== '/api/manpower/board') return json({ error: 'not found' }, 404);
+  if (req.method !== 'GET') return json({ error: 'method' }, 405);
+  const from = url.searchParams.get('from') || '', to = url.searchParams.get('to') || '';
+  if (!ISO_DAY.test(from) || !ISO_DAY.test(to) || to < from) return json({ error: 'range' }, 400);
+  if ((Date.parse(to) - Date.parse(from)) / 864e5 > 400) return json({ error: 'range too long' }, 400);
+  const span = `day=gte.${from}&day=lte.${to}`;
+  const [workers, projects, milestones, assignments, absences, holidays] = await Promise.all([
+    restAll(cfg, '/rest/v1/mp_workers?select=id,emp_code,name_th,nickname,unit,trade,active,sort&order=sort.asc'),
+    restAll(cfg, '/rest/v1/mp_projects?select=code,name,customer,job_no,status,color,sort,note&order=sort.asc'),
+    restAll(cfg, `/rest/v1/mp_milestones?select=project_code,day,label&${span}&order=day.asc`),
+    restAll(cfg, `/rest/v1/mp_assignments?select=worker_id,day,project_code,kind,text,tentative&${span}&order=day.asc,worker_id.asc`),
+    restAll(cfg, `/rest/v1/mp_absences?select=worker_id,day,type&${span}&order=day.asc,worker_id.asc`),
+    restAll(cfg, `/rest/v1/mp_holidays?select=day,type,name&${span}&order=day.asc`),
+  ]);
+  if (!workers || !projects) return json({ error: 'no_table' }, 503);
+  return json({ from, to, canEdit: canEditManpower(prof), workers, projects, milestones: milestones || [], assignments: assignments || [], absences: absences || [], holidays: holidays || [] });
+}
+
 // Site Expense permissions are fixed by username (set by Dew, 9 Nov 2026), not by the admin checkboxes.
 //   ดิว nantana.s · บี chayanun.s · สปาย prakaikaew.p · อาร์ต sakkamon.c · หนุ่ม teedanai.h · นิ้ง chalunda.w · นิว suwitcha.b
 const SITE_EXPENSE = {
@@ -284,7 +328,7 @@ function profileOf(cfg, user) {
   const meta = user.user_metadata || {};
   const role = email === cfg.superAdmin ? 'admin' : (user.app_metadata && user.app_metadata.role) === 'admin' ? 'admin' : 'user';
   const mods = user.app_metadata && user.app_metadata.modules;
-  return { id: user.id, email, username: String(meta.username || ''), name: meta.full_name || meta.username || email.split('@')[0], role, modules: Array.isArray(mods) ? mods : null, mustChange: meta.must_change_password === true };
+  return { id: user.id, email, username: String(meta.username || ''), name: meta.full_name || meta.username || email.split('@')[0], nameTh: String(meta.name_th || ''), role, modules: Array.isArray(mods) ? mods : null, mustChange: meta.must_change_password === true };
 }
 
 async function startSession(cfg, prof, next) {
@@ -817,7 +861,7 @@ export default async function middleware(req) {
     if (!signedIn) return json({}, 401);
     const live = await liveProfile(cfg, user);
     if (!live) return json({}, 401);
-    return json({ email: live.email, username: live.username, name: live.name, role: live.role, modules: effectiveMenus(live), siteExpense: sitePerms(live) });
+    return json({ email: live.email, username: live.username, name: live.name, role: live.role, modules: effectiveMenus(live), siteExpense: sitePerms(live), manpowerEdit: canEditManpower(live) });
   }
 
   if (path === '/admin' || path.startsWith('/admin/')) {
@@ -837,6 +881,14 @@ export default async function middleware(req) {
     if (!live) return json({ error: 'login required' }, 401);
     if (!canOpen(live, 'spare-part')) return json({ error: 'no access' }, 403);
     try { return await sparePartApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
+  }
+
+  if (path.startsWith('/api/manpower/')) {
+    if (!signedIn) return json({ error: 'login required' }, 401);
+    const live = await liveProfile(cfg, user);
+    if (!live) return json({ error: 'login required' }, 401);
+    if (!canOpen(live, 'manpower')) return json({ error: 'no access' }, 403);
+    try { return await manpowerApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
   }
 
   if (path.startsWith('/api/service-plan/')) {
