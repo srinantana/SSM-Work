@@ -363,20 +363,50 @@ async function mpLog(cfg, who, action, detail) {
   await fetch(cfg.url + '/rest/v1/mp_change_log', { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'return=minimal' },
     body: JSON.stringify({ by_user: who, action, detail }) }).catch(() => {});
 }
+const MP_ID = /^[A-Za-z0-9_-]{1,20}$/;
+function mpIds(d) {
+  const ids = Array.isArray(d.worker_ids) ? d.worker_ids : [d.worker_id];
+  return [...new Set(ids.map((x) => mpStr(x, 20)).filter((x) => MP_ID.test(x)))].slice(0, 60);
+}
+function mpDays(from, to) {
+  const out = [];
+  for (let t = Date.parse(from + 'T00:00:00Z'); t <= Date.parse(to + 'T00:00:00Z'); t += 864e5) out.push(new Date(t).toISOString().slice(0, 10));
+  return out;
+}
+// days per worker without Sundays, company holidays and (offTypes) the worker's own days off / leave
+async function mpWorkDays(cfg, ids, from, to, skip, offTypes) {
+  const all = mpDays(from, to), out = new Map(ids.map((id) => [id, all.slice()]));
+  if (!skip || all.length < 2) return out;
+  const span = `day=gte.${from}&day=lte.${to}`;
+  const [hol, abs] = await Promise.all([
+    restAll(cfg, `/rest/v1/mp_holidays?select=day&${span}`),
+    restAll(cfg, `/rest/v1/mp_absences?select=worker_id,day,type&worker_id=in.(${ids.map(encodeURIComponent).join(',')})&${span}`),
+  ]);
+  const h = new Set((hol || []).map((x) => x.day));
+  for (const id of ids) {
+    const own = new Set((abs || []).filter((x) => x.worker_id === id && (!offTypes || offTypes.includes(x.type))).map((x) => x.day));
+    out.set(id, all.filter((x) => !h.has(x) && !own.has(x) && new Date(x + 'T00:00:00Z').getUTCDay() !== 0));
+  }
+  return out;
+}
+async function mpKnownWorkers(cfg, ids) {
+  const w = await restAll(cfg, `/rest/v1/mp_workers?select=id&id=in.(${ids.map(encodeURIComponent).join(',')})`);
+  return w ? w.map((x) => x.id) : null;
+}
 async function manpowerAssign(cfg, req, prof) {
   if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
   const d = await mpBody(req);
   if (!d) return json({ error: 'json' }, 400);
-  const wid = mpStr(d.worker_id, 20), from = mpStr(d.from, 10), to = mpStr(d.to || d.from, 10);
+  const from = mpStr(d.from, 10), to = mpStr(d.to || d.from, 10);
   const customer = mpStr(d.customer, 120), job = mpStr(d.job, 160), jobNo = mpStr(d.job_no, 40), note = mpStr(d.note, 300);
   const type = MP_TYPES.includes(d.work_type) ? d.work_type : 'other';
-  if (!/^[A-Za-z0-9_-]{1,20}$/.test(wid) || !ISO_DAY.test(from) || !ISO_DAY.test(to) || to < from) return json({ error: 'input' }, 400);
+  let ids = mpIds(d);
+  if (!ids.length || !ISO_DAY.test(from) || !ISO_DAY.test(to) || to < from) return json({ error: 'input' }, 400);
   if ((Date.parse(to) - Date.parse(from)) / 864e5 > 92) return json({ error: 'range too long' }, 400);
   if (!job && !note) return json({ error: 'job' }, 400);
+  ids = await mpKnownWorkers(cfg, ids);
+  if (!ids || !ids.length) return json({ error: 'worker' }, 404);
   const who = prof.username || prof.email, now = new Date().toISOString();
-  const w = await call(cfg, `/rest/v1/mp_workers?select=id&id=eq.${encodeURIComponent(wid)}`, { method: 'GET', admin: true });
-  if (!w.ok || !w.data.length) return json({ error: 'worker' }, 404);
-  // project: existing (customer + name) or new
   let code = null;
   if (job) {
     const all = await restAll(cfg, '/rest/v1/mp_projects?select=code,name,customer,job_no,sort');
@@ -395,36 +425,33 @@ async function manpowerAssign(cfg, req, prof) {
       if (!res.ok) return json({ error: 'supabase' }, 502);
     }
   }
-  // days, optionally without days off
-  let days = [];
-  for (let t = Date.parse(from + 'T00:00:00Z'); t <= Date.parse(to + 'T00:00:00Z'); t += 864e5) days.push(new Date(t).toISOString().slice(0, 10));
-  if (d.skip_off !== false && days.length > 1) {
-    const span = `day=gte.${from}&day=lte.${to}`;
-    const [hol, abs] = await Promise.all([
-      restAll(cfg, `/rest/v1/mp_holidays?select=day&${span}`),
-      restAll(cfg, `/rest/v1/mp_absences?select=day&worker_id=eq.${encodeURIComponent(wid)}&${span}`),
-    ]);
-    const off = new Set([...(hol || []), ...(abs || [])].map((x) => x.day));
-    days = days.filter((x) => !off.has(x) && new Date(x + 'T00:00:00Z').getUTCDay() !== 0);
-  }
-  if (!days.length) return json({ error: 'no working day in range' }, 400);
-  const text = note || job;
-  const rows = days.map((day) => ({ worker_id: wid, day, project_code: code, kind: code ? 'work' : 'other', work_type: type, text, tentative: d.tentative === true, source: 'app', updated_by: who, updated_at: now }));
+  const per = await mpWorkDays(cfg, ids, from, to, d.skip_off !== false, null);
+  const text = note || job, rows = [];
+  for (const [wid, days] of per) for (const day of days) rows.push({ worker_id: wid, day, project_code: code, kind: code ? 'work' : 'other', work_type: type, text, tentative: d.tentative === true, source: 'app', updated_by: who, updated_at: now });
+  if (!rows.length) return json({ error: 'no working day in range' }, 400);
   const res = await fetch(cfg.url + '/rest/v1/mp_assignments?on_conflict=worker_id,day', { method: 'POST',
     headers: { ...authHeaders(cfg.service), prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
   if (!res.ok) return json({ error: res.status === 400 ? 'run database/manpower-002.sql' : 'supabase' }, 502);
-  await mpLog(cfg, who, 'assign', { worker_id: wid, days, project_code: code, customer, job, job_no: jobNo, work_type: type, text, tentative: d.tentative === true });
-  return json({ ok: true, saved: days.length, project_code: code });
+  await mpLog(cfg, who, 'assign', { workers: Object.fromEntries(per), project_code: code, customer, job, job_no: jobNo, work_type: type, text, tentative: d.tentative === true });
+  return json({ ok: true, saved: rows.length, people: ids.length, project_code: code });
+}
+// clear / leave-clear accept {worker_id, days} or {items:[{worker_id, days}]}
+function mpItems(d) {
+  const raw = Array.isArray(d && d.items) ? d.items : [{ worker_id: d && d.worker_id, days: d && d.days }];
+  return raw.slice(0, 60).map((it) => ({ wid: mpStr(it && it.worker_id, 20), days: (Array.isArray(it && it.days) ? it.days : []).filter((x) => ISO_DAY.test(String(x))).slice(0, 100) }))
+    .filter((it) => MP_ID.test(it.wid) && it.days.length);
 }
 async function manpowerClear(cfg, req, prof) {
   if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
-  const d = await mpBody(req);
-  const wid = mpStr(d && d.worker_id, 20), days = (Array.isArray(d && d.days) ? d.days : []).filter((x) => ISO_DAY.test(String(x))).slice(0, 100);
-  if (!/^[A-Za-z0-9_-]{1,20}$/.test(wid) || !days.length) return json({ error: 'input' }, 400);
-  const res = await fetch(cfg.url + `/rest/v1/mp_assignments?worker_id=eq.${encodeURIComponent(wid)}&day=in.(${days.join(',')})`, { method: 'DELETE', headers: { ...authHeaders(cfg.service), prefer: 'return=representation' } });
-  if (!res.ok) return json({ error: 'supabase' }, 502);
-  const gone = await res.json().catch(() => []);
-  if (gone.length) await mpLog(cfg, prof.username || prof.email, 'clear', { worker_id: wid, days, removed: gone });
+  const items = mpItems(await mpBody(req));
+  if (!items.length) return json({ error: 'input' }, 400);
+  const gone = [];
+  for (const it of items) {
+    const res = await fetch(cfg.url + `/rest/v1/mp_assignments?worker_id=eq.${encodeURIComponent(it.wid)}&day=in.(${it.days.join(',')})`, { method: 'DELETE', headers: { ...authHeaders(cfg.service), prefer: 'return=representation' } });
+    if (!res.ok) return json({ error: 'supabase' }, 502);
+    gone.push(...await res.json().catch(() => []));
+  }
+  if (gone.length) await mpLog(cfg, prof.username || prof.email, 'clear', { items: items.map((i) => ({ worker_id: i.wid, days: i.days })), removed: gone });
   return json({ ok: true, removed: gone.length });
 }
 
@@ -436,47 +463,119 @@ async function manpowerLeave(cfg, req, prof) {
   if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
   const d = await mpBody(req);
   if (!d) return json({ error: 'json' }, 400);
-  const wid = mpStr(d.worker_id, 20), from = mpStr(d.from, 10), to = mpStr(d.to || d.from, 10), type = String(d.type || ''), note = mpStr(d.note, 200);
-  if (!/^[A-Za-z0-9_-]{1,20}$/.test(wid) || !ISO_DAY.test(from) || !ISO_DAY.test(to) || to < from || !MP_LEAVE.includes(type)) return json({ error: 'input' }, 400);
+  const from = mpStr(d.from, 10), to = mpStr(d.to || d.from, 10), type = String(d.type || ''), note = mpStr(d.note, 200);
+  let ids = mpIds(d);
+  if (!ids.length || !ISO_DAY.test(from) || !ISO_DAY.test(to) || to < from || !MP_LEAVE.includes(type)) return json({ error: 'input' }, 400);
   if ((Date.parse(to) - Date.parse(from)) / 864e5 > 92) return json({ error: 'range too long' }, 400);
-  const w = await call(cfg, `/rest/v1/mp_workers?select=id&id=eq.${encodeURIComponent(wid)}`, { method: 'GET', admin: true });
-  if (!w.ok || !w.data.length) return json({ error: 'worker' }, 404);
-  let days = [];
-  for (let t = Date.parse(from + 'T00:00:00Z'); t <= Date.parse(to + 'T00:00:00Z'); t += 864e5) days.push(new Date(t).toISOString().slice(0, 10));
-  if (d.skip_off !== false && days.length > 1) {
-    const span = `day=gte.${from}&day=lte.${to}`;
-    const [hol, abs] = await Promise.all([
-      restAll(cfg, `/rest/v1/mp_holidays?select=day&${span}`),
-      restAll(cfg, `/rest/v1/mp_absences?select=day,type&worker_id=eq.${encodeURIComponent(wid)}&${span}`),
-    ]);
-    const off = new Set([...(hol || []), ...(abs || []).filter((x) => ['H', 'PH', 'EX', 'สลับวันหยุด'].includes(x.type))].map((x) => x.day));
-    days = days.filter((x) => !off.has(x) && new Date(x + 'T00:00:00Z').getUTCDay() !== 0);
-  }
-  if (!days.length) return json({ error: 'no working day in range' }, 400);
-  const who = prof.username || prof.email, now = new Date().toISOString();
-  const rows = days.map((day) => ({ worker_id: wid, day, type, note: note || null, updated_by: who, updated_at: now }));
+  ids = await mpKnownWorkers(cfg, ids);
+  if (!ids || !ids.length) return json({ error: 'worker' }, 404);
+  const per = await mpWorkDays(cfg, ids, from, to, d.skip_off !== false, ['H', 'PH', 'EX', 'สลับวันหยุด']);
+  const who = prof.username || prof.email, now = new Date().toISOString(), rows = [];
+  for (const [wid, days] of per) for (const day of days) rows.push({ worker_id: wid, day, type, note: note || null, updated_by: who, updated_at: now });
+  if (!rows.length) return json({ error: 'no working day in range' }, 400);
   const res = await fetch(cfg.url + '/rest/v1/mp_absences?on_conflict=worker_id,day', { method: 'POST',
     headers: { ...authHeaders(cfg.service), prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
   if (!res.ok) return json({ error: 'supabase' }, 502);
-  let removed = [];
-  if (d.clear_work === true) {
+  const removed = [];
+  if (d.clear_work === true) for (const [wid, days] of per) {
+    if (!days.length) continue;
     const del = await fetch(cfg.url + `/rest/v1/mp_assignments?worker_id=eq.${encodeURIComponent(wid)}&day=in.(${days.join(',')})`, { method: 'DELETE', headers: { ...authHeaders(cfg.service), prefer: 'return=representation' } });
-    if (del.ok) removed = await del.json().catch(() => []);
+    if (del.ok) removed.push(...await del.json().catch(() => []));
   }
-  await mpLog(cfg, who, 'leave', { worker_id: wid, days, type, note, removed_work: removed });
-  return json({ ok: true, saved: days.length, removed: removed.length });
+  await mpLog(cfg, who, 'leave', { workers: Object.fromEntries(per), type, note, removed_work: removed });
+  return json({ ok: true, saved: rows.length, people: ids.length, removed: removed.length });
 }
 async function manpowerLeaveClear(cfg, req, prof) {
   if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
-  const d = await mpBody(req);
-  const wid = mpStr(d && d.worker_id, 20), days = (Array.isArray(d && d.days) ? d.days : []).filter((x) => ISO_DAY.test(String(x))).slice(0, 100);
-  if (!/^[A-Za-z0-9_-]{1,20}$/.test(wid) || !days.length) return json({ error: 'input' }, 400);
+  const items = mpItems(await mpBody(req));
+  if (!items.length) return json({ error: 'input' }, 400);
   const types = ['ลาป่วย', 'ลาป่วยครึ่งวัน', 'พักร้อน', 'ลากิจ', 'ลาไม่รับค่าจ้าง', 'ลา'].map(encodeURIComponent).join(',');
-  const res = await fetch(cfg.url + `/rest/v1/mp_absences?worker_id=eq.${encodeURIComponent(wid)}&day=in.(${days.join(',')})&type=in.(${types})`, { method: 'DELETE', headers: { ...authHeaders(cfg.service), prefer: 'return=representation' } });
-  if (!res.ok) return json({ error: 'supabase' }, 502);
-  const gone = await res.json().catch(() => []);
-  if (gone.length) await mpLog(cfg, prof.username || prof.email, 'leave-clear', { worker_id: wid, days, removed: gone });
+  const gone = [];
+  for (const it of items) {
+    const res = await fetch(cfg.url + `/rest/v1/mp_absences?worker_id=eq.${encodeURIComponent(it.wid)}&day=in.(${it.days.join(',')})&type=in.(${types})`, { method: 'DELETE', headers: { ...authHeaders(cfg.service), prefer: 'return=representation' } });
+    if (!res.ok) return json({ error: 'supabase' }, 502);
+    gone.push(...await res.json().catch(() => []));
+  }
+  if (gone.length) await mpLog(cfg, prof.username || prof.email, 'leave-clear', { items: items.map((i) => ({ worker_id: i.wid, days: i.days })), removed: gone });
   return json({ ok: true, removed: gone.length });
+}
+
+// Master data (SC / PC / SSM): POST /api/manpower/master/worker | project | holiday | holiday-delete
+// A worker with a placeholder id (X###) gets its RAK employee code as id once known: mp_assignments / mp_absences
+// follow through "on update cascade". GET /api/manpower/log?before=<id> → last 100 changes (editors only).
+async function manpowerMaster(cfg, req, prof, kind) {
+  if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
+  const d = await mpBody(req);
+  if (!d) return json({ error: 'json' }, 400);
+  const who = prof.username || prof.email, now = new Date().toISOString(), H = { ...authHeaders(cfg.service), prefer: 'return=minimal' };
+  if (kind === 'worker') {
+    const id = mpStr(d.id, 20), code = mpStr(d.emp_code, 20).toUpperCase(), name = mpStr(d.name_th, 120);
+    const unit = ['ME', 'PP', 'EE', 'PC', 'SC'].includes(d.unit) ? d.unit : null;
+    if (!name || !unit || (code && !/^R\d{4,8}$/.test(code)) || (id && !MP_ID.test(id))) return json({ error: 'input' }, 400);
+    const row = { emp_code: code || null, name_th: name, nickname: mpStr(d.nickname, 60) || null, unit, trade: mpStr(d.trade, 60) || null,
+      active: d.active !== false, sort: Number.isFinite(+d.sort) ? Math.round(+d.sort) : 0, updated_at: now };
+    const all = await restAll(cfg, '/rest/v1/mp_workers?select=id,sort');
+    if (!all) return json({ error: 'no_table' }, 503);
+    if (code && all.some((w) => w.id === code && w.id !== id)) return json({ error: 'รหัสพนักงานนี้มีอยู่แล้ว' }, 409);
+    let res, newId = id;
+    if (id) {
+      if (code && id !== code && /^X/.test(id)) { row.id = code; newId = code; }
+      res = await fetch(cfg.url + `/rest/v1/mp_workers?id=eq.${encodeURIComponent(id)}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) });
+    } else {
+      newId = code || 'X' + String(all.filter((w) => /^X\d+$/.test(w.id)).reduce((m, w) => Math.max(m, +w.id.slice(1)), 0) + 10).padStart(3, '0');
+      if (!d.sort) row.sort = all.reduce((m, w) => Math.max(m, w.sort || 0), 0) + 10;
+      res = await fetch(cfg.url + '/rest/v1/mp_workers', { method: 'POST', headers: H, body: JSON.stringify({ id: newId, ...row }) });
+    }
+    if (!res.ok) return json({ error: 'supabase' }, 502);
+    await mpLog(cfg, who, id ? 'worker-edit' : 'worker-add', { ...row, old_id: id || null, newId });
+    return json({ ok: true, id: newId });
+  }
+  if (kind === 'project') {
+    const code = mpStr(d.code, 20), name = mpStr(d.name, 160);
+    const status = ['active', 'hold', 'postponed', 'cancelled', 'done'].includes(d.status) ? d.status : 'active';
+    const color = /^#[0-9a-fA-F]{6}$/.test(String(d.color || '')) ? d.color : '#6d7582';
+    if (!name || (code && !/^[A-Za-z0-9_-]{1,20}$/.test(code))) return json({ error: 'input' }, 400);
+    const row = { name, customer: mpStr(d.customer, 120) || null, job_no: mpStr(d.job_no, 40) || null, status, color, updated_at: now };
+    let res, newCode = code;
+    if (code) res = await fetch(cfg.url + `/rest/v1/mp_projects?code=eq.${encodeURIComponent(code)}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) });
+    else {
+      const all = await restAll(cfg, '/rest/v1/mp_projects?select=sort');
+      newCode = 'P' + Date.now().toString(36).toUpperCase();
+      res = await fetch(cfg.url + '/rest/v1/mp_projects', { method: 'POST', headers: H, body: JSON.stringify({ code: newCode, sort: (all || []).reduce((m, p) => Math.max(m, p.sort || 0), 0) + 10, ...row }) });
+    }
+    if (!res.ok) return json({ error: 'supabase' }, 502);
+    await mpLog(cfg, who, code ? 'project-edit' : 'project-add', { code: newCode, ...row });
+    return json({ ok: true, code: newCode });
+  }
+  if (kind === 'holiday' || kind === 'holiday-delete') {
+    const day = mpStr(d.day, 10);
+    if (!ISO_DAY.test(day)) return json({ error: 'input' }, 400);
+    const res = kind === 'holiday'
+      ? await fetch(cfg.url + '/rest/v1/mp_holidays?on_conflict=day', { method: 'POST', headers: { ...H, prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify({ day, type: d.type === 'EX' ? 'EX' : 'PH', name: mpStr(d.name, 120) || null }) })
+      : await fetch(cfg.url + `/rest/v1/mp_holidays?day=eq.${day}`, { method: 'DELETE', headers: H });
+    if (!res.ok) return json({ error: 'supabase' }, 502);
+    await mpLog(cfg, who, kind, { day, type: d.type, name: d.name });
+    return json({ ok: true });
+  }
+  return json({ error: 'not found' }, 404);
+}
+async function manpowerMasterGet(cfg, prof) {
+  if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
+  const [workers, projects, holidays] = await Promise.all([
+    restAll(cfg, '/rest/v1/mp_workers?select=id,emp_code,name_th,nickname,unit,trade,active,sort&order=sort.asc'),
+    restAll(cfg, '/rest/v1/mp_projects?select=code,name,customer,job_no,status,color,sort&order=sort.asc'),
+    restAll(cfg, '/rest/v1/mp_holidays?select=day,type,name&order=day.asc'),
+  ]);
+  if (!workers || !projects) return json({ error: 'no_table' }, 503);
+  return json({ workers, projects, holidays: holidays || [] });
+}
+async function manpowerLog(cfg, url, prof) {
+  if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
+  const before = Number(url.searchParams.get('before')) || 0;
+  const r = await call(cfg, `/rest/v1/mp_change_log?select=id,at,by_user,action,detail&order=id.desc&limit=100${before ? '&id=lt.' + before : ''}`, { method: 'GET', admin: true });
+  if (!r.ok) return json({ error: 'no_table' }, 503);
+  return json({ rows: r.data });
 }
 
 async function manpowerApi(cfg, req, url, prof) {
@@ -486,6 +585,10 @@ async function manpowerApi(cfg, req, url, prof) {
     if (req.method !== 'POST') return json({ error: 'method' }, 405);
     return writes[url.pathname](cfg, req, prof);
   }
+  const m = /^\/api\/manpower\/master\/(worker|project|holiday|holiday-delete)$/.exec(url.pathname);
+  if (m) return req.method === 'POST' ? manpowerMaster(cfg, req, prof, m[1]) : json({ error: 'method' }, 405);
+  if (url.pathname === '/api/manpower/master') return req.method === 'GET' ? manpowerMasterGet(cfg, prof) : json({ error: 'method' }, 405);
+  if (url.pathname === '/api/manpower/log') return req.method === 'GET' ? manpowerLog(cfg, url, prof) : json({ error: 'method' }, 405);
   if (url.pathname !== '/api/manpower/board') return json({ error: 'not found' }, 404);
   if (req.method !== 'GET') return json({ error: 'method' }, 405);
   const from = url.searchParams.get('from') || '', to = url.searchParams.get('to') || '';
