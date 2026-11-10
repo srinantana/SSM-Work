@@ -101,7 +101,7 @@
 .se-card-main{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:16px 20px;text-decoration:none}
 .se-card-l{display:grid;gap:2px;min-width:0}
 .se-id{display:flex;flex-wrap:wrap;align-items:center;gap:10px}.se-id b{font-size:17px;font-weight:600}
-.se-jo{font-size:12px;color:var(--rak);font-weight:600}.se-jo.none{color:var(--muted);font-weight:400}
+.se-jo{font-size:12px;color:var(--rak);font-weight:600}.se-jobchip{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:600;color:#14532d;background:#e7f6ec;border:1px solid #bfe5cc;border-radius:999px;padding:2px 10px;font-variant-numeric:tabular-nums}.se-dupb{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:#fff;color:var(--muted);font:inherit;font-size:12.5px;border-radius:8px;padding:4px 9px;cursor:pointer}.se-dupb:hover{border-color:var(--rak);color:var(--rak)}.se-dupb .se-ci{width:14px;height:14px}.se-dupsrc{display:flex;gap:10px;align-items:flex-start;background:#f6f8fb;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:12px;font-size:13.5px}.se-dupsrc small{display:block;color:var(--muted);margin-top:2px}.se-dupsrc .se-ci{width:16px;height:16px;margin-top:2px;flex:none}.se-dupopt{display:grid;gap:6px;margin-top:12px;border-top:1px dashed var(--line);padding-top:10px;font-size:13.5px}.se-dupopt label{display:flex;gap:8px;align-items:flex-start}.se-dupopt small{color:var(--muted)}.se-from{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);margin:2px 0}.se-from .se-ci{width:13px;height:13px}.se-jo.none{color:var(--muted);font-weight:400}
 .se-st{font-size:12px;font-weight:600;border-radius:6px;padding:1px 10px}
 .s-draft{background:#eceef1;color:#5d6673}.s-req{background:#fdf1c9;color:#a0560c}.s-ok{background:#dff5e9;color:#1d7a4f}.s-rev{background:#fde8e8;color:var(--rak)}
 .se-tlb{display:inline-flex;align-items:center;gap:2px;border:0;background:none;color:#9aa2ad;padding:2px 4px;border-radius:6px}.se-tlb:hover{background:#f1f3f6;color:var(--rak)}.se-tlb .se-ci{width:17px;height:17px}
@@ -140,7 +140,7 @@
     revise:    { th: "Revise",        cls: "s-rev",   wait: "ส่งกลับให้ SC แก้" },
     locked:    { th: "Budget locked", cls: "s-lock",  wait: "บันทึก Actual ได้" },
   };
-  const FILTERS = [["all", "All", null], ["draft", "Draft", ["draft"]], ["requested", "Requested", ["requested", "reviewed"]], ["approved", "Approved", ["approved", "locked"]], ["revise", "Revise", ["revise"]]];
+  const FILTERS = [["all", "All", null], ["draft", "Draft", ["draft"]], ["requested", "Requested", ["requested", "reviewed"]], ["approved", "Approved", ["approved"]], ["locked", "Awarded (Job)", ["locked"]], ["revise", "Revise", ["revise"]]];
   // RAK Site & Service team. Only SSM may Get Award and adjust the Budget control.
   // Site Expense permissions by person (set by Dew, 9 Nov 2026). The server applies the same list for menu access.
   const PEOPLE = [["dew", "ดิว", "nantana.s", "SSM"], ["bee", "บี", "chayanun.s", "MD"], ["spy", "สปาย", "prakaikaew.p", "SC"], ["art", "อาร์ต", "sakkamon.c", "SC"], ["num", "หนุ่ม", "teedanai.h", "SC"], ["ning", "นิ้ง", "chalunda.w", "ดู"], ["new", "นิว", "suwitcha.b", "ดู"]];
@@ -156,6 +156,7 @@
 
   const L = d => `<svg class="se-ci" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
   const IC = {
+    copy: '<svg class="se-ci" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>',
     flow: L('<rect x="3.5" y="3.5" width="6" height="6" rx="1.5"/><rect x="14.5" y="14.5" width="6" height="6" rx="1.5"/><path d="M6.5 9.5v3a2 2 0 0 0 2 2h6"/>'),
     plus: L('<path d="M12 5v14M5 12h14"/>'),
     eye: L('<path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/>'),
@@ -696,6 +697,7 @@
       el.querySelector("#seList").innerHTML = rows.length ? rows.map(card).join("")
         : `<div class="empty">${q ? `ไม่พบโปรเจคที่ตรงกับ “${esc(VIEW.q)}”` : VIEW.list === "active" ? "ยังไม่มีโปรเจค · กด New Project ในบทบาท SC" : "ไม่มีรายการ"}</div>`;
       el.querySelectorAll("[data-tl]").forEach(b => b.onclick = e => { e.preventDefault(); e.stopPropagation(); const id = b.dataset.tl; OPEN.has(id) ? OPEN.delete(id) : OPEN.add(id); draw(); });
+      el.querySelectorAll("[data-dup]").forEach(b => b.onclick = e => { e.preventDefault(); e.stopPropagation(); const src = DB.projects.find(x => x.id === b.dataset.dup); if (src) dupForm(src); });
     };
     wireRole(el, () => overview(el));
     el.querySelectorAll("[data-list]").forEach(b => b.onclick = () => { VIEW.list = b.dataset.list; overview(el); });
@@ -711,10 +713,10 @@
       ${ph.length ? `<ul>${ph.map(x => `<li><b>${esc(x.name)}</b><span>${fmtD(x.start)} – ${fmtD(x.end)} · ${span(x.start, x.end)} days</span></li>`).join("")}</ul>` : `<p class="se-muted">ยังไม่ได้แบ่ง phase</p>`}</div>` : "";
     return `<article class="se-card ${open ? "open" : ""}">
       <a class="se-card-main" href="#site-expense/${encodeURIComponent(p.id)}">
-        <span class="se-card-l"><span class="se-id"><b>${esc(p.ij)}</b>${p.jo ? `<span class="se-jo">Job ${esc(p.jo)}</span>` : ""}<span class="se-st ${st.cls}">${st.th}</span>
+        <span class="se-card-l"><span class="se-id"><b>${esc(p.ij)}</b>${p.jo ? `<span class="se-jobchip" title="Get Award แล้ว">🏆 Job ${esc(p.jo)}</span>` : ""}<span class="se-st ${st.cls}">${st.th}</span>
           <button class="se-tlb" data-tl="${esc(p.id)}" aria-expanded="${open}" aria-label="Project Timeline">${IC.cal}<span>${open ? "▴" : "▾"}</span></button><span class="se-wait">${st.wait}</span></span>
           <span class="se-nm">${esc(p.name)}</span><span class="se-cu">${esc(p.customer)}${p.city ? " · " + esc(p.city) : ""}</span></span>
-        <span class="se-card-r"><span>${daysOf(p)} days</span><span class="se-ppl">${CATS[0].ic}${peopleOf(p)}</span><b>${baht(plannedOf(p))}</b></span>
+        <span class="se-card-r">${can("create") ? `<button class="se-dupb" data-dup="${esc(p.id)}" title="Duplicate เป็น Estimate ใหม่" aria-label="Duplicate ${esc(p.ij)} เป็น Estimate ใหม่">${IC.copy}<span>Duplicate</span></button>` : ""}<span>${daysOf(p)} days</span><span class="se-ppl">${CATS[0].ic}${peopleOf(p)}</span><b>${baht(plannedOf(p))}</b></span>
       </a>${tl}</article>`;
   }
 
@@ -753,6 +755,64 @@
     wirePh();
   }
 
+
+  /* ---------- duplicate a past project into a new draft Estimate ---------- */
+  const addDays = (d, n) => { if (!d) return ""; const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  const diffDays = (a, b) => Math.round((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 864e5);
+  function dupForm(src) {
+    const srcPh = phasesOf(src).length ? src.phases : (src.start ? [{ id: "ph" + uid(), name: "Phase 1", start: src.start, end: src.end }] : []);
+    const base = src.start || (srcPh[0] && srcPh[0].start) || "";
+    const nDocs = (src.docs || []).length, nLines = (src.lines || []).length;
+    const phRow = x => `<div class="se-phr" data-id="${esc(x.id)}"><input value="${esc(x.name)}" data-k="name" aria-label="ชื่อ phase"><input type="date" value="${esc(x.start || "")}" data-k="start" aria-label="เริ่ม"><input type="date" value="${esc(x.end || "")}" data-k="end" aria-label="สิ้นสุด"><button class="se-x" data-delph aria-label="ลบ phase">${IC.x}</button></div>`;
+    const m = modal("Duplicate เป็น Estimate ใหม่", `
+      <div class="se-dupsrc">${IC.copy}<span>ต้นแบบ <b>${esc(src.ij)}</b>${src.jo ? ` · Job ${esc(src.jo)}` : ""} · ${esc(src.name)} · ${baht(totalOf(src))}<small>${nLines} รายการ Estimate · ${srcPh.length} phase · ${peopleOf(src)} คน</small></span></div>
+      <div class="se-fgrid">
+        <label>IJ no. ใหม่ *<input id="dIj" placeholder="IJ2611001"></label>
+        <label class="w2">Project name *<input id="dName" value="${esc(src.name)}"></label>
+        <label class="w2">Customer<input id="dCus" value="${esc(src.customer || "")}"></label>
+        <label>City / Site<input id="dCity" value="${esc(src.city || "")}"></label>
+        <label>จังหวัดปลายทาง (ราคารถ)<select id="dDest"><option value="">ต่างประเทศ / อื่นๆ</option>${DESTS.map(d => `<option ${src.destination === d ? "selected" : ""}>${d}</option>`).join("")}</select></label>
+        <label>วันเริ่มงานใหม่<input id="dStart" type="date" value="${esc(base)}"></label>
+      </div>
+      <p class="se-hint" style="margin:8px 0 0">เปลี่ยนวันเริ่มงาน แล้วทุก phase จะเลื่อนตาม โดยคงจำนวนวันและช่วงเว้นระหว่าง phase ไว้ แก้ทีละ phase ต่อได้</p>
+      <div class="se-phs"><b>Project Timeline (phase)</b><div id="dPh">${srcPh.map(phRow).join("")}</div><button class="se-btn" data-addph>${IC.plus}เพิ่ม phase</button></div>
+      <div class="se-dupopt">
+        <label><input type="checkbox" id="dLines" ${nLines ? "checked" : "disabled"}> คัดลอกรายการ Estimate ทุกหมวด (${nLines} รายการ) · แก้จำนวนคนและรายการต่อได้หลังสร้าง</label>
+        <label><input type="checkbox" id="dDocs" ${nDocs ? "" : "disabled"}> คัดลอกเอกสารที่เกี่ยวข้อง (${nDocs} รายการ)</label>
+        <small>ไม่คัดลอก: สถานะอนุมัติ, Job no., Budget, Actual และประวัติ · โปรเจคใหม่เริ่มเป็น Draft</small>
+      </div>`,
+      mm => {
+        const g = id => mm.querySelector(id).value.trim();
+        const ij = g("#dIj"), name = g("#dName");
+        if (!ij || !name) return "กรอก IJ no. ใหม่ และ Project name";
+        if (DB.projects.some(x => x.ij.toLowerCase() === ij.toLowerCase() && x.list !== "trash")) return "มี IJ นี้อยู่แล้ว";
+        const phases = [...mm.querySelectorAll("#dPh .se-phr")].map(r => ({ id: r.dataset.id || "ph" + uid(), name: r.querySelector('[data-k="name"]').value.trim(), start: r.querySelector('[data-k="start"]').value, end: r.querySelector('[data-k="end"]').value })).filter(x => x.name);
+        if (phases.some(x => x.start && x.end && x.end < x.start)) return "มี phase ที่วันสิ้นสุดอยู่ก่อนวันเริ่ม";
+        const keep = new Set(phases.map(x => x.id));
+        const lines = mm.querySelector("#dLines").checked ? JSON.parse(JSON.stringify(src.lines || [])).map(l => Object.assign(l, { id: uid() }, l.phase && !keep.has(l.phase) ? { phase: "" } : {})) : [];
+        const docs = mm.querySelector("#dDocs").checked ? JSON.parse(JSON.stringify(src.docs || [])).map(d => Object.assign(d, { id: uid(), by: who(), at: new Date().toISOString() })) : [];
+        const s0 = phases.map(x => x.start).filter(Boolean).sort()[0] || g("#dStart"), e0 = phases.map(x => x.end).filter(Boolean).sort().pop() || "";
+        const now = new Date().toISOString();
+        const np = { id: ij.toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + uid().slice(0, 4), ij, jo: "", name, customer: g("#dCus"), city: g("#dCity"), destination: mm.querySelector("#dDest").value,
+          start: s0, end: e0, phases, lines, docs, status: "draft", list: "active", budget: null, lockedAt: null, award: null, actuals: [], createdAt: now, from: { id: src.id, ij: src.ij, jo: src.jo || "" },
+          history: [{ at: now, role: "create", by: who(), action: "duplicate", note: `สร้างจาก ${src.ij}${src.jo ? " (Job " + src.jo + ")" : ""}` }] };
+        syncDates(np);
+        DB.projects.unshift(np); VIEW.list = "active"; save();
+        toast(`สร้าง ${ij} จาก ${src.ij} แล้ว · ปรับคนและวันในแต่ละหมวด`);
+        location.hash = "#site-expense/" + encodeURIComponent(np.id) + "/estimate";
+      }, "สร้าง Estimate ใหม่");
+    const wirePh = () => m.querySelectorAll("[data-delph]").forEach(b => b.onclick = () => b.parentElement.remove());
+    wirePh();
+    m.querySelector("[data-addph]").onclick = () => { m.querySelector("#dPh").insertAdjacentHTML("beforeend", phRow({ id: "ph" + uid(), name: "", start: "", end: "" })); wirePh(); };
+    let prev = base;
+    m.querySelector("#dStart").onchange = e => {
+      const nv = e.target.value; if (!nv || !prev) { prev = nv; return; }
+      const n = diffDays(prev, nv); prev = nv; if (!n) return;
+      m.querySelectorAll('#dPh [data-k="start"], #dPh [data-k="end"]').forEach(i => { if (i.value) i.value = addDays(i.value, n); });
+    };
+    m.querySelector("#dIj").focus();
+  }
+
   /* ---------- project page ---------- */
   const SECS = [
     { id: "dashboard", no: "1", name: "Dashboard", th: "Budget vs Actual", ic: "📊" },
@@ -775,12 +835,12 @@
         ${roleBar()}
         ${listNote}
         <div class="se-ph">
-          <div style="min-width:0"><div class="se-id"><b>${esc(p.ij)}</b>${p.jo ? `<span class="se-jo">Job ${esc(p.jo)}</span>` : `<span class="se-jo none">ยังไม่มี Job no.</span>`}<span class="se-st ${st.cls}">${st.th}</span><span class="se-wait">${st.wait}</span></div>
-            <h2>${esc(p.name)}</h2><div class="se-cu">${esc(p.customer)}${p.city ? " · " + esc(p.city) : ""} · ${fmtD(p.start)} – ${fmtD(p.end)}</div></div>
+          <div style="min-width:0"><div class="se-id"><b>${esc(p.ij)}</b>${p.jo ? `<span class="se-jobchip">🏆 Job ${esc(p.jo)}</span>` : `<span class="se-jo none">ยังไม่มี Job no.</span>`}<span class="se-st ${st.cls}">${st.th}</span><span class="se-wait">${st.wait}</span></div>
+            <h2>${esc(p.name)}</h2>${p.from ? `<div class="se-from">${IC.copy}สร้างจาก ${esc(p.from.ij)}${p.from.jo ? " · Job " + esc(p.from.jo) : ""}</div>` : ""}<div class="se-cu">${esc(p.customer)}${p.city ? " · " + esc(p.city) : ""} · ${fmtD(p.start)} – ${fmtD(p.end)}</div></div>
           <div class="se-ph-r"><span><small>ระยะเวลา</small><b>${daysOf(p)} days</b></span><span><small>คน</small><b>${peopleOf(p)}</b></span><span><small>${p.budget ? "Budget" : "Planned"}</small><b>${baht(plannedOf(p))}</b></span></div>
           ${p.award ? `<div class="se-award"><span class="se-aw-ic">🏆</span><span><b>Awarded</b> · ${esc(p.ij)} → <b class="se-jo">Job ${esc(p.jo)}</b> · ${fmtD(p.award.date)}${p.award.value ? ` · มูลค่างาน ${baht(p.award.value)}` : ""}${p.award.by ? ` · เปิด Job โดย ${esc(p.award.by)}` : ""}${p.award.note || p.award.source ? `<small>${[p.award.note, p.award.source].filter(Boolean).map(esc).join(" · ")}${p.award.estimate && Math.round(Object.values(p.award.estimate).reduce((x, y) => x + y, 0)) !== Math.round(plannedOf(p)) ? ` · ปรับจาก Estimate ${baht(Object.values(p.award.estimate).reduce((x, y) => x + y, 0))}` : ""}</small>` : ""}</span><span class="se-aw-b">Budget control ${baht(plannedOf(p))} 🔒</span></div>` : ""}
           ${docsBox(p)}
-          <div class="se-ph-a">${p.status === "approved" && p.list === "active" ? (can("award") ? `<button class="se-btn award" data-award>🏆 Get Award</button>` : `<span class="se-hint" style="margin-right:auto">รอ ${namesWith("award")} กด Get Award และกำหนด Budget control</span>`) : ""}${editable(p) ? `<button class="se-btn" data-edit>${IC.edit}แก้ไขข้อมูล</button>` : ""}${p.list === "active" ? `<button class="se-btn" data-arch>${IC.box}Archive</button><button class="se-btn danger" data-trash>${IC.trash}Trash</button>` : ""}</div>
+          <div class="se-ph-a">${p.status === "approved" && p.list === "active" ? (can("award") ? `<button class="se-btn award" data-award>🏆 Get Award</button>` : `<span class="se-hint" style="margin-right:auto">รอ ${namesWith("award")} กด Get Award และกำหนด Budget control</span>`) : ""}${editable(p) ? `<button class="se-btn" data-edit>${IC.edit}แก้ไขข้อมูล</button>` : ""}${can("create") ? `<button class="se-btn" data-dup>${IC.copy}Duplicate เป็น Estimate ใหม่</button>` : ""}${p.list === "active" ? `<button class="se-btn" data-arch>${IC.box}Archive</button><button class="se-btn danger" data-trash>${IC.trash}Trash</button>` : ""}</div>
         </div>
         <div class="se-steps">${stepper}</div>
         <nav class="se-tabs" aria-label="Section ของโปรเจค">${SECS.map(s => `<a class="se-tab" href="${href(s.id)}" ${s.id === cur.id ? 'aria-current="page"' : ""}><span class="n">${s.ic}</span><b>${s.no}. ${esc(s.name)}</b><small>${esc(s.th)}</small></a>`).join("")}</nav>
@@ -791,6 +851,7 @@
     const on = (sel, fn) => { const b = el.querySelector(sel); if (b) b.onclick = fn; };
     on("[data-edit]", () => projectForm(p));
     on("[data-award]", () => getAward(p));
+    on("[data-dup]", () => dupForm(p));
     on("[data-arch]", () => { p.list = "archived"; save(); toast("ย้ายไป Archived แล้ว"); redraw(); });
     on("[data-trash]", () => { if (confirm("ย้ายโปรเจคนี้ไป Trash?")) { p.list = "trash"; save(); toast("ย้ายไป Trash แล้ว"); location.hash = "#site-expense"; } });
     on("[data-restore]", () => { p.list = "active"; save(); toast("กู้คืนแล้ว"); redraw(); });
@@ -911,7 +972,7 @@
     const owner = { draft: "create", revise: "create", requested: "approve", reviewed: "approve", approved: "award" }[p.status];
     const waitMsg = p.list === "active" && owner && !actions.length ? `<span class="se-hint">ขั้นตอนนี้เป็นของ ${namesWith(owner)} · สลับคนด้านบนเพื่อทดสอบ</span>` : "";
     const hist = p.history.slice().reverse();
-    const ACT = { submit: "ส่งตรวจ", approve: "ผ่าน / อนุมัติ", back: "ส่งกลับแก้", lock: "เปิด Job & ล็อกงบ", award: "Get Award · ผูก Job no. & ล็อก Budget control" };
+    const ACT = { submit: "ส่งตรวจ", approve: "ผ่าน / อนุมัติ", back: "ส่งกลับแก้", lock: "เปิด Job & ล็อกงบ", award: "Get Award · ผูก Job no. & ล็อก Budget control", duplicate: "Duplicate จากโปรเจคเดิม" };
     sec.innerHTML = `
       <div class="se-sec-h"><h3>📝 Estimate · ประเมินจาก Scope of Work</h3>${ed ? `<span class="badge live">แก้ไขได้</span>` : `<span class="badge off">${p.status === "locked" ? "🔒 ล็อกเป็น Budgetary แล้ว" : "อ่านอย่างเดียว"}</span>`}</div>
       ${p.status === "revise" ? `<div class="se-alert">↩ ถูกส่งกลับให้แก้: ${esc((p.history.filter(h => h.action === "back").pop() || {}).note || "-")}</div>` : ""}
