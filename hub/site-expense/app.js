@@ -762,7 +762,7 @@
   function dupForm(src) {
     const srcPh = phasesOf(src).length ? src.phases : (src.start ? [{ id: "ph" + uid(), name: "Phase 1", start: src.start, end: src.end }] : []);
     const base = src.start || (srcPh[0] && srcPh[0].start) || "";
-    const nDocs = (src.docs || []).length, nLines = (src.lines || []).length;
+    const nLines = (src.lines || []).length;
     const phRow = x => `<div class="se-phr" data-id="${esc(x.id)}"><input value="${esc(x.name)}" data-k="name" aria-label="ชื่อ phase"><input type="date" value="${esc(x.start || "")}" data-k="start" aria-label="เริ่ม"><input type="date" value="${esc(x.end || "")}" data-k="end" aria-label="สิ้นสุด"><button class="se-x" data-delph aria-label="ลบ phase">${IC.x}</button></div>`;
     const m = modal("Duplicate เป็น Estimate ใหม่", `
       <div class="se-dupsrc">${IC.copy}<span>ต้นแบบ <b>${esc(src.ij)}</b>${src.jo ? ` · Job ${esc(src.jo)}` : ""} · ${esc(src.name)} · ${baht(totalOf(src))}<small>${nLines} รายการ Estimate · ${srcPh.length} phase · ${peopleOf(src)} คน</small></span></div>
@@ -778,8 +778,7 @@
       <div class="se-phs"><b>Project Timeline (phase)</b><div id="dPh">${srcPh.map(phRow).join("")}</div><button class="se-btn" data-addph>${IC.plus}เพิ่ม phase</button></div>
       <div class="se-dupopt">
         <label><input type="checkbox" id="dLines" ${nLines ? "checked" : "disabled"}> คัดลอกรายการ Estimate ทุกหมวด (${nLines} รายการ) · แก้จำนวนคนและรายการต่อได้หลังสร้าง</label>
-        <label><input type="checkbox" id="dDocs" ${nDocs ? "" : "disabled"}> คัดลอกเอกสารที่เกี่ยวข้อง (${nDocs} รายการ)</label>
-        <small>ไม่คัดลอก: สถานะอนุมัติ, Job no., Budget, Actual และประวัติ · โปรเจคใหม่เริ่มเป็น Draft</small>
+        <small>ไม่คัดลอก: เอกสารที่เกี่ยวข้อง (SOW, Layout ฯลฯ ให้แนบของงานใหม่), สถานะอนุมัติ, Job no., Budget, Actual และประวัติ · โปรเจคใหม่เริ่มเป็น Draft</small>
       </div>`,
       mm => {
         const g = id => mm.querySelector(id).value.trim();
@@ -790,11 +789,10 @@
         if (phases.some(x => x.start && x.end && x.end < x.start)) return "มี phase ที่วันสิ้นสุดอยู่ก่อนวันเริ่ม";
         const keep = new Set(phases.map(x => x.id));
         const lines = mm.querySelector("#dLines").checked ? JSON.parse(JSON.stringify(src.lines || [])).map(l => Object.assign(l, { id: uid() }, l.phase && !keep.has(l.phase) ? { phase: "" } : {})) : [];
-        const docs = mm.querySelector("#dDocs").checked ? JSON.parse(JSON.stringify(src.docs || [])).map(d => Object.assign(d, { id: uid(), by: who(), at: new Date().toISOString() })) : [];
         const s0 = phases.map(x => x.start).filter(Boolean).sort()[0] || g("#dStart"), e0 = phases.map(x => x.end).filter(Boolean).sort().pop() || "";
         const now = new Date().toISOString();
         const np = { id: ij.toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + uid().slice(0, 4), ij, jo: "", name, customer: g("#dCus"), city: g("#dCity"), destination: mm.querySelector("#dDest").value,
-          start: s0, end: e0, phases, lines, docs, status: "draft", list: "active", budget: null, lockedAt: null, award: null, actuals: [], createdAt: now, from: { id: src.id, ij: src.ij, jo: src.jo || "" },
+          start: s0, end: e0, phases, lines, docs: [], status: "draft", list: "active", budget: null, lockedAt: null, award: null, actuals: [], createdAt: now, from: { id: src.id, ij: src.ij, jo: src.jo || "" },
           history: [{ at: now, role: "create", by: who(), action: "duplicate", note: `สร้างจาก ${src.ij}${src.jo ? " (Job " + src.jo + ")" : ""}` }] };
         syncDates(np);
         DB.projects.unshift(np); VIEW.list = "active"; save();
