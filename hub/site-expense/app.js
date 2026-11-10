@@ -122,14 +122,14 @@
   /* ======================= TEST MODE =======================
      Everything below keeps its data in this browser only (localStorage key KEY).
      Swap load()/save() for calls to /api/site-expense/* (Supabase tables in database/site_expense.sql) to go live. */
-  const KEY = "ssm-site-expense-test-v2"; // v2: category detail lines (v1 test data is left untouched)
+  const KEY = "ssm-site-expense-test-v3"; // v3: working periods (phases) + manpower per phase
   const num = v => { const n = parseFloat(String(v ?? "").replace(/,/g, "")); return isFinite(n) ? n : 0; };
   const baht = n => "฿" + Math.round(n).toLocaleString("en-US");
   const money = n => Math.round(n).toLocaleString("en-US");
   const uid = () => Math.random().toString(36).slice(2, 10);
   const today = () => new Date().toISOString().slice(0, 10);
   const fmtD = d => { if (!d) return "—"; const x = new Date(d + "T00:00:00"); return isNaN(x) ? d : x.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); };
-  const span = (a, b) => (a && b) ? Math.max(1, Math.round((new Date(b) - new Date(a)) / 864e5) + 1) : 0;
+  const span = (a, b) => (a && b) ? Math.max(1, Math.round((new Date(b) - new Date(a)) / 864e5)) : 0; // same as Base44: end − start
   const catOf = code => CATS.find(c => c.code === code) || CATS[5];
 
   const STATUS = {
@@ -256,6 +256,61 @@
     }
   }
 
+  /* ---------- working period (phases) ---------- */
+  // Phases may have gaps between them (e.g. supervision in June and July, installation in August–September).
+  function wpPanel(p, ed, open) {
+    const ph = phasesOf(p), dated = ph.filter(x => x.start && x.end);
+    const sorted = dated.slice().sort((a, b) => a.start.localeCompare(b.start));
+    const warn = [];
+    sorted.forEach((x, i) => { if (x.end < x.start) warn.push(`${x.name || "phase"}: วันสิ้นสุดก่อนวันเริ่ม`); if (i && x.start < sorted[i - 1].end) warn.push(`${sorted[i - 1].name} กับ ${x.name} ช่วงเวลาซ้อนกัน`); });
+    const gaps = sorted.slice(1).map((x, i) => span(sorted[i].end, x.start)).filter(g => g > 1);
+    const row = (x, i) => ed
+      ? `<tr data-ph="${x.id}"><td class="c se-no">${i + 1}</td><td><input class="se-in" data-pk="name" value="${esc(x.name || "")}" placeholder="เช่น Phase 1 Installation"></td><td><input class="se-in" type="date" data-pk="start" value="${esc(x.start || "")}"></td><td><input class="se-in" type="date" data-pk="end" value="${esc(x.end || "")}"></td><td class="c"><b>${phDays(x) || "–"}</b></td><td><button class="se-x" data-phdel aria-label="ลบ phase">${IC.x}</button></td></tr>`
+      : `<tr><td class="c se-no">${i + 1}</td><td>${esc(x.name || "–")}</td><td>${fmtD(x.start)}</td><td>${fmtD(x.end)}</td><td class="c"><b>${phDays(x) || "–"}</b></td><td></td></tr>`;
+    return `<details class="se-grp se-wp" ${open ? "open" : ""}><summary class="se-grp-h"><b>📅 Working period</b><span class="se-hint">${ph.length} phase · ทำงานจริง ${daysOf(p) || "–"} วัน${dated.length ? ` · ${fmtD(p.start)} – ${fmtD(p.end)}` : ""}${gaps.length ? ` · มีช่วงว่างระหว่าง phase ${gaps.length} ช่วง` : ""}</span></summary>
+      <div class="tbl"><table class="se-dt se-wpt"><colgroup><col style="width:40px"><col><col style="width:150px"><col style="width:150px"><col style="width:70px"><col style="width:36px"></colgroup>
+        <thead><tr><th class="c">#</th><th>Phase</th><th>เริ่ม</th><th>สิ้นสุด</th><th class="c">วัน</th><th></th></tr></thead>
+        <tbody>${ph.length ? ph.map(row).join("") : `<tr><td colspan="6" class="se-muted c" style="padding:14px">ยังไม่มี phase${ed ? " · กด ＋ เพิ่ม phase" : ""}</td></tr>`}</tbody></table></div>
+      ${warn.length ? `<div class="se-alert">⚠️ ${warn.map(esc).join(" · ")}</div>` : ""}
+      ${ed ? `<div class="se-actions"><button class="se-btn" data-phadd>${IC.plus}เพิ่ม phase</button><span class="se-hint">วัน = วันสิ้นสุด − วันเริ่ม (แบบเดียวกับ Base44) · แก้วันที่แล้ว วันของกำลังคนใน phase นั้นจะปรับตาม ยกเว้นแถวที่แก้วันเอง</span></div>` : ""}
+    </details>`;
+  }
+  function wireWp(sec, p, redraw) {
+    const after = () => { syncDates(p); save(); redraw(); };
+    sec.querySelectorAll("tr[data-ph]").forEach(tr => {
+      const x = p.phases.find(y => y.id === tr.dataset.ph); if (!x) return;
+      tr.querySelectorAll("[data-pk]").forEach(inp => inp.onchange = () => {
+        x[inp.dataset.pk] = inp.value.trim();
+        if (inp.dataset.pk !== "name") p.lines.forEach(l => { if (l.kind === "mp" && l.phase === x.id && l.days_auto !== false) l.days = phDays(x) || l.days; });
+        after();
+      });
+      const d = tr.querySelector("[data-phdel]");
+      if (d) d.onclick = () => {
+        const n = p.lines.filter(l => l.kind === "mp" && l.phase === x.id).length;
+        if (n && !confirm(`ลบ ${x.name || "phase นี้"}? กำลังคน ${n} แถวใน phase นี้จะย้ายไป “ยังไม่ระบุ phase”`)) return;
+        p.phases = p.phases.filter(y => y !== x); p.lines.forEach(l => { if (l.phase === x.id) l.phase = ""; }); after();
+      };
+    });
+    const a = sec.querySelector("[data-phadd]");
+    if (a) a.onclick = () => {
+      const last = phasesOf(p).filter(x => x.end).map(x => x.end).sort().pop() || "";
+      p.phases.push({ id: "ph" + uid(), name: `Phase ${p.phases.length + 1}`, start: "", end: "" }); save(); redraw();
+      const r = sec.querySelector("tr[data-ph]:last-of-type [data-pk=start]"); if (r) { if (last) r.min = last; r.focus(); }
+    };
+  }
+  // Manpower summary by phase: head count, man-days, wages, OT, allowance
+  function mpSummary(p) {
+    const ph = phasesOf(p), known = new Set(ph.map(x => x.id)), mp = p.lines.filter(l => l.kind === "mp");
+    const rows = ph.map((x, i) => [`${i + 1}. ${x.name || "Phase " + (i + 1)}`, mp.filter(l => l.phase === x.id), phDays(x)]);
+    const un = mp.filter(l => !known.has(l.phase)); if (un.length) rows.push(["ยังไม่ระบุ phase", un, null]);
+    const calc = ls => ls.reduce((o, l) => { const q = num(l.qty), d = num(l.days); o.ppl += q; o.md += q * d; o.wage += q * d * num(l.day_rate); o.ot += q * num(l.ot_hours) * num(l.ot_rate); o.al += l.overnight ? q * d * num(l.allow_rate) : 0; return o; }, { ppl: 0, md: 0, wage: 0, ot: 0, al: 0 });
+    const all = calc(mp), tr = (n, o, d, b) => `<tr${b ? ' class="se-sumrow"' : ""}><td>${n}</td><td class="c">${d == null ? "" : d || "–"}</td><td class="c">${o.ppl || "–"}</td><td class="c">${o.md ? money(o.md) : "–"}</td><td class="r">${money(o.wage)}</td><td class="r">${money(o.ot)}</td><td class="r">${money(o.al)}</td><td class="r"><b>${money(o.wage + o.ot + o.al)}</b></td></tr>`;
+    return `<div class="se-grp-h"><b>📊 สรุปกำลังคนตาม phase</b><span class="se-hint">คนสูงสุดในหนึ่ง phase ${peopleOf(p)} คน · รวม ${money(all.md)} man-day</span></div>
+      <div class="tbl"><table class="se-mps"><thead><tr><th>Phase</th><th class="c">วัน</th><th class="c">คน</th><th class="c">Man-day</th><th class="r">ค่าแรง</th><th class="r">OT</th><th class="r">เบี้ยเลี้ยง</th><th class="r">รวม</th></tr></thead>
+      <tbody>${rows.map(([n, ls, d]) => tr(esc(n), calc(ls), d)).join("")}</tbody>
+      <tfoot>${tr("<b>รวมทั้งหมด</b>", Object.assign(all, { ppl: peopleOf(p) }), daysOf(p), true)}</tfoot></table></div>`;
+  }
+
   /* ---------- category detail page ---------- */
   function secCategory(sec, p, redraw, code) {
     const c = catOf(code), ed = editable(p), groups = FORMS[c.code];
@@ -270,16 +325,27 @@
       if (f.t === "pick") return `<input class="se-in" data-k="${f.k}" data-pick="${f.list}" list="dl-${f.list}" value="${esc(v)}" placeholder="เลือกหรือพิมพ์">`;
       return `<input class="se-in ${f.t === "num" ? "r" : ""}" data-k="${f.k}" value="${esc(v)}" ${f.t === "num" ? 'inputmode="decimal"' : ""}>`;
     };
-    const group = g => {
-      const rows = p.lines.filter(l => l.cat === c.code && l.kind === g.kind);
+    const GF = [];   // row filter of each rendered group (index = data-gi)
+    const group = (g, o = {}) => {
+      const gi = GF.push(l => l.cat === c.code && l.kind === g.kind && (!o.filter || o.filter(l))) - 1;
+      const rows = p.lines.filter(GF[gi]);
       const sub = rows.reduce((a, l) => a + amtOf(l), 0);
-      return `<div class="se-grp" data-kind="${g.kind}">
-        <div class="se-grp-h"><b>${esc(g.title)}</b><span class="se-hint">${esc(g.hint)}</span><span class="se-grp-t">${baht(sub)}</span></div>
+      return `<div class="se-grp ${o.cls || ""}" data-kind="${g.kind}" data-gi="${gi}">
+        <div class="se-grp-h"><b>${o.title || esc(g.title)}</b><span class="se-hint">${esc(o.hint != null ? o.hint : g.hint)}</span><span class="se-grp-t">${baht(sub)}</span></div>
         <div class="tbl"><table class="se-dt"><thead><tr><th class="c" style="width:40px">#</th>${g.fields.map(f => `<th class="${f.t === "num" ? "r" : f.t === "check" ? "c" : ""}" ${f.w ? `style="width:${f.w}px"` : ""}>${esc(f.l)}</th>`).join("")}<th class="r" style="width:120px">จำนวนเงิน</th>${ed ? '<th style="width:36px"></th>' : ""}</tr></thead>
         <tbody>${rows.length ? rows.map((l, i) => `<tr data-id="${l.id}"><td class="c se-no">${i + 1}</td>${g.fields.map(f => `<td class="${f.t === "num" ? "r" : f.t === "check" ? "c" : ""}">${cell(l, f)}</td>`).join("")}<td class="r se-amt" data-amt>${money(amtOf(l))}</td>${ed ? `<td><button class="se-x" data-del aria-label="ลบแถว">${IC.x}</button></td>` : ""}</tr>`).join("")
           : `<tr><td colspan="${g.fields.length + (ed ? 3 : 2)}" class="se-muted c" style="padding:16px">ยังไม่มีรายการ</td></tr>`}</tbody></table></div>
-        ${ed ? `<button class="se-btn" data-add="${g.kind}">${IC.plus}เพิ่ม${esc(g.title)}</button>` : ""}</div>`;
+        ${ed ? `<button class="se-btn" data-add="${g.kind}" data-phase="${esc(o.phase || "")}">${IC.plus}เพิ่ม${esc(g.title)}${o.addTo ? " ใน " + esc(o.addTo) : ""}</button>` : ""}</div>`;
     };
+    const phases = phasesOf(p), mpByPhase = c.code === "manpower" && phases.length > 0;
+    if (mpByPhase && phases.length === 1) p.lines.forEach(l => { if (l.kind === "mp" && !l.phase) l.phase = phases[0].id; });
+    const known = new Set(phases.map(x => x.id));
+    const body = mpByPhase
+      ? `<p class="se-hint" style="margin:0">กำลังคนแยกตาม phase · ${esc(groups[0].hint)}</p>` + phases.map((ph, i) => group(groups[0], { filter: l => l.phase === ph.id, phase: ph.id, addTo: ph.name || `Phase ${i + 1}`, cls: "se-phg", hint: "",
+          title: `<span class="se-phn">${i + 1}</span>${esc(ph.name || "Phase " + (i + 1))} <small class="se-muted">${fmtD(ph.start)} – ${fmtD(ph.end)} · ${phDays(ph) || "–"} วัน</small>` })).join("")
+        + (p.lines.some(l => l.kind === "mp" && !known.has(l.phase)) ? group(groups[0], { filter: l => !known.has(l.phase), title: "ยังไม่ระบุ phase", hint: "รายการเดิมก่อนแบ่ง phase · ลบแล้วเพิ่มใหม่ใน phase ที่ถูกต้อง", cls: "se-phg" }) : "")
+        + `<div class="se-grp" id="mpSum">${mpSummary(p)}</div>`
+      : groups.map(g => group(g)).join("");
     const lists = [...new Set(groups.flatMap(g => g.fields.filter(f => f.t === "pick").map(f => f.list)))];
     const acts = p.actuals.filter(a => a.cat === c.code).sort((a, b) => b.date.localeCompare(a.date));
     const STA = { pending: ["รอตรวจ", "s-req"], checked: ["ตรวจแล้ว", "s-ok"], rejected: ["ไม่ผ่าน", "s-rev"] };
@@ -289,8 +355,9 @@
       <div class="se-catnav">${CATS.map(x => `<a href="${href(x.code)}" class="${x.code === c.code ? "on" : ""}">${x.ic}<span>${esc(x.name)}</span></a>`).join("")}</div>
       <div class="se-sec-h"><h3 class="se-cat-h">${c.ic}${esc(c.name)} <small>${esc(c.th)}</small></h3>${ed ? `<span class="badge live">แก้ไขได้</span>` : `<span class="badge off">${p.status === "locked" ? "🔒 ล็อกเป็น Budgetary แล้ว" : "อ่านอย่างเดียว"}</span>`}</div>
       <div class="se-kpis">${kpi("Estimate", baht(est))}${kpi("Budget", bud == null ? "—" : baht(bud))}${kpi("Actual", baht(act))}${kpi("คงเหลือ", bud == null ? "—" : baht(bud - act), bud != null && bud - act < 0 ? "over" : "")}</div>
+      ${wpPanel(p, ed, c.code === "manpower" || !phases.length)}
       ${lists.map(k => `<datalist id="dl-${k}">${MASTER[k].map(([n, d]) => { const v = typeof d === "function" ? d(p) : d; return `<option value="${esc(n)}">${typeof d === "function" ? (v.rate ? money(v.rate) + " (" + esc(p.destination) + ")" : "ราคาตามจังหวัดปลายทาง") : Object.values(v).filter(x => typeof x === "number").map(money).join(" / ")}</option>`; }).join("")}</datalist>`).join("")}
-      ${groups.map(group).join("")}
+      ${body}
       <div class="se-cat-tot"><span>รวม Estimate หมวด ${esc(c.name)}</span><b id="seCatTot">${baht(est)}</b></div>
       ${ed ? `<p class="se-hint">พิมพ์หรือเลือกจากรายการ ระบบเติมราคาตาม Master rate ตัวอย่าง · บันทึกอัตโนมัติ</p>` : ""}
       <div class="se-grp">
@@ -306,13 +373,18 @@
             <td><span class="se-rowact">${canChk && a.status === "pending" ? `<button class="se-btn sm" data-chk="checked">✓</button><button class="se-btn sm" data-chk="rejected">✗</button>` : ""}${canAdd && a.status === "pending" ? `<button class="se-x" data-adel aria-label="ลบ">${IC.x}</button>` : ""}</span></td></tr>`).join("")
             : `<tr><td colspan="7" class="se-muted c" style="padding:16px">ยังไม่มีรายการ</td></tr>`}</tbody></table></div>
       </div>`;
-    const tot = () => { sec.querySelector("#seCatTot").textContent = baht(sumByCat(p)[c.code]); sec.querySelectorAll(".se-grp[data-kind]").forEach(gEl => { const k = gEl.dataset.kind; gEl.querySelector(".se-grp-t").textContent = baht(p.lines.filter(l => l.cat === c.code && l.kind === k).reduce((a, l) => a + amtOf(l), 0)); }); };
+    const tot = () => {
+      sec.querySelector("#seCatTot").textContent = baht(sumByCat(p)[c.code]);
+      sec.querySelectorAll(".se-grp[data-gi]").forEach(gEl => { gEl.querySelector(".se-grp-t").textContent = baht(p.lines.filter(GF[+gEl.dataset.gi]).reduce((a, l) => a + amtOf(l), 0)); });
+      const ms = sec.querySelector("#mpSum"); if (ms) ms.innerHTML = mpSummary(p);
+    };
+    wireWp(sec, p, redraw);
     sec.querySelectorAll("tr[data-id]").forEach(tr => {
       const l = p.lines.find(x => x.id === tr.dataset.id); if (!l) return;
       const upd = () => { save(); tr.querySelector("[data-amt]").textContent = money(amtOf(l)); tot(); };
       tr.querySelectorAll("input[data-k]").forEach(inp => {
         if (inp.type === "checkbox") inp.onchange = () => { l[inp.dataset.k] = inp.checked; upd(); };
-        else inp.oninput = () => { l[inp.dataset.k] = inp.value; upd(); };
+        else inp.oninput = () => { l[inp.dataset.k] = inp.value; if (inp.dataset.k === "days") l.days_auto = false; upd(); };
         if (inp.dataset.pick) inp.onchange = () => { const m = MASTER[inp.dataset.pick].find(x => x[0] === inp.value); if (m) { Object.assign(l, typeof m[1] === "function" ? m[1](p) : m[1]); save(); redraw(); } };
       });
       tr.querySelectorAll("select[data-k]").forEach(s => s.onchange = () => { l[s.dataset.k] = s.value; upd(); });
@@ -321,9 +393,11 @@
     sec.querySelectorAll("[data-add]").forEach(b => b.onclick = () => {
       const nl = newLine(c.code, b.dataset.add);
       if ((nl.kind === "doc" || nl.kind === "air") && peopleOf(p)) nl.qty = peopleOf(p);   // default: whole team
-      if (nl.kind === "mp" || nl.kind === "acc") { const d = daysOf(p); if (d) { if (nl.kind === "mp") nl.days = d; else nl.periods = Math.max(1, d - 1); } }
+      const ph = phasesOf(p).find(x => x.id === b.dataset.phase);
+      if (nl.kind === "mp") { nl.phase = ph ? ph.id : ""; nl.days = ph ? phDays(ph) || "" : daysOf(p) || ""; nl.days_auto = true; }
+      if (nl.kind === "acc") { const d = daysOf(p); if (d) nl.periods = Math.max(1, d - 1); }
       p.lines.push(nl); save(); redraw();
-      const g = document.querySelector(`.se-grp[data-kind="${b.dataset.add}"]`), ins = g && g.querySelectorAll("tbody tr:last-child input");
+      const row = document.querySelector(`tr[data-id="${nl.id}"]`), ins = row && row.querySelectorAll("input");
       if (ins && ins.length) ins[0].focus();
     });
     const add = sec.querySelector("#cAdd");
@@ -354,6 +428,11 @@
 .se-dt td .se-in{min-width:0}
 .se-cat-tot{display:flex;justify-content:space-between;align-items:center;background:var(--blush);border:1px solid var(--blush-2);border-radius:10px;padding:10px 14px;font-weight:600}
 .se-cat-tot b{font-size:18px;color:var(--rak)}
+.se-wp summary{cursor:pointer;list-style:none}.se-wp summary::-webkit-details-marker{display:none}.se-wp summary b::after{content:" ▾";color:var(--muted);font-weight:400}.se-wp:not([open]) summary b::after{content:" ▸"}
+.se-wpt{min-width:560px}
+.se-phg{border-left:4px solid var(--rak)}.se-phn{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--rak);color:#fff;font-size:12px;margin-right:8px}
+.se-phg .se-grp-h small{font-weight:400;font-size:12.5px;margin-left:6px}
+.se-mps td,.se-mps th{font-variant-numeric:tabular-nums}.se-mps tfoot td{border-top:2px solid var(--line);background:#fafbfc}
 .se-estcat td{vertical-align:middle}.se-estcat .se-brief{color:var(--muted);font-size:12.5px}
 @media (max-width:640px){.se-catnav a span{display:none}.se-catnav a{padding:6px 9px}}`;
 
@@ -363,7 +442,7 @@
     const L1 = (cat, kind, o) => Object.assign(newLine(cat, kind), o);
     return { v: 2, user: "dew", projects: [
       mk({ id: "ij2610005", ij: "IJ2610005", name: "New Dual EP Line", customer: "ULTRA CLEAN TECHNOLOGY (SINGAPORE)", city: "Singapore",
-        start: "2027-05-23", end: "2027-05-30", phases: [{ name: "Phase 1 Installation", start: "2027-05-23", end: "2027-05-30" }], status: "requested",
+        start: "2027-05-23", end: "2027-05-30", phases: [{ id: "ph1", name: "Phase 1 Installation", start: "2027-05-23", end: "2027-05-30" }], status: "requested",
         destination: "", // from Base44 project IJ2610005 — totals ฿566,350 there and here
         lines: [
           L1("manpower", "mp", { position: "Site Engineer", qty: 1, days: 7, day_rate: 2000, ot_hours: 20, ot_rate: 375, overnight: true, note: "SC" }),
@@ -386,19 +465,24 @@
           L1("site_expense", "se", { tier_item: "Pocket money 3 — scope ใหญ่", description: "Pocket Money", qty: 1, rate: 30000, holder_name: "อาร์ต" })],
         history: [{ at: new Date().toISOString(), role: "sc", by: "สปาย", action: "submit", note: "" }] }),
       mk({ id: "ij2604012", ij: "IJ2604012", name: "New Dual EP Line", customer: "ULTRA CLEAN TECHNOLOGY (ISRAEL)", city: "Tel Aviv",
-        start: "2027-03-01", end: "2027-03-10", phases: [{ name: "Phase 1 Installation", start: "2027-03-01", end: "2027-03-10" }], status: "draft",
+        start: "2027-03-01", end: "2027-03-10", phases: [{ id: "ph1", name: "Phase 1 Installation", start: "2027-03-01", end: "2027-03-10" }], status: "draft",
         lines: [L1("manpower", "mp", { position: "Technician", qty: 3, days: 10, day_rate: 1000, ot_hours: 10, ot_rate: 187.5 }), L1("manpower", "mp", { position: "Team Lead", qty: 3, days: 10, day_rate: 2000, ot_hours: 10, ot_rate: 375, overnight: true })] }),
       mk({ id: "ij20602006", ij: "IJ20602006", jo: "03302026", name: "Plating Line & WWTP relocation", customer: "ISOBE", city: "Nagoya",
-        start: "2026-11-01", end: "2027-02-04", phases: [{ name: "Dismantle", start: "2026-11-01", end: "2026-11-30" }, { name: "Installation", start: "2026-12-01", end: "2027-01-19" }, { name: "Test & SAT", start: "2027-01-20", end: "2027-02-04" }],
+        start: "2027-06-10", end: "2027-09-14", // phases from Base44 — with gaps between them
+        phases: [{ id: "ph1", name: "Phase 1 Supervision", start: "2027-06-10", end: "2027-06-15" }, { id: "ph2", name: "Phase 2 Supervision", start: "2027-07-15", end: "2027-07-20" }, { id: "ph3", name: "Phase 3 Installation", start: "2027-08-15", end: "2027-09-14" }],
         status: "locked", lockedAt: new Date().toISOString(),
-        lines: [L1("manpower", "mp", { position: "Technician", qty: 10, days: 96, day_rate: 1000 }), L1("manpower", "mp", { position: "Team Lead", qty: 3, days: 96, day_rate: 2000, overnight: true }),
+        lines: [
+          L1("manpower", "mp", { phase: "ph1", position: "Site Engineer", qty: 1, days: 5, day_rate: 2000, ot_rate: 375, overnight: true }), L1("manpower", "mp", { phase: "ph1", position: "Team Lead", qty: 3, days: 5, day_rate: 2000, ot_rate: 375, overnight: true, note: "PP+ME+EE" }),
+          L1("manpower", "mp", { phase: "ph2", position: "Site Engineer", qty: 1, days: 5, day_rate: 2000, ot_rate: 375, overnight: true }), L1("manpower", "mp", { phase: "ph2", position: "Team Lead", qty: 3, days: 5, day_rate: 2000, ot_rate: 375, overnight: true, note: "PP+ME+EE" }),
+          L1("manpower", "mp", { phase: "ph3", position: "Site Engineer", qty: 1, days: 30, day_rate: 2000, ot_rate: 375, overnight: true }), L1("manpower", "mp", { phase: "ph3", position: "Team Lead", qty: 3, days: 30, day_rate: 2000, ot_rate: 375, overnight: true, note: "PP+ME+EE" }),
+          L1("manpower", "mp", { phase: "ph3", position: "Technician", qty: 8, days: 30, day_rate: 1000, ot_rate: 187.5, overnight: true, note: "PP+ME+EE" }), L1("manpower", "mp", { phase: "ph3", position: "Engineer", qty: 1, days: 10, day_rate: 2000, ot_rate: 375, overnight: true, note: "If needed", days_auto: false }),
           L1("transportation", "veh", { description: "รถ 10 ล้อ เฮี๊ยบติดเครน", vehicles_qty: 2, trips: 5, rate: 8500 }), L1("transportation", "veh", { description: "รถเครน 25 ตัน", vehicles_qty: 1, trips: 4, rate: 9000, signal_crew: 2, signal_rate: 4500 }),
-          L1("accommodation", "acc", { label: "ห้องพัก (ต่างประเทศ)", unit_qty: 13, periods: 96, rate: 3500 })],
+          L1("accommodation", "acc", { label: "Hotel Rental", unit_qty: 2, periods: 10, rate: 2000 }), L1("accommodation", "acc", { label: "House rental (Airbnb)", billing: "month", unit_qty: 1, periods: 1, rate: 200000 })],
         history: [{ at: new Date().toISOString(), role: "sc", by: "อาร์ต", action: "submit", note: "" }, { at: new Date().toISOString(), role: "ssm", by: "ดิว", action: "approve", note: "" }, { at: new Date().toISOString(), role: "md", by: "บี", action: "approve", note: "" }, { at: new Date().toISOString(), role: "ssm", by: "ดิว", action: "award", note: "Job 03302026" }],
         actuals: [
-          { id: uid(), date: "2026-11-03", cat: "manpower", desc: "ค่าแรงทีมรื้อถอน สัปดาห์ 1", amount: 182000, receipt: "", by: "อาร์ต", status: "checked" },
-          { id: uid(), date: "2026-11-04", cat: "accommodation", desc: "ที่พัก 13 ห้อง × 7 คืน", amount: 318500, receipt: "hotel-w1.jpg", by: "หนุ่ม", status: "checked" },
-          { id: uid(), date: "2026-11-06", cat: "transportation", desc: "รถ 10 ล้อ ขนอุปกรณ์", amount: 24000, receipt: "", by: "อาร์ต", status: "pending" }] }),
+          { id: uid(), date: "2027-06-12", cat: "manpower", desc: "ค่าแรง Phase 1 Supervision", amount: 42000, receipt: "", by: "อาร์ต", status: "checked" },
+          { id: uid(), date: "2027-06-11", cat: "accommodation", desc: "Hotel 2 ห้อง × 5 คืน", amount: 20000, receipt: "hotel-w1.jpg", by: "หนุ่ม", status: "checked" },
+          { id: uid(), date: "2027-06-14", cat: "transportation", desc: "รถ 10 ล้อ ขนอุปกรณ์", amount: 17000, receipt: "", by: "อาร์ต", status: "pending" }] }),
     ].map(p => { if (p.status === "locked") p.budget = sumByCat(p); return p; }) };
   }
   let DB = null;
@@ -413,8 +497,18 @@
   const amtOf = l => l.kind && KIND[l.kind] ? KIND[l.kind].amt(l) : qtyOf(l) * num(l.rate);
   const totalOf = p => p.lines.reduce((a, l) => a + amtOf(l), 0);
   function sumByCat(p) { const o = {}; CATS.forEach(c => o[c.code] = 0); p.lines.forEach(l => o[l.cat] = (o[l.cat] || 0) + amtOf(l)); return o; }
-  const peopleOf = p => p.lines.filter(l => l.kind === "mp").reduce((a, l) => a + num(l.qty), 0);
-  const daysOf = p => span(p.start, p.end);
+  const phasesOf = p => { p.phases = (p.phases || []).filter(Boolean); p.phases.forEach(x => { if (!x.id) x.id = "ph" + uid(); }); return p.phases; };
+  const phDays = ph => span(ph.start, ph.end);
+  // Working days: sum of the phases (they may have gaps); without dated phases, the project start–end.
+  const daysOf = p => { const ph = phasesOf(p).filter(x => x.start && x.end); return ph.length ? ph.reduce((a, x) => a + phDays(x), 0) : span(p.start, p.end); };
+  // Head count: the biggest team in any one phase (the same people usually move between phases).
+  const peopleOf = p => {
+    const mp = p.lines.filter(l => l.kind === "mp"), ph = phasesOf(p);
+    if (ph.length < 2) return mp.reduce((a, l) => a + num(l.qty), 0);
+    const by = {}; mp.forEach(l => by[l.phase || "-"] = (by[l.phase || "-"] || 0) + num(l.qty));
+    return Math.max(0, ...Object.values(by));
+  };
+  const syncDates = p => { const d = phasesOf(p).filter(x => x.start && x.end); if (d.length) { p.start = d.map(x => x.start).sort()[0]; p.end = d.map(x => x.end).sort().pop(); } };
   const plannedOf = p => p.budget ? Object.values(p.budget).reduce((a, b) => a + b, 0) : totalOf(p);
   const actualBy = p => { const o = {}; CATS.forEach(c => o[c.code] = 0); p.actuals.filter(a => a.status !== "rejected").forEach(a => o[a.cat] += num(a.amount)); return o; };
   const editable = p => (p.status === "draft" || p.status === "revise") && can("create") && p.list === "active";
@@ -510,7 +604,7 @@
   /* ---------- new / edit project ---------- */
   function projectForm(p) {
     const v = p || { ij: "", name: "", customer: "", city: "", start: "", end: "", phases: [] };
-    const phaseRow = (x = {}) => `<div class="se-phr"><input placeholder="ชื่อ phase เช่น Installation" value="${esc(x.name || "")}" data-k="name"><input type="date" value="${esc(x.start || "")}" data-k="start"><input type="date" value="${esc(x.end || "")}" data-k="end"><button class="se-x" data-delph aria-label="ลบ phase">${IC.x}</button></div>`;
+    const phaseRow = (x = {}) => `<div class="se-phr" data-id="${esc(x.id || "")}"><input placeholder="ชื่อ phase เช่น Installation" value="${esc(x.name || "")}" data-k="name"><input type="date" value="${esc(x.start || "")}" data-k="start"><input type="date" value="${esc(x.end || "")}" data-k="end"><button class="se-x" data-delph aria-label="ลบ phase">${IC.x}</button></div>`;
     const m = modal(p ? "แก้ไขข้อมูลโปรเจค" : "New Project", `
       <div class="se-fgrid">
         <label>IJ no. *<input id="fIj" value="${esc(v.ij)}" placeholder="IJ2611001"></label>
@@ -529,9 +623,9 @@
         const s = g("#fStart"), e = g("#fEnd");
         if (s && e && e < s) return "วันสิ้นสุดต้องไม่ก่อนวันเริ่ม";
         if (DB.projects.some(x => x.ij.toLowerCase() === ij.toLowerCase() && x !== p && x.list !== "trash")) return "มี IJ นี้อยู่แล้ว";
-        const phases = [...mm.querySelectorAll(".se-phr")].map(r => ({ name: r.querySelector('[data-k="name"]').value.trim(), start: r.querySelector('[data-k="start"]').value, end: r.querySelector('[data-k="end"]').value })).filter(x => x.name);
+        const phases = [...mm.querySelectorAll(".se-phr")].map(r => ({ id: r.dataset.id || "ph" + uid(), name: r.querySelector('[data-k="name"]').value.trim(), start: r.querySelector('[data-k="start"]').value, end: r.querySelector('[data-k="end"]').value })).filter(x => x.name);
         const data = { ij, name, customer: g("#fCus"), city: g("#fCity"), destination: mm.querySelector("#fDest").value, start: s, end: e, phases };
-        if (p) { Object.assign(p, data); save(); toast("บันทึกข้อมูลโปรเจคแล้ว"); window.dispatchEvent(new HashChangeEvent("hashchange")); }
+        if (p) { Object.assign(p, data); syncDates(p); save(); toast("บันทึกข้อมูลโปรเจคแล้ว"); window.dispatchEvent(new HashChangeEvent("hashchange")); }
         else {
           const np = Object.assign({ id: ij.toLowerCase().replace(/[^a-z0-9]+/g, "-") + "-" + uid().slice(0, 4), jo: "", status: "draft", list: "active", lines: [], history: [], budget: null, lockedAt: null, actuals: [], createdAt: new Date().toISOString() }, data);
           DB.projects.unshift(np); save(); toast("สร้างโปรเจคแล้ว · เริ่มกรอก Estimate"); location.hash = "#site-expense/" + encodeURIComponent(np.id) + "/estimate";
