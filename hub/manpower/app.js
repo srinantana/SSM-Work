@@ -13,7 +13,7 @@
   const DS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];   // by Date.getDay()
   const ABS = { // absence type → [short label, css class, long label]
     H: ["H", "off", "วันหยุด"], PH: ["PH", "ph", "วันหยุดนักขัตฤกษ์"], EX: ["EX", "ph", "วันหยุดพิเศษบริษัท"],
-    "พักร้อน": ["พร", "lv", "พักร้อน"], "ลาป่วย": ["ป่วย", "lv", "ลาป่วย"], "ลาป่วยครึ่งวัน": ["ป่วย½", "lv", "ลาป่วยครึ่งวัน"],
+    "พักร้อน": ["พักร้อน", "lv", "ลาพักร้อน"], "ลาป่วย": ["ป่วย", "lv", "ลาป่วย"], "ลาป่วยครึ่งวัน": ["ป่วย½", "lv", "ลาป่วยครึ่งวัน"],
     "ลากิจ": ["กิจ", "lv", "ลากิจ"], "ลาไม่รับค่าจ้าง": ["ไม่รับ", "lv", "ลาไม่รับค่าจ้าง"], "ลา": ["ลา", "lv", "ลา"],
     "สลับวันหยุด": ["สลับ", "off", "สลับวันหยุด"],
   };
@@ -23,6 +23,7 @@
   const S = { zoom: "month", date: new Date(), units: new Set(UNITS.map(u => u[0])), cust: "", project: "", person: "", q: "", left: false, miles: true };
   const WT = [["fab", "Fab"], ["assembly", "Assembly"], ["install", "Install"], ["service", "Service"], ["other", "Other"]];
   const WTL = Object.fromEntries(WT);
+  const LV = [["ลาป่วย", "ลาป่วย"], ["พักร้อน", "ลาพักร้อน"], ["ลากิจ", "ลากิจ"]];
 
   /* ---------- dates ---------- */
   const pad = n => String(n).padStart(2, "0");
@@ -170,6 +171,11 @@
     // Service Plan (Confirm) next to a different plan for the same person/day → flag, never hide either one
     const clash = sv && ((a && a.project_code !== "SERVICE") || (x && ABS[x.type] && ABS[x.type][1] === "lv"));
     const flag = sv ? `<b class="mp-sp${clash ? " x" : ""}" title="${esc(clash ? "ชนกับงานจาก Service Plan: " : "Service Plan: ") + esc(sv.map(spText).join(", "))}">${clash ? "!" : "SP"}</b>` : "";
+    // leave wins over planned work on the same day (work is kept and flagged)
+    if (x && ABS[x.type] && ABS[x.type][1] === "lv") {
+      const t = ABS[x.type], wf = a ? `<b class="mp-sp x" title="${esc("มีงานลงไว้: " + a.text)}">!</b>` : flag;
+      return `<td class="${base} ab lv" data-k="${esc(id)}" title="${esc(t[2] + (x.note ? " · " + x.note : ""))}"><span>${esc(t[0])}</span>${wf}</td>`;
+    }
     if (a && matchA(a)) {
       const c = colorOf(a);
       return `<td class="${base} job${a.tentative ? " tent" : ""}" style="--c:${esc(c)}" data-k="${esc(id)}" title="${esc(a.text)}"><span>${esc(a.text)}</span>${flag}</td>`;
@@ -214,7 +220,8 @@
   function detail(k) {
     const [wid, day] = k.split("|"), w = DATA.workers.find(x => x.id === wid), a = DATA.A.get(k), x = DATA.X.get(k), sv = DATA.SV.get(k) || [], d = fromKey(day);
     let body = a ? `<dl class="mp-dl"><dt>งาน</dt><dd>${esc(a.text)}</dd><dt>โปรเจกต์</dt><dd><i class="mp-dot" style="background:${esc(colorOf(a))}"></i>${esc(projName(a))}</dd>${a.project_code && DATA.P.get(a.project_code) && DATA.P.get(a.project_code).customer ? `<dt>ลูกค้า</dt><dd>${esc(DATA.P.get(a.project_code).customer)}</dd>` : ""}${a.project_code && DATA.P.get(a.project_code) && DATA.P.get(a.project_code).job_no ? `<dt>Job no.</dt><dd>${esc(DATA.P.get(a.project_code).job_no)}</dd>` : ""}<dt>ประเภทงาน</dt><dd>${esc(WTL[a.work_type] || "—")}</dd><dt>สถานะ</dt><dd>${a.tentative ? "จอง (ยังไม่ยืนยัน)" : "ยืนยันแล้ว"}</dd></dl>`
-      : x ? `<dl class="mp-dl"><dt>ประเภท</dt><dd>${esc((ABS[x.type] || [0, 0, x.type])[2])}</dd></dl>` : "";
+      : x ? `<dl class="mp-dl"><dt>ประเภท</dt><dd>${esc((ABS[x.type] || [0, 0, x.type])[2])}</dd>${x.note ? `<dt>หมายเหตุ</dt><dd>${esc(x.note)}</dd>` : ""}</dl>` : "";
+    if (a && x && ABS[x.type] && ABS[x.type][1] === "lv") body = `<dl class="mp-dl"><dt>วันลา</dt><dd>${esc(ABS[x.type][2])}${x.note ? " · " + esc(x.note) : ""}</dd><dt>งานที่ลงไว้</dt><dd>⚠ ${esc(a.text)}</dd></dl>`;
     let actions = "";
     if (a && a.tentative) {
       const run = runOf(wid, day, a.text), lo = run[0], hi = run[run.length - 1];
@@ -236,7 +243,8 @@
       const cust = pj ? pj.customer || "" : (S.cust || ""), job = pj ? pj.name : "", jno = pj ? pj.job_no || "" : "";
       const wt = a ? (a.work_type || "other") : (pj && pj.code === "SERVICE" ? "service" : "");
       const note = a && pj && a.text !== pj.name ? a.text.replace(/^จอง\s*/, "") : (a && !pj ? a.text : "");
-      form = `<details class="mp-fwrap" ${a ? "" : "open"}><summary>${a ? "แก้ไขงานวันนี้" : "ลงงาน"}</summary><form class="mp-form" autocomplete="off">
+      const isLv = x && ABS[x.type] && ABS[x.type][1] === "lv";
+      form = `<details class="mp-fwrap" ${a || isLv ? "" : "open"}><summary>${a ? "แก้ไขงานวันนี้" : "ลงงาน"}</summary><form class="mp-form" autocomplete="off">
         <label>ลูกค้า<input name="customer" list="mpCustL" value="${esc(cust)}" placeholder="เช่น UCT, Ham-Let, SMT" required></label>
         <label>ชื่องาน<input name="job" list="mpJobL" value="${esc(job)}" placeholder="เลือกงานเดิมหรือพิมพ์ชื่องานใหม่" required></label>
         <label>Job no.<input name="job_no" value="${esc(jno)}" placeholder="เช่น 04002026"></label>
@@ -246,13 +254,45 @@
         <div class="mp-chks"><label><input type="checkbox" name="skip" checked> ข้ามวันอาทิตย์ / วันหยุด / วันลา</label><label><input type="checkbox" name="tentative" ${a && a.tentative ? "checked" : ""}> จอง (ยังไม่ยืนยัน)</label></div>
         <div class="mp-fbtn"><button type="submit" class="mp-save">บันทึก</button>${a ? `<button type="button" class="mp-del">ลบงานวันนี้</button>` : ""}</div>
         <datalist id="mpCustL">${customers().map(c => `<option value="${esc(c)}">`).join("")}</datalist><datalist id="mpJobL"></datalist>
+      </form></details>
+      <details class="mp-fwrap lv" ${isLv ? "open" : ""}><summary>${isLv ? "แก้ไข / ยกเลิกวันลา" : "ลงวันลา"}</summary><form class="mp-form mp-lform" autocomplete="off">
+        <fieldset><legend>ประเภทการลา</legend>${LV.map(([v, l]) => `<label class="mp-wt"><input type="radio" name="type" value="${v}" ${isLv && x.type === v ? "checked" : ""} required>${l}</label>`).join("")}</fieldset>
+        <label>ถึงวันที่<input type="date" name="to" value="${esc(day)}" min="${esc(day)}"></label>
+        <label>หมายเหตุ (ไม่บังคับ)<input name="note" value="${esc(isLv ? x.note || "" : "")}" placeholder="เช่น ไปโรงพยาบาล, ลาครึ่งวันเช้า"></label>
+        <div class="mp-chks"><label><input type="checkbox" name="skip" checked> ข้ามวันอาทิตย์ / วันหยุด</label><label><input type="checkbox" name="clear" checked> ลบงานที่ลงไว้ในวันลา</label></div>
+        <div class="mp-fbtn"><button type="submit" class="mp-save">บันทึกวันลา</button>${isLv ? `<button type="button" class="mp-ldel">ยกเลิกวันลาวันนี้</button>` : ""}</div>
       </form></details>`;
     }
     const el = document.createElement("div");
     el.className = "mp-modal";
     el.innerHTML = `<div class="mp-dlg" role="dialog" aria-modal="true" aria-label="รายละเอียด"><header><div><b>${esc(w ? (w.nickname || w.name_th) : wid)}</b> <span>${esc(w ? w.name_th : "")}</span><div class="mp-when">${DS[d.getDay()]}. ${d.getDate()} ${MF[d.getMonth()]} ${d.getFullYear()}</div></div><button type="button" class="mp-x" aria-label="ปิด">✕</button></header>${body}${actions}${form}<div class="mp-msg" role="status"></div></div>`;
     const reload = () => { if (DATA) DATA.want = ""; return ensure().then(draw); };
-    const f = el.querySelector(".mp-form");
+    const lf = el.querySelector(".mp-lform");
+    if (lf) {
+      lf.addEventListener("submit", async e => {
+        e.preventDefault();
+        const msg = el.querySelector(".mp-msg"), btn = lf.querySelector(".mp-save");
+        btn.disabled = true; msg.textContent = "กำลังบันทึก…";
+        try {
+          const r = await fetch("/api/manpower/leave", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
+            worker_id: wid, from: day, to: lf.to.value || day, type: (lf.querySelector("[name=type]:checked") || {}).value, note: lf.note.value, skip_off: lf.skip.checked, clear_work: lf.clear.checked }) });
+          const res = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(res.error || r.status);
+          msg.textContent = `บันทึกวันลาแล้ว ${res.saved} วัน${res.removed ? ` · ลบงานที่ลงไว้ ${res.removed} วัน` : ""}`;
+          await reload(); setTimeout(close, 700);
+        } catch (err) { msg.textContent = "บันทึกไม่สำเร็จ (" + err.message + ")"; btn.disabled = false; }
+      });
+      const ld = lf.querySelector(".mp-ldel");
+      if (ld) ld.addEventListener("click", async () => {
+        const msg = el.querySelector(".mp-msg"); ld.disabled = true; msg.textContent = "กำลังยกเลิก…";
+        try {
+          const r = await fetch("/api/manpower/leave-clear", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ worker_id: wid, days: [day] }) });
+          if (!r.ok) throw new Error(r.status);
+          await reload(); close();
+        } catch (err) { msg.textContent = "ยกเลิกไม่สำเร็จ (" + err.message + ")"; ld.disabled = false; }
+      });
+    }
+    const f = el.querySelector(".mp-form:not(.mp-lform)");
     if (f) {
       const jobsFor = () => { const c = lc(f.customer.value); el.querySelector("#mpJobL").innerHTML = DATA.projects.filter(p => !c || lc(p.customer) === c).map(p => `<option value="${esc(p.name)}">${esc(p.job_no || "")}</option>`).join(""); };
       jobsFor();
@@ -430,7 +470,8 @@ button.mp-lg:hover,.mp-lg.on{border-color:var(--rak);color:var(--rak)}.mp-lg b{f
 .mp-wt:has(input:checked){border-color:var(--rak);background:#fff1f1;color:var(--rak)}.mp-wt input{margin:0}
 .mp-chks{display:flex;flex-wrap:wrap;gap:6px 16px}.mp-chks label{display:inline-flex;align-items:center;gap:6px}
 .mp-fbtn{display:flex;gap:8px}.mp-save{background:var(--rak);color:#fff;border:0;border-radius:8px;padding:8px 18px;font:inherit;font-weight:600;cursor:pointer}
-.mp-del{background:#fff;color:var(--rak);border:1px solid #f0b9b9;border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer}.mp-save:disabled,.mp-del:disabled{opacity:.5}
+.mp-fwrap.lv summary{color:var(--amber)}.mp-lform .mp-wt:has(input:checked){border-color:var(--amber);background:#fff6e0;color:var(--amber)}.mp-lform .mp-save{background:var(--amber)}
+.mp-ldel,.mp-del{background:#fff;color:var(--rak);border:1px solid #f0b9b9;border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer}.mp-save:disabled,.mp-del:disabled{opacity:.5}
 @media (max-width:640px){.mp-form{grid-template-columns:1fr}}
 @media (max-width:640px){.mp-legend{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.mp-lg{white-space:nowrap;flex:none}.mp-mon span{left:120px}.mp-name{min-width:112px;max-width:112px}.mp-name small{display:none}.mp-zoom{margin-left:0}.mp-scroll{max-height:none}}
 `;
