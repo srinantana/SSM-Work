@@ -54,24 +54,28 @@
   const clampDate = d => d < MIN ? MIN : d > MAX ? MAX : d;
 
   /* ---------- load ---------- */
+  const loadErr = st => st === 503 ? "ยังไม่ได้สร้างตารางข้อมูลกำลังคนใน Supabase (database/manpower.sql)" : st === 403 ? "บัญชีนี้ยังไม่มีสิทธิ์เมนูวางแผนกำลังคน" : "โหลดข้อมูลไม่สำเร็จ (" + st + ")";
+  function prep(d) {
+    d.P = new Map(d.projects.map(p => [p.code, p]));
+    d.A = new Map(d.assignments.map(x => [x.worker_id + "|" + x.day, x]));
+    d.X = new Map(d.absences.map(x => [x.worker_id + "|" + x.day, x]));
+    d.H = new Map(d.holidays.map(x => [x.day, x]));
+    d.SV = new Map();
+    (d.service || []).forEach(x => { const k = x.worker_id + "|" + x.day; if (!d.SV.has(k)) d.SV.set(k, []); d.SV.get(k).push(x); });
+    d.busy = new Set(d.assignments.concat(d.absences.filter(x => !["H", "PH", "EX"].includes(x.type)), d.service || []).map(x => x.worker_id));
+    return d;
+  }
+  async function fetchRange(from, to) {
+    const r = await fetch(`/api/manpower/board?from=${from}&to=${to}`, { cache: "no-store" });
+    if (!r.ok) { const e = new Error(loadErr(r.status)); e.status = r.status; throw e; }
+    return prep(await r.json());
+  }
   async function load() {
     const [a, b] = range(), want = key(a) + "|" + key(b);
     if (DATA && DATA.want === want) return;
     ERR = "";
-    try {
-      const r = await fetch(`/api/manpower/board?from=${key(a)}&to=${key(b)}`, { cache: "no-store" });
-      if (!r.ok) { ERR = r.status === 503 ? "ยังไม่ได้สร้างตารางข้อมูลกำลังคนใน Supabase (database/manpower.sql)" : r.status === 403 ? "บัญชีนี้ยังไม่มีสิทธิ์เมนูวางแผนกำลังคน" : "โหลดข้อมูลไม่สำเร็จ (" + r.status + ")"; DATA = null; return; }
-      const d = await r.json();
-      d.want = want;
-      d.P = new Map(d.projects.map(p => [p.code, p]));
-      d.A = new Map(d.assignments.map(x => [x.worker_id + "|" + x.day, x]));
-      d.X = new Map(d.absences.map(x => [x.worker_id + "|" + x.day, x]));
-      d.H = new Map(d.holidays.map(x => [x.day, x]));
-      d.SV = new Map();
-      (d.service || []).forEach(x => { const k = x.worker_id + "|" + x.day; if (!d.SV.has(k)) d.SV.set(k, []); d.SV.get(k).push(x); });
-      d.busy = new Set(d.assignments.concat(d.absences.filter(x => !["H", "PH", "EX"].includes(x.type)), d.service || []).map(x => x.worker_id));
-      DATA = d;
-    } catch { ERR = "โหลดข้อมูลไม่สำเร็จ ลองรีเฟรชหน้า"; DATA = null; }
+    try { const d = await fetchRange(key(a), key(b)); d.want = want; DATA = d; }
+    catch (err) { ERR = err.status ? err.message : "โหลดข้อมูลไม่สำเร็จ ลองรีเฟรชหน้า"; DATA = null; }
   }
   function ensure() { if (!LOADING) LOADING = load().finally(() => { LOADING = null; }); return LOADING; }
 
@@ -113,7 +117,7 @@
     const ppl = DATA ? UNITS.map(([u, l]) => `<optgroup label="${esc(l)}">${DATA.workers.filter(w => w.unit === u && (w.active || S.left)).map(w => `<option value="${esc(w.id)}" ${S.person === w.id ? "selected" : ""}>${esc(w.nickname || w.name_th)} · ${esc(w.name_th)}</option>`).join("")}</optgroup>`).join("") : "";
     const can = DATA && DATA.canEdit;
     return `<div class="mp-head">
-      <div class="mp-title"><h2>วางแผนกำลังคน</h2>${DATA && DATA.canEdit ? `<nav class="mp-tabs"><a href="#manpower" class="${S.page === "board" ? "on" : ""}">Planning Board</a><a href="#manpower/data" class="${S.page === "data" ? "on" : ""}">ข้อมูลหลัก</a><a href="#manpower/log" class="${S.page === "log" ? "on" : ""}">ประวัติการแก้ไข</a></nav>` : ""}<span class="mp-badge ${can ? "ed" : ""}">${can ? "SC / PC / SSM · ลงงาน / แก้ไข / Confirm ได้" : "ดูอย่างเดียว"}</span></div>
+      <div class="mp-title"><h2>วางแผนกำลังคน</h2>${tabs(DATA && DATA.canEdit)}<span class="mp-badge ${can ? "ed" : ""}">${can ? "SC / PC / SSM · ลงงาน / แก้ไข / Confirm ได้" : "ดูอย่างเดียว"}</span></div>
       <div class="mp-nav">${range()[0] <= MIN ? `<span class="mp-btn off">‹</span>` : `<a class="mp-btn" href="${href(S.zoom, step(-1))}" aria-label="ก่อนหน้า">‹</a>`}<a class="mp-btn" href="${href(S.zoom, today())}">วันนี้</a>${range()[1] >= MAX ? `<span class="mp-btn off">›</span>` : `<a class="mp-btn" href="${href(S.zoom, step(1))}" aria-label="ถัดไป">›</a>`}<b>${esc(title())}</b><span class="mp-zoom">${zoom}</span><button type="button" class="mp-btn mp-fs" id="mpFull" title="${isFull() ? "ออกจากเต็มจอ (Esc)" : "ขยายเต็มจอ"}">${isFull() ? "✕ ออกจากเต็มจอ" : "⛶ เต็มจอ"}</button></div>
       <div class="mp-filters">${units}
         <span class="mp-fl"><select id="mpCust" aria-label="1. ลูกค้า"><option value="">ลูกค้า: ทั้งหมด</option>${custs}</select><i>›</i><select id="mpProj" aria-label="2. ชื่องาน"><option value="">${S.cust ? "งานของ " + esc(S.cust) + ": ทั้งหมด" : "ชื่องาน: ทั้งหมด"}</option>${projs}</select></span>
@@ -318,7 +322,7 @@
   }
   function wireForms(el, ctx, close) {
     const msg = el.querySelector(".mp-msg");
-    const reload = () => { if (DATA) DATA.want = ""; return ensure().then(draw); };
+    const reload = () => { if (DATA) DATA.want = ""; DCACHE.clear(); return ensure().then(draw); };
     const who = () => [...el.querySelectorAll("[name=who]:checked")].map(i => i.value);
     const pn = el.querySelector(".mp-pn");
     el.querySelectorAll("[name=who]").forEach(i => i.addEventListener("change", () => { pn.textContent = who().length; }));
@@ -410,7 +414,8 @@
   }
 
   /* ---------- ข้อมูลหลัก / ประวัติการแก้ไข (SC / PC / SSM) ---------- */
-  const pageHead = () => `<div class="mp-head"><div class="mp-title"><h2>วางแผนกำลังคน</h2><nav class="mp-tabs"><a href="#manpower">Planning Board</a><a href="#manpower/data" class="${S.page === "data" ? "on" : ""}">ข้อมูลหลัก</a><a href="#manpower/log" class="${S.page === "log" ? "on" : ""}">ประวัติการแก้ไข</a></nav></div></div>`;
+  const tabs = can => `<nav class="mp-tabs"><a href="#manpower" class="${S.page === "dash" ? "on" : ""}">ภาพรวม</a><a href="#manpower/board" class="${S.page === "board" ? "on" : ""}">วางแผนกำลังคน</a>${can ? `<a href="#manpower/data" class="${S.page === "data" ? "on" : ""}">ข้อมูลหลัก</a><a href="#manpower/log" class="${S.page === "log" ? "on" : ""}">ประวัติการแก้ไข</a>` : ""}</nav>`;
+  const pageHead = (title, can) => `<div class="mp-head"><div class="mp-title"><h2>${title || "Manpower"}</h2>${tabs(can)}</div></div>`;
   const STATUS = [["active", "Active"], ["hold", "Hold"], ["postponed", "เลื่อน"], ["cancelled", "ยกเลิก"], ["done", "เสร็จแล้ว"]];
   async function dataPage(box) {
     let M;
@@ -438,7 +443,7 @@
         <table class="mp-mt"><thead><tr><th>ลูกค้า</th><th>ชื่องาน</th><th>Job no.</th><th>สถานะ</th><th>สี</th><th></th></tr></thead><tbody>${pRow(null)}${M.projects.map(pRow).join("")}</tbody></table>`
       : hBody}</div><div class="mp-msg mp-pmsg" role="status"></div>`;
     const msg = box.querySelector(".mp-pmsg");
-    const done = async (fn, okText) => { msg.textContent = "กำลังบันทึก…"; try { await fn(); msg.textContent = okText; if (DATA) DATA.want = ""; ensure(); dataPage(box).then(() => { box.querySelector(".mp-pmsg").textContent = okText; }); } catch (err) { msg.textContent = "บันทึกไม่สำเร็จ (" + err.message + ")"; } };
+    const done = async (fn, okText) => { msg.textContent = "กำลังบันทึก…"; try { await fn(); msg.textContent = okText; if (DATA) DATA.want = ""; DCACHE.clear(); ensure(); dataPage(box).then(() => { box.querySelector(".mp-pmsg").textContent = okText; }); } catch (err) { msg.textContent = "บันทึกไม่สำเร็จ (" + err.message + ")"; } };
     box.querySelectorAll("[data-t]").forEach(b => b.addEventListener("click", () => { S.dtab = b.dataset.t; dataPage(box); }));
     box.querySelectorAll("tr[data-id] .mp-rs").forEach(b => b.addEventListener("click", () => { const tr = b.closest("tr"), v = n => tr.querySelector(`[name=${n}]`);
       done(() => post("/api/manpower/master/worker", { id: tr.dataset.id, emp_code: v("emp_code").value.trim(), name_th: v("name_th").value, nickname: v("nickname").value, unit: v("unit").value, trade: v("trade").value, sort: v("sort").value, active: v("active").checked }), tr.dataset.id ? "บันทึกข้อมูลช่างแล้ว" : "เพิ่มช่างแล้ว"); }));
@@ -495,7 +500,7 @@
     const msg = el.querySelector(".mp-msg");
     const close = () => { el.remove(); document.removeEventListener("keydown", onKey); };
     const onKey = e => { if (e.key === "Escape") close(); };
-    const go = async (fn, ok) => { msg.textContent = "กำลังบันทึก…"; try { await fn(); msg.textContent = ok; if (DATA) DATA.want = ""; await ensure(); draw(); setTimeout(close, 500); } catch (err) { msg.textContent = "ไม่สำเร็จ (" + err.message + ")"; } };
+    const go = async (fn, ok) => { msg.textContent = "กำลังบันทึก…"; try { await fn(); msg.textContent = ok; if (DATA) DATA.want = ""; DCACHE.clear(); await ensure(); draw(); setTimeout(close, 500); } catch (err) { msg.textContent = "ไม่สำเร็จ (" + err.message + ")"; } };
     el.querySelectorAll(".mp-mrow").forEach(f => {
       f.addEventListener("submit", e => { e.preventDefault(); go(() => post("/api/manpower/milestone", { id: f.dataset.id, project_code: code, day: f.day.value, label: f.label.value }), "บันทึกแล้ว"); });
       f.querySelector(".mp-mdel").addEventListener("click", () => go(() => post("/api/manpower/milestone-delete", { id: f.dataset.id }), "ลบแล้ว"));
@@ -527,11 +532,106 @@
     window.addEventListener("hashchange", () => { if (ROOT && ROOT.classList.contains("mp-full") && !location.hash.startsWith("#manpower")) { ROOT.classList.remove("mp-full"); document.body.classList.remove("mp-noscroll"); } });
   }
 
+  /* ---------- ภาพรวม (dashboard): first page of the Manpower menu ---------- */
+  const PERIODS = [["month", "เดือนนี้"], ["next", "เดือนหน้า"], ["q3", "3 เดือนข้างหน้า"], ["y2026", "ทั้งปี 2026"], ["y2027", "ทั้งปี 2027"]];
+  function periodRange(p) {
+    const t = today(), m0 = new Date(t.getFullYear(), t.getMonth(), 1);
+    if (p === "next") return [new Date(t.getFullYear(), t.getMonth() + 1, 1), new Date(t.getFullYear(), t.getMonth() + 2, 0)];
+    if (p === "q3") return [t, addDays(new Date(t.getFullYear(), t.getMonth() + 3, t.getDate()), -1)];
+    if (p === "y2026") return [new Date(2026, 0, 1), new Date(2026, 11, 31)];
+    if (p === "y2027") return [new Date(2027, 0, 1), new Date(2027, 11, 31)];
+    return [m0, new Date(t.getFullYear(), t.getMonth() + 1, 0)];
+  }
+  const DCACHE = new Map();
+  function cached(from, to) {   // one request per range, reused for 60 s (and while it is still loading)
+    const k = from + "|" + to, hit = DCACHE.get(k);
+    if (hit && Date.now() - hit.at < 60000) return hit.p;
+    const p = fetchRange(from, to);
+    DCACHE.set(k, { at: Date.now(), p });
+    p.catch(() => DCACHE.delete(k));
+    return p;
+  }
+  // every planned man-day: an assignment, or a Service Plan job on an otherwise empty day
+  function mandays(d) {
+    const out = [];
+    d.assignments.forEach(a => out.push({ w: a.worker_id, day: a.day, code: a.project_code || "_" + a.kind, wt: a.work_type || "other", tent: a.tentative }));
+    d.SV.forEach((v, k) => { if (!d.A.has(k)) { const [w, day] = k.split("|"); out.push({ w, day, code: "SERVICE", wt: "service", tent: false, sp: true }); } });
+    return out;
+  }
+  const isLeave = x => x && ABS[x.type] && ABS[x.type][1] === "lv";
+  function bars(rows, total, link) {
+    if (!rows.length) return `<p class="mp-hint">ยังไม่มีข้อมูลในช่วงนี้</p>`;
+    const max = Math.max(...rows.map(r => r.n));
+    return `<div class="mp-bars">${rows.map(r => `<${link && r.code ? `a href="#manpower/month/${esc(link)}" data-go="${esc(r.code)}"` : "div"} class="mp-bar"><span class="mp-bl" title="${esc(r.label)}"><i style="background:${esc(r.color || "#6d7582")}"></i>${esc(r.label)}</span><span class="mp-bt"><b style="width:${Math.max(2, r.n / max * 100).toFixed(1)}%;background:${esc(r.color || "#6d7582")}"></b></span><span class="mp-bn">${r.n.toLocaleString()}<small>${total ? Math.round(r.n / total * 100) + "%" : ""}</small></span></${link && r.code ? "a" : "div"}>`).join("")}</div>`;
+  }
+  async function dashPage(box) {
+    const per = S.dper || "month", [pa, pb] = periodRange(per), t = today(), near = [t, addDays(t, 29)];
+    let D, N;
+    try { [D, N] = await Promise.all([cached(key(pa), key(pb)), cached(key(near[0]), key(near[1]))]); }
+    catch (err) { box.innerHTML = pageHead("Manpower") + `<div class="mp-empty">${esc(err.message)}</div>`; return; }
+    if (S.page !== "dash") return;
+    const can = D.canEdit, act = N.workers.filter(w => w.active), tk = key(t);
+    // today
+    const offToday = N.H.has(tk) || t.getDay() === 0;
+    const onLeave = act.filter(w => isLeave(N.X.get(w.id + "|" + tk))).length;
+    const working = act.filter(w => N.A.has(w.id + "|" + tk) || N.SV.has(w.id + "|" + tk)).length;
+    const free = offToday ? 0 : act.filter(w => !N.A.has(w.id + "|" + tk) && !N.X.has(w.id + "|" + tk) && !N.SV.has(w.id + "|" + tk)).length;
+    const avail = act.length - onLeave;
+    const util = avail ? Math.round(working / avail * 100) : 0;
+    const tentN = N.assignments.filter(a => a.tentative).length;
+    // period man-days
+    const md = mandays(D), total = md.length;
+    const by = (f) => { const m = new Map(); md.forEach(r => { const k = f(r); m.set(k, (m.get(k) || 0) + 1); }); return m; };
+    const pRows = [...by(r => r.code)].map(([code, n]) => { const p = D.P.get(code); return { code: p ? code : "", label: p ? p.name : (KIND[code.slice(1)] || KIND.other)[1], color: p ? p.color : (KIND[code.slice(1)] || KIND.other)[0], n }; }).sort((a, b) => b.n - a.n);
+    const cRows = [...by(r => { const p = D.P.get(r.code); return p && p.customer ? p.customer : "ไม่ระบุลูกค้า"; })].map(([label, n]) => ({ label, n, color: "#3d5a80" })).sort((a, b) => b.n - a.n);
+    const W = new Map(D.workers.map(w => [w.id, w]));
+    const UC = { ME: "#c2410c", PP: "#0e7490", EE: "#7c3aed", PC: "#a16207", SC: "#be185d" };
+    const uRows = UNITS.map(([u, l]) => ({ label: l, color: UC[u], n: md.filter(r => (W.get(r.w) || {}).unit === u).length })).filter(r => r.n);
+    const WC = { fab: "#c2410c", assembly: "#0e7490", install: "#15803d", service: "#1d4ed8", other: "#9aa1ab" };
+    const tRows = WT.map(([v, l]) => ({ label: l, color: WC[v], n: md.filter(r => r.wt === v).length })).filter(r => r.n);
+    // weekly trend (Monday-based)
+    const wk = new Map();
+    md.forEach(r => { const d = fromKey(r.day), m = addDays(d, -((d.getDay() + 6) % 7)), k = key(m); wk.set(k, (wk.get(k) || 0) + 1); });
+    const weeks = []; for (let m = addDays(pa, -((pa.getDay() + 6) % 7)); m <= pb; m = addDays(m, 7)) weeks.push([key(m), wk.get(key(m)) || 0]);
+    const wmax = Math.max(1, ...weeks.map(w => w[1]));
+    // capacity next 14 days: free people per unit
+    const d14 = []; for (let i = 0; i < 14; i++) d14.push(addDays(t, i));
+    // a day off for the company: Sunday, company holiday, or a day most people have H / PH (e.g. Saturdays off)
+    const dOff = d => { const k = key(d); if (N.H.has(k) || d.getDay() === 0) return true; const off = act.filter(w => { const x = N.X.get(w.id + "|" + k); return x && ["H", "PH", "EX", "สลับวันหยุด"].includes(x.type); }).length; return off >= act.length / 2; };
+    const offs = d14.map(dOff);
+    const cap = UNITS.map(([u, l]) => { const ws = act.filter(w => w.unit === u); return { u, l, n: ws.length, free: d14.map((d, i) => { const k = key(d); return offs[i] ? null : ws.filter(w => !N.A.has(w.id + "|" + k) && !N.X.has(w.id + "|" + k) && !N.SV.has(w.id + "|" + k)).length; }) }; }).filter(r => r.n);
+    const capTot = d14.map((d, i) => cap.every(r => r.free[i] === null) ? null : cap.reduce((s2, r) => s2 + (r.free[i] || 0), 0));
+    const heat = (v, n) => v === null ? `<td class="off">–</td>` : `<td style="background:${v === 0 ? "#fde3e3" : `rgba(21,128,61,${(0.12 + 0.6 * v / Math.max(1, n)).toFixed(2)})`}">${v}</td>`;
+    // milestones & tentative in the next 30 days
+    const ms = N.milestones.slice().sort((a, b) => a.day < b.day ? -1 : 1).slice(0, 12);
+    const tg = new Map();
+    N.assignments.filter(a => a.tentative).forEach(a => { if (!tg.has(a.text)) tg.set(a.text, { text: a.text, code: a.project_code, ppl: new Set(), lo: a.day, hi: a.day, n: 0 }); const g = tg.get(a.text); g.ppl.add(a.worker_id); g.n++; if (a.day < g.lo) g.lo = a.day; if (a.day > g.hi) g.hi = a.day; });
+    const tList = [...tg.values()].sort((a, b) => a.lo < b.lo ? -1 : 1).slice(0, 10);
+    const kpi = (lab, v, sub, cls) => `<div class="mp-kpi ${cls || ""}"><span>${lab}</span><b>${v}</b><small>${sub || ""}</small></div>`;
+    box.innerHTML = pageHead("Manpower", can) + `
+      <div class="mp-dash-top"><div><h3>ภาพรวมกำลังคน</h3><p class="mp-hint">${esc(DS[t.getDay()])}. ${t.getDate()} ${MF[t.getMonth()]} ${t.getFullYear()}${offToday ? " · วันนี้เป็นวันหยุด" : ""}</p></div>
+        <a class="mp-go" href="#manpower/board">วางแผนกำลังคน →</a></div>
+      <div class="mp-kpis">${kpi("ช่างทั้งหมด", act.length, "คนที่ทำงานอยู่")}${kpi("ทำงานวันนี้", working, "มีงานลงไว้ / Service Plan", "g")}${kpi("ลาวันนี้", onLeave, "ลาป่วย / พักร้อน / ลากิจ", "a")}${kpi("ว่างวันนี้", offToday ? "–" : free, "ยังไม่ได้ลงงาน", "r")}${kpi("Utilization วันนี้", util + "%", "ทำงาน ÷ คนที่ไม่ลา")}${kpi("งานจองรอ Confirm", tentN, "ช่องใน 30 วันข้างหน้า", "t")}</div>
+      <div class="mp-card"><div class="mp-ch"><h4>คนว่าง 14 วันข้างหน้า <small>จำนวนคนที่ยังไม่ได้ลงงานและไม่ได้ลา · กดวันที่เพื่อเปิดตาราง</small></h4></div>
+        <div class="mp-capw"><table class="mp-cap"><thead><tr><th></th>${d14.map(d => `<th><a href="#manpower/week/${key(d)}">${DS[d.getDay()]}<br>${d.getDate()}/${d.getMonth() + 1}</a></th>`).join("")}</tr></thead>
+        <tbody>${cap.map(r => `<tr><th>${esc(r.u)} <small>${r.n} คน</small></th>${r.free.map(v => heat(v, r.n)).join("")}</tr>`).join("")}<tr class="tot"><th>รวม</th>${capTot.map(v => heat(v, act.length)).join("")}</tr></tbody></table></div></div>
+      <div class="mp-card"><div class="mp-ch"><h4>Man-day summary</h4><div class="mp-per">${PERIODS.map(([k2, l]) => `<button type="button" data-per="${k2}" class="${per === k2 ? "on" : ""}">${l}</button>`).join("")}</div></div>
+        <p class="mp-hint">${esc(fmtD(key(pa)))} – ${esc(fmtD(key(pb)))} · รวม <b>${total.toLocaleString()}</b> man-day · คนละเฉลี่ย ${act.length ? (total / act.length).toFixed(1) : 0} วัน${md.filter(r => r.tent).length ? ` · ในนี้เป็นงานจอง ${md.filter(r => r.tent).length.toLocaleString()} วัน` : ""}</p>
+        <div class="mp-g2"><div><h5>แยกตามงาน <small>กดเพื่อเปิดตารางของงานนั้น</small></h5>${bars(pRows.slice(0, 12), total, key(pa))}</div><div><h5>แยกตามลูกค้า</h5>${bars(cRows.slice(0, 12), total)}</div></div>
+        <div class="mp-g3"><div><h5>แยกตามหน่วยงาน</h5>${bars(uRows, total)}</div><div><h5>แยกตามประเภทงาน</h5>${bars(tRows, total)}</div>
+          <div><h5>รายสัปดาห์</h5><div class="mp-wk">${weeks.map(([k2, n]) => `<div title="สัปดาห์ ${esc(fmtD(k2))} · ${n} man-day"><b style="height:${(n / wmax * 100).toFixed(1)}%"></b><span>${fromKey(k2).getDate()}/${fromKey(k2).getMonth() + 1}</span></div>`).join("")}</div></div></div></div>
+      <div class="mp-g2"><div class="mp-card"><h4>Milestone 30 วันข้างหน้า</h4>${ms.length ? `<ul class="mp-ul">${ms.map(m => { const p = N.P.get(m.project_code); return `<li><span class="d">${esc(fmtD(m.day))}</span><i style="background:${esc(p ? p.color : "#999")}"></i><b>${esc(m.label)}</b> <span>${esc(p ? p.name : m.project_code)}</span></li>`; }).join("")}</ul>` : `<p class="mp-hint">ยังไม่มี Milestone ใน 30 วันข้างหน้า</p>`}</div>
+        <div class="mp-card"><h4>งานจองรอ Confirm <small>30 วันข้างหน้า</small></h4>${tList.length ? `<ul class="mp-ul">${tList.map(g => `<li><span class="d">${esc(fmtD(g.lo))}${g.hi !== g.lo ? " – " + esc(fmtD(g.hi)) : ""}</span><b>${esc(g.text.replace(/^จอง\s*/, ""))}</b> <span>${g.ppl.size} คน · ${g.n} ช่อง</span> <a href="#manpower/month/${esc(g.lo)}">เปิด</a></li>`).join("")}</ul>` : `<p class="mp-hint">ไม่มีงานจองค้างอยู่</p>`}</div></div>`;
+    box.querySelectorAll("[data-per]").forEach(b => b.addEventListener("click", () => { S.dper = b.dataset.per; box.querySelectorAll("[data-per]").forEach(x => x.classList.toggle("on", x === b)); box.classList.add("mp-busy"); dashPage(box).finally(() => box.classList.remove("mp-busy")); }));
+    box.querySelectorAll("[data-go]").forEach(a => a.addEventListener("click", () => { S.project = a.dataset.go; S.cust = (D.P.get(a.dataset.go) || {}).customer || ""; S.zoom = "month"; }));
+  }
+
   function draw() {
     if (!ROOT) return;
+    if (S.page === "dash") { ROOT.classList.remove("mp-ed"); ROOT.innerHTML = `<div id="mpPage" class="mp-page"><div class="mp-empty">กำลังโหลด…</div></div>`; dashPage(ROOT.querySelector("#mpPage")); return; }
     if (!DATA) { ROOT.innerHTML = toolbar() + `<div class="mp-empty">${esc(ERR || "กำลังโหลด…")}</div>`; bind(); return; }
     ROOT.classList.toggle("mp-ed", !!DATA.canEdit);
-    if (S.page !== "board" && DATA.canEdit) { ROOT.innerHTML = pageHead() + `<div id="mpPage" class="mp-page"><div class="mp-empty">กำลังโหลด…</div></div>`; (S.page === "data" ? dataPage : logPage)(ROOT.querySelector("#mpPage")); return; }
+    if (S.page !== "board" && DATA.canEdit) { ROOT.innerHTML = pageHead("วางแผนกำลังคน", true) + `<div id="mpPage" class="mp-page"><div class="mp-empty">กำลังโหลด…</div></div>`; (S.page === "data" ? dataPage : logPage)(ROOT.querySelector("#mpPage")); return; }
     ROOT.innerHTML = toolbar() + legend() + grid()
       + `<p class="mp-note">ข้อมูลตั้งแต่ 1 ม.ค. 2026 นำเข้าจาก Google Sheet "ตารางงานและวันหยุดช่าง 2569" ครั้งเดียว · งาน SP มาจาก Service Plan (ใบขอคน สถานะ Confirm / Complete)${DATA.serviceUpdated ? " อัปเดต " + esc(new Date(DATA.serviceUpdated).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })) : ""} · กดช่องเพื่อดูรายละเอียด</p>`;
     bind();
@@ -565,8 +665,9 @@
     ROOT = el;
     const [z, k] = String(sub || "").split("/");
     if (ZOOMS.some(x => x[0] === z)) S.zoom = z;
-    S.page = z === "data" || z === "log" ? z : "board";
-    if (S.page === "board") S.date = clampDate(fromKey(k) || (sub ? S.date : today()));
+    S.page = z === "data" || z === "log" ? z : !sub ? "dash" : "board";
+    if (S.page === "board") S.date = clampDate(fromKey(k) || (z === "board" ? today() : S.date));
+    if (S.page === "dash") { draw(); return; }
     draw();
     ensure().then(draw);
   }
@@ -696,6 +797,29 @@ body.mp-noscroll{overflow:hidden}
 .mp-root:fullscreen .mp-note,.mp-root.mp-full .mp-note{display:none}
 .mp-root:fullscreen .mp-legend,.mp-root.mp-full .mp-legend{flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px}.mp-root:fullscreen .mp-lg,.mp-root.mp-full .mp-lg{white-space:nowrap;flex:none}
 .mp-root:fullscreen .mp-um,.mp-root.mp-full .mp-um{display:none}
+.mp-busy .mp-card:nth-of-type(3){opacity:.45;pointer-events:none;transition:opacity .2s}
+.mp-dash-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.mp-dash-top h3{margin:0;font-size:18px}.mp-dash-top .mp-hint{margin:2px 0 0}
+.mp-go{background:var(--rak);color:#fff;text-decoration:none;border-radius:10px;padding:10px 20px;font-weight:600;font-size:15px;box-shadow:0 6px 16px -8px rgba(199,4,4,.6)}.mp-go:hover{filter:brightness(1.08)}
+.mp-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.mp-kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:2px}.mp-kpi span{font-size:12.5px;color:var(--muted)}.mp-kpi b{font-size:26px;font-weight:700;line-height:1.15}.mp-kpi small{font-size:11px;color:#9aa1ab}
+.mp-kpi.g b{color:var(--green)}.mp-kpi.a b{color:var(--amber)}.mp-kpi.r b{color:var(--rak)}.mp-kpi.t b{color:#2f6fd6}
+.mp-card h4{margin:0 0 8px;font-size:14px}.mp-card h4 small,.mp-card h5 small{font-weight:400;color:var(--muted);font-size:11.5px;margin-left:6px}.mp-card h5{margin:8px 0 6px;font-size:12.5px;color:#424a57}
+.mp-ch{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}.mp-ch h4{margin:0}
+.mp-per{display:inline-flex;gap:4px;flex-wrap:wrap}.mp-per button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:3px 12px;font:inherit;font-size:12.5px;cursor:pointer}.mp-per button.on{background:var(--rak);border-color:var(--rak);color:#fff}
+.mp-g2{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px}.mp-g3{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin-top:6px}
+.mp-bars{display:grid;gap:5px}.mp-bar{display:grid;grid-template-columns:minmax(110px,42%) 1fr 64px;gap:8px;align-items:center;font-size:12.5px;color:var(--ink);text-decoration:none}
+a.mp-bar:hover .mp-bl{color:var(--rak)}
+.mp-bl{display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.mp-bl i{width:9px;height:9px;border-radius:2px;flex:none}
+.mp-bt{background:#f1f3f6;border-radius:4px;height:12px;overflow:hidden}.mp-bt b{display:block;height:100%;border-radius:4px}
+.mp-bn{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}.mp-bn small{font-weight:400;color:var(--muted);margin-left:4px;font-size:10.5px}
+.mp-wk{display:flex;align-items:flex-end;gap:3px;height:120px;padding-top:6px}.mp-wk div{flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;min-width:0}
+.mp-wk b{display:block;width:100%;background:#3d5a80;border-radius:3px 3px 0 0;min-height:1px}.mp-wk span{font-size:9px;color:var(--muted);margin-top:3px;white-space:nowrap}
+.mp-capw{overflow-x:auto}.mp-cap{border-collapse:separate;border-spacing:3px;font-size:12px;width:100%}.mp-cap th{font-weight:500;color:#4a515c;text-align:left;white-space:nowrap;padding:0 6px 0 0}.mp-cap th small{color:var(--muted);font-weight:400}
+.mp-cap thead th{text-align:center;font-size:11px;line-height:1.2;padding:0}.mp-cap thead a{color:#4a515c;text-decoration:none}.mp-cap thead a:hover{color:var(--rak)}
+.mp-cap td{text-align:center;border-radius:5px;height:26px;min-width:34px;font-weight:600;font-variant-numeric:tabular-nums}.mp-cap td.off{color:#c3c8d0;background:#f5f6f8;font-weight:400}
+.mp-cap tr.tot th,.mp-cap tr.tot td{font-weight:700}
+.mp-ul{list-style:none;margin:0;padding:0;display:grid;gap:6px;font-size:12.5px}.mp-ul li{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.mp-ul .d{color:var(--muted);min-width:88px;font-variant-numeric:tabular-nums}
+.mp-ul i{width:9px;height:9px;border-radius:2px}.mp-ul li>span:not(.d){color:var(--muted)}.mp-ul a{color:var(--rak);font-size:12px;margin-left:auto}
 @media (max-width:640px){.mp-legend{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.mp-lg{white-space:nowrap;flex:none}.mp-mon span{left:120px}.mp-name{min-width:112px;max-width:112px}.mp-name small{display:none}.mp-zoom{margin-left:0}.mp-scroll{max-height:none}}
 `;
 
