@@ -428,8 +428,60 @@ async function manpowerClear(cfg, req, prof) {
   return json({ ok: true, removed: gone.length });
 }
 
+// POST /api/manpower/leave {worker_id, from, to, type, note, skip_off, clear_work} — SC / PC / SSM record leave for anyone.
+// type ∈ ลาป่วย / พักร้อน / ลากิจ. skip_off leaves out Sundays, company holidays and the person's H / PH days.
+// clear_work removes planned work on those days (kept in mp_change_log). POST /api/manpower/leave-clear {worker_id, days}.
+const MP_LEAVE = ['ลาป่วย', 'พักร้อน', 'ลากิจ'];
+async function manpowerLeave(cfg, req, prof) {
+  if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
+  const d = await mpBody(req);
+  if (!d) return json({ error: 'json' }, 400);
+  const wid = mpStr(d.worker_id, 20), from = mpStr(d.from, 10), to = mpStr(d.to || d.from, 10), type = String(d.type || ''), note = mpStr(d.note, 200);
+  if (!/^[A-Za-z0-9_-]{1,20}$/.test(wid) || !ISO_DAY.test(from) || !ISO_DAY.test(to) || to < from || !MP_LEAVE.includes(type)) return json({ error: 'input' }, 400);
+  if ((Date.parse(to) - Date.parse(from)) / 864e5 > 92) return json({ error: 'range too long' }, 400);
+  const w = await call(cfg, `/rest/v1/mp_workers?select=id&id=eq.${encodeURIComponent(wid)}`, { method: 'GET', admin: true });
+  if (!w.ok || !w.data.length) return json({ error: 'worker' }, 404);
+  let days = [];
+  for (let t = Date.parse(from + 'T00:00:00Z'); t <= Date.parse(to + 'T00:00:00Z'); t += 864e5) days.push(new Date(t).toISOString().slice(0, 10));
+  if (d.skip_off !== false && days.length > 1) {
+    const span = `day=gte.${from}&day=lte.${to}`;
+    const [hol, abs] = await Promise.all([
+      restAll(cfg, `/rest/v1/mp_holidays?select=day&${span}`),
+      restAll(cfg, `/rest/v1/mp_absences?select=day,type&worker_id=eq.${encodeURIComponent(wid)}&${span}`),
+    ]);
+    const off = new Set([...(hol || []), ...(abs || []).filter((x) => ['H', 'PH', 'EX', 'สลับวันหยุด'].includes(x.type))].map((x) => x.day));
+    days = days.filter((x) => !off.has(x) && new Date(x + 'T00:00:00Z').getUTCDay() !== 0);
+  }
+  if (!days.length) return json({ error: 'no working day in range' }, 400);
+  const who = prof.username || prof.email, now = new Date().toISOString();
+  const rows = days.map((day) => ({ worker_id: wid, day, type, note: note || null, updated_by: who, updated_at: now }));
+  const res = await fetch(cfg.url + '/rest/v1/mp_absences?on_conflict=worker_id,day', { method: 'POST',
+    headers: { ...authHeaders(cfg.service), prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
+  if (!res.ok) return json({ error: 'supabase' }, 502);
+  let removed = [];
+  if (d.clear_work === true) {
+    const del = await fetch(cfg.url + `/rest/v1/mp_assignments?worker_id=eq.${encodeURIComponent(wid)}&day=in.(${days.join(',')})`, { method: 'DELETE', headers: { ...authHeaders(cfg.service), prefer: 'return=representation' } });
+    if (del.ok) removed = await del.json().catch(() => []);
+  }
+  await mpLog(cfg, who, 'leave', { worker_id: wid, days, type, note, removed_work: removed });
+  return json({ ok: true, saved: days.length, removed: removed.length });
+}
+async function manpowerLeaveClear(cfg, req, prof) {
+  if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
+  const d = await mpBody(req);
+  const wid = mpStr(d && d.worker_id, 20), days = (Array.isArray(d && d.days) ? d.days : []).filter((x) => ISO_DAY.test(String(x))).slice(0, 100);
+  if (!/^[A-Za-z0-9_-]{1,20}$/.test(wid) || !days.length) return json({ error: 'input' }, 400);
+  const types = ['ลาป่วย', 'ลาป่วยครึ่งวัน', 'พักร้อน', 'ลากิจ', 'ลาไม่รับค่าจ้าง', 'ลา'].map(encodeURIComponent).join(',');
+  const res = await fetch(cfg.url + `/rest/v1/mp_absences?worker_id=eq.${encodeURIComponent(wid)}&day=in.(${days.join(',')})&type=in.(${types})`, { method: 'DELETE', headers: { ...authHeaders(cfg.service), prefer: 'return=representation' } });
+  if (!res.ok) return json({ error: 'supabase' }, 502);
+  const gone = await res.json().catch(() => []);
+  if (gone.length) await mpLog(cfg, prof.username || prof.email, 'leave-clear', { worker_id: wid, days, removed: gone });
+  return json({ ok: true, removed: gone.length });
+}
+
 async function manpowerApi(cfg, req, url, prof) {
-  const writes = { '/api/manpower/confirm': manpowerConfirm, '/api/manpower/assign': manpowerAssign, '/api/manpower/clear': manpowerClear };
+  const writes = { '/api/manpower/confirm': manpowerConfirm, '/api/manpower/assign': manpowerAssign, '/api/manpower/clear': manpowerClear,
+    '/api/manpower/leave': manpowerLeave, '/api/manpower/leave-clear': manpowerLeaveClear };
   if (writes[url.pathname]) {
     if (req.method !== 'POST') return json({ error: 'method' }, 405);
     return writes[url.pathname](cfg, req, prof);
@@ -445,7 +497,7 @@ async function manpowerApi(cfg, req, url, prof) {
     restAll(cfg, '/rest/v1/mp_projects?select=code,name,customer,job_no,status,color,sort,note&order=sort.asc'),
     restAll(cfg, `/rest/v1/mp_milestones?select=project_code,day,label&${span}&order=day.asc`),
     restAll(cfg, `/rest/v1/mp_assignments?select=worker_id,day,project_code,kind,work_type,text,tentative,updated_by&${span}&order=day.asc,worker_id.asc`),
-    restAll(cfg, `/rest/v1/mp_absences?select=worker_id,day,type&${span}&order=day.asc,worker_id.asc`),
+    restAll(cfg, `/rest/v1/mp_absences?select=worker_id,day,type,note&${span}&order=day.asc,worker_id.asc`),
     restAll(cfg, `/rest/v1/mp_holidays?select=day,type,name&${span}&order=day.asc`),
   ]);
   if (!workers || !projects) return json({ error: 'no_table' }, 503);
