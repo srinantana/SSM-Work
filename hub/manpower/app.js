@@ -116,14 +116,15 @@
     const projs = DATA ? DATA.projects.filter(p => !S.cust || lc(p.customer) === lc(S.cust)).map(p => `<option value="${esc(p.code)}" ${S.project === p.code ? "selected" : ""}>${esc(p.name)}${p.job_no ? " · " + esc(p.job_no) : ""}${p.status !== "active" ? " (" + esc(p.status) + ")" : ""}</option>`).join("") : "";
     const ppl = DATA ? UNITS.map(([u, l]) => `<optgroup label="${esc(l)}">${DATA.workers.filter(w => w.unit === u && (w.active || S.left)).map(w => `<option value="${esc(w.id)}" ${S.person === w.id ? "selected" : ""}>${esc(w.nickname || w.name_th)} · ${esc(w.name_th)}</option>`).join("")}</optgroup>`).join("") : "";
     const can = DATA && DATA.canEdit;
+    const nf = [S.cust, S.project, S.person, S.q].filter(Boolean).length + (S.units.size < UNITS.length ? 1 : 0) + (S.left ? 1 : 0);
     return `<div class="mp-head">
       <div class="mp-title"><h2>วางแผนกำลังคน</h2>${tabs(DATA && DATA.canEdit)}<span class="mp-badge ${can ? "ed" : ""}">${can ? "SC / PC / SSM · ลงงาน / แก้ไข / Confirm ได้" : "ดูอย่างเดียว"}</span></div>
       <div class="mp-nav">${range()[0] <= MIN ? `<span class="mp-btn off">‹</span>` : `<a class="mp-btn" href="${href(S.zoom, step(-1))}" aria-label="ก่อนหน้า">‹</a>`}<a class="mp-btn" href="${href(S.zoom, today())}">วันนี้</a>${range()[1] >= MAX ? `<span class="mp-btn off">›</span>` : `<a class="mp-btn" href="${href(S.zoom, step(1))}" aria-label="ถัดไป">›</a>`}<b>${esc(title())}</b><span class="mp-zoom">${zoom}</span><button type="button" class="mp-btn mp-fs" id="mpFull" title="${isFull() ? "ออกจากเต็มจอ (Esc)" : "ขยายเต็มจอ"}">${isFull() ? "✕ ออกจากเต็มจอ" : "⛶ เต็มจอ"}</button></div>
       <div class="mp-filters">${units}
         <span class="mp-fl"><select id="mpCust" aria-label="1. ลูกค้า"><option value="">ลูกค้า: ทั้งหมด</option>${custs}</select><i>›</i><select id="mpProj" aria-label="2. ชื่องาน"><option value="">${S.cust ? "งานของ " + esc(S.cust) + ": ทั้งหมด" : "ชื่องาน: ทั้งหมด"}</option>${projs}</select></span>
         <select id="mpPerson" aria-label="ชื่อคน"><option value="">ชื่อคน: ทุกคน</option>${ppl}</select>
+        <button type="button" class="mp-clr${nf ? " on" : ""}" id="mpClr" ${nf ? "" : "disabled"} title="ล้างลูกค้า งาน ชื่อคน คำค้นหา และหน่วยงาน">✕ Clear filter${nf ? ` <b>${nf}</b>` : ""}</button>
         <input id="mpQ" type="search" placeholder="ค้นหาชื่อ / งาน" value="${esc(S.q)}" aria-label="ค้นหา">
-        ${S.cust || S.project || S.person || S.q ? `<button type="button" class="mp-clr" id="mpClr">ล้างตัวกรอง</button>` : ""}
         <label class="mp-chk"><input type="checkbox" id="mpLeft" ${S.left ? "checked" : ""}>แสดงคนที่ลาออก</label>
         <label class="mp-chk"><input type="checkbox" id="mpMiles" ${S.miles ? "checked" : ""}>Milestone</label></div>
     </div>`;
@@ -647,7 +648,7 @@
     const c = ROOT.querySelector("#mpCust"); if (c) c.addEventListener("change", () => { S.cust = c.value; S.project = ""; draw(); });
     const p = ROOT.querySelector("#mpProj"); if (p) p.addEventListener("change", () => { S.project = p.value; draw(); });
     const pp = ROOT.querySelector("#mpPerson"); if (pp) pp.addEventListener("change", () => { S.person = pp.value; draw(); });
-    const cl = ROOT.querySelector("#mpClr"); if (cl) cl.addEventListener("click", () => { S.cust = S.project = S.person = S.q = ""; draw(); });
+    const cl = ROOT.querySelector("#mpClr"); if (cl) cl.addEventListener("click", () => { S.cust = S.project = S.person = S.q = ""; S.units = new Set(UNITS.map(u => u[0])); S.left = false; draw(); });
     const q = ROOT.querySelector("#mpQ"); if (q) q.addEventListener("change", () => { S.q = q.value.trim(); draw(); });
     const l = ROOT.querySelector("#mpLeft"); if (l) l.addEventListener("change", () => { S.left = l.checked; draw(); });
     const m = ROOT.querySelector("#mpMiles"); if (m) m.addEventListener("change", () => { S.miles = m.checked; draw(); });
@@ -752,7 +753,9 @@ button.mp-lg:hover,.mp-lg.on{border-color:var(--rak);color:var(--rak)}.mp-lg b{f
 .mp-msg{padding:0 16px 12px;font-size:12.5px;color:var(--green)}.mp-msg:empty{display:none}
 .mp-dlg{max-height:calc(100vh - 32px);overflow:auto}
 .mp-fl{display:inline-flex;align-items:center;gap:4px}.mp-fl i{font-style:normal;color:var(--muted)}
-.mp-clr{border:0;background:none;color:var(--rak);font:inherit;font-size:13px;cursor:pointer;padding:0}
+.mp-clr{border:1px solid var(--line);background:#fff;color:#9aa1ab;font:inherit;font-size:13px;border-radius:8px;padding:4px 12px;cursor:default;white-space:nowrap}
+.mp-clr.on{border-color:var(--rak);color:var(--rak);cursor:pointer}.mp-clr.on:hover{background:var(--rak);color:#fff}
+.mp-clr b{display:inline-grid;place-items:center;min-width:18px;height:18px;border-radius:9px;background:var(--rak);color:#fff;font-size:11px;margin-left:4px;padding:0 4px}.mp-clr.on:hover b{background:#fff;color:var(--rak)}
 .mp-c.ed:hover{background:#fff6f6;box-shadow:inset 0 0 0 1px #f0b9b9;cursor:copy}
 .mp-fwrap{border-top:1px solid var(--line)}.mp-fwrap summary{cursor:pointer;padding:12px 16px;font-weight:600;font-size:13.5px;color:var(--rak)}
 .mp-form{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px;padding:0 16px 14px;font-size:12.5px;color:#4a515c}
