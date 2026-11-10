@@ -218,9 +218,12 @@ const MANPOWER_EDIT = {
     'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์', 'พิชญ์ยุทธ คงดิศ', 'ภัทรลดา ทองสอาด', 'นภัท ทองอำไพ'],
 };
 const thKey = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+// Milestones (top rows of the board): only ดิว (SSM) and กอล์ฟ (PC) may add / change / delete them (set by Dew, 10 Nov 2026)
+const MILESTONE_EDIT = { usernames: ['nantana.s', 'kitisak.s'], namesTh: ['นันทนา ศรีสกุลเตียว', 'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์'] };
 const canEditManpower = (prof) => MANPOWER_EDIT.usernames.includes(String(prof.username || '').toLowerCase())
   || MANPOWER_EDIT.namesTh.includes(thKey(prof.nameTh));
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const canEditMilestone = (prof) => MILESTONE_EDIT.usernames.includes(String(prof.username || '').toLowerCase()) || MILESTONE_EDIT.namesTh.includes(thKey(prof.nameTh));
 // PostgREST returns at most 1000 rows per request; page through with limit/offset.
 async function restAll(cfg, path, max = 40000) {
   const out = [];
@@ -578,6 +581,34 @@ async function manpowerLog(cfg, url, prof) {
   return json({ rows: r.data });
 }
 
+// POST /api/manpower/milestone {id?, project_code, day, label} · POST /api/manpower/milestone-delete {id}
+async function manpowerMilestone(cfg, req, prof, del) {
+  if (!canEditMilestone(prof)) return json({ error: 'forbidden' }, 403);
+  const d = await mpBody(req);
+  if (!d) return json({ error: 'json' }, 400);
+  const who = prof.username || prof.email, H = { ...authHeaders(cfg.service), prefer: 'return=representation' };
+  const id = Number(d.id) || 0;
+  if (del) {
+    if (!id) return json({ error: 'input' }, 400);
+    const res = await fetch(cfg.url + `/rest/v1/mp_milestones?id=eq.${id}`, { method: 'DELETE', headers: H });
+    if (!res.ok) return json({ error: 'supabase' }, 502);
+    const gone = await res.json().catch(() => []);
+    await mpLog(cfg, who, 'milestone-delete', { removed: gone });
+    return json({ ok: true, removed: gone.length });
+  }
+  const code = mpStr(d.project_code, 20), day = mpStr(d.day, 10), label = mpStr(d.label, 120);
+  if (!/^[A-Za-z0-9_-]{1,20}$/.test(code) || !ISO_DAY.test(day) || !label) return json({ error: 'input' }, 400);
+  const p = await call(cfg, `/rest/v1/mp_projects?select=code&code=eq.${encodeURIComponent(code)}`, { method: 'GET', admin: true });
+  if (!p.ok || !p.data.length) return json({ error: 'project' }, 404);
+  const row = { project_code: code, day, label };
+  const res = id
+    ? await fetch(cfg.url + `/rest/v1/mp_milestones?id=eq.${id}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) })
+    : await fetch(cfg.url + '/rest/v1/mp_milestones', { method: 'POST', headers: H, body: JSON.stringify(row) });
+  if (!res.ok) return json({ error: 'supabase' }, 502);
+  await mpLog(cfg, who, id ? 'milestone-edit' : 'milestone-add', { id: id || null, ...row });
+  return json({ ok: true });
+}
+
 async function manpowerApi(cfg, req, url, prof) {
   const writes = { '/api/manpower/confirm': manpowerConfirm, '/api/manpower/assign': manpowerAssign, '/api/manpower/clear': manpowerClear,
     '/api/manpower/leave': manpowerLeave, '/api/manpower/leave-clear': manpowerLeaveClear };
@@ -585,6 +616,8 @@ async function manpowerApi(cfg, req, url, prof) {
     if (req.method !== 'POST') return json({ error: 'method' }, 405);
     return writes[url.pathname](cfg, req, prof);
   }
+  if (url.pathname === '/api/manpower/milestone' || url.pathname === '/api/manpower/milestone-delete')
+    return req.method === 'POST' ? manpowerMilestone(cfg, req, prof, url.pathname.endsWith('-delete')) : json({ error: 'method' }, 405);
   const m = /^\/api\/manpower\/master\/(worker|project|holiday|holiday-delete)$/.exec(url.pathname);
   if (m) return req.method === 'POST' ? manpowerMaster(cfg, req, prof, m[1]) : json({ error: 'method' }, 405);
   if (url.pathname === '/api/manpower/master') return req.method === 'GET' ? manpowerMasterGet(cfg, prof) : json({ error: 'method' }, 405);
@@ -598,7 +631,7 @@ async function manpowerApi(cfg, req, url, prof) {
   const [workers, projects, milestones, assignments, absences, holidays] = await Promise.all([
     restAll(cfg, '/rest/v1/mp_workers?select=id,emp_code,name_th,nickname,unit,trade,active,sort&order=sort.asc'),
     restAll(cfg, '/rest/v1/mp_projects?select=code,name,customer,job_no,status,color,sort,note&order=sort.asc'),
-    restAll(cfg, `/rest/v1/mp_milestones?select=project_code,day,label&${span}&order=day.asc`),
+    restAll(cfg, `/rest/v1/mp_milestones?select=id,project_code,day,label&${span}&order=day.asc`),
     restAll(cfg, `/rest/v1/mp_assignments?select=worker_id,day,project_code,kind,work_type,text,tentative,updated_by&${span}&order=day.asc,worker_id.asc`),
     restAll(cfg, `/rest/v1/mp_absences?select=worker_id,day,type,note&${span}&order=day.asc,worker_id.asc`),
     restAll(cfg, `/rest/v1/mp_holidays?select=day,type,name&${span}&order=day.asc`),
@@ -612,7 +645,7 @@ async function manpowerApi(cfg, req, url, prof) {
   const sp = await call(cfg, SPL_TABLE + '?select=data,updated_at&id=eq.main', { method: 'GET', admin: true }).catch(() => null);
   const spRow = sp && sp.ok && Array.isArray(sp.data) ? sp.data[0] : null;
   const overlay = serviceOverlay(spRow && spRow.data, workers, from, to);
-  return json({ from, to, canEdit: canEditManpower(prof), workers, projects, milestones: milestones || [], assignments: rows || [], absences: absences || [], holidays: holidays || [], needsMigration,
+  return json({ from, to, canEdit: canEditManpower(prof), canMilestone: canEditMilestone(prof), workers, projects, milestones: milestones || [], assignments: rows || [], absences: absences || [], holidays: holidays || [], needsMigration,
     service: overlay.service, serviceUnmatched: overlay.serviceUnmatched, serviceUpdated: spRow ? (spRow.data && spRow.data.updated) || spRow.updated_at : null });
 }
 
