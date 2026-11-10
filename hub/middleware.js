@@ -119,12 +119,14 @@ const MENUS = [
   { id: 'spare-part', name: 'Spare Part' },
   { id: 'punch-list', name: 'Punch List' },
   { id: 'service-plan', name: 'Service Plan' },
+  { id: 'manpower', name: 'Manpower' },
 ];
 const MENU_IDS = MENUS.map((m) => m.id);
 function menuOfPath(path) {
   if (path.startsWith('/spare-part/') || path.startsWith('/api/spare-part/')) return 'spare-part';
   if (path.startsWith('/site-expense/')) return 'site-expense';
   if (path.startsWith('/service-plan/') || path.startsWith('/api/service-plan/')) return 'service-plan';
+  if (path.startsWith('/manpower/') || path.startsWith('/api/manpower/')) return 'manpower';
   const m = path.match(/^\/customers\/[^/]+\/[^/]+\/([^/]+)/);
   if (!m) return null; // not a tool page
   return MENU_IDS.find((id) => m[1].startsWith(id)) || '__admin';
