@@ -530,12 +530,12 @@ function adminPage(cfg, me) {
 <style>
 :root{--rak:#c70404;--rak-dark:#a00303;--blush:#fff0f0;--blush-2:#ffd9d9;--ink:#22252b;--muted:#6d7582;--line:#e6e8ed;--bg:#f5f6f8;--amber:#946719;--amber-soft:#fff4da;--green:#188764;--green-soft:#e9f7f0}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.6 "IBM Plex Sans Thai","Leelawadee UI",Tahoma,sans-serif}
-.bar{background:#121212;color:#fff}.bar .in{max-width:1180px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:16px}
+.bar{background:#121212;color:#fff;position:sticky;top:0;z-index:30}.bar .in{max-width:1180px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:16px}
 .bar img{height:26px}.bar .ws{font-size:10px;letter-spacing:2px;color:#b7b7b7;border-left:1px solid #3a3a3a;padding-left:16px}
 .bar a{margin-left:auto;color:#fff;text-decoration:none;background:#2a2a2a;border-radius:999px;padding:5px 14px;font-size:12.5px}.bar a:hover{background:var(--rak)}
 main{max-width:1180px;margin:0 auto;padding:26px 24px 60px;display:grid;gap:18px}
 h1{margin:0;font-size:24px;font-weight:600}.sub{color:var(--muted);margin:2px 0 0}
-.cards{display:flex;flex-wrap:wrap;gap:12px}.stat{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 16px;min-width:110px}.stat b{display:block;font-size:22px;font-weight:600}.stat span{font-size:11.5px;color:var(--muted)}
+.cards{display:flex;flex-wrap:wrap;gap:12px;position:sticky;top:50px;z-index:20;background:var(--bg);padding:10px 0;margin:-10px 0;box-shadow:0 10px 12px -12px rgba(18,18,18,.25)}.stat{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 16px;min-width:110px}.stat b{display:block;font-size:22px;font-weight:600}.stat span{font-size:11.5px;color:var(--muted)}
 .panel{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:10px}
 .panel h2{margin:0;font-size:15px;font-weight:600}.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
 .btn{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;font:inherit;font-size:12.5px;cursor:pointer;color:var(--ink)}.btn:hover{border-color:#f0b9b9;color:var(--rak)}
