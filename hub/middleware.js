@@ -232,7 +232,208 @@ async function restAll(cfg, path, max = 40000) {
   }
   return out;
 }
+// Confirmed Service Plan jobs (ใบขอคน, types IS/SO/IN/WR, status Confirm or Complete) are laid over the board at
+// read time — nothing is copied into mp_assignments, so the board always follows the sheet. People are read from
+// columns J–O (ME, PP, EE, PC/PG, SS, ENG) as Thai first names ("สวัย", "ธีร์ดนัย/กรุณา", "พี่สมนึก") and matched to
+// mp_workers by first name, then by nickname; names that match nobody or more than one person are listed, not guessed.
+const SP_TYPES = ['IS', 'SO', 'IN', 'WR'], SP_OK = ['confirm', 'complete'];
+function spDate(s) {
+  const m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})$/.exec(String(s || '').trim());
+  if (!m) return null;
+  let d = +m[1], mo = +m[2], y = +m[3];
+  if (y < 100) y += 2000;
+  if (y > 2400) y -= 543;
+  const t = Date.UTC(y, mo - 1, d), dt = new Date(t);
+  return dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d ? t : null;
+}
+const spIso = (t) => new Date(t).toISOString().slice(0, 10);
+// Thai cleanup: drop stray leading vowel/tone marks (a broken "พี่" → "ี่สมนึก"), collapse doubled marks (บุุญทัน).
+const spName = (s) => String(s || '').replace(/^[ัิ-ฺ็-๎]+/, '').replace(/([ัิ-ฺ็-๎])\1+/g, '$1')
+  .replace(/^(พี่|คุณ|น้อง|นางสาว|นาง|นาย)\s*/, '').replace(/[().]/g, '').trim();
+function spIndex(workers) {
+  const first = new Map(), nick = new Map();
+  const add = (m, k, w) => { if (!k) return; if (!m.has(k)) m.set(k, []); if (!m.get(k).includes(w)) m.get(k).push(w); };
+  for (const w of workers) {
+    const [fn, ...sn] = String(w.name_th || '').trim().split(/\s+/);
+    w._sur = spName(sn.join(''));
+    add(first, spName(fn), w);
+    String(w.nickname || '').split(/[\/,]/).forEach((n) => add(nick, spName(n), w));
+  }
+  // → { id } | { ambiguous: [workers] } | null
+  const find = (name) => {
+    const k = spName(name), hit = first.get(k) || nick.get(k);
+    if (!hit) return null;
+    return hit.length === 1 ? { id: hit[0].id } : { ambiguous: hit };
+  };
+  // "สัญญา สม" / "สัญญา_สม" / "สัญญาสม": first name shared by two people, followed by the start of the surname
+  const bySurname = (cands, sur) => { const m = sur ? cands.filter((w) => w._sur.startsWith(spName(sur))) : []; return m.length === 1 ? m[0].id : null; };
+  const glued = (tok) => {
+    for (const [k, cands] of first) if (cands.length > 1 && tok.length > k.length && tok.startsWith(k)) { const id = bySurname(cands, tok.slice(k.length)); if (id) return id; }
+    return null;
+  };
+  return { find, bySurname, glued };
+}
+function spPeople(text, ix) {
+  const ids = new Set(), miss = [];
+  const toks = String(text || '').split(/[\s\/,+&_]+/).map(spName).filter((t) => t.length >= 2 && !/^\d+(คน)?$/.test(t) && !/^[A-Za-z<=>-]+$/.test(t));
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i], hit = ix.find(t);
+    if (hit && hit.id) { ids.add(hit.id); continue; }
+    if (hit && hit.ambiguous) {
+      const id = ix.bySurname(hit.ambiguous, toks[i + 1]);
+      if (id) { ids.add(id); i++; } else miss.push(t + ' (ชื่อซ้ำ ระบุนามสกุลด้วย)');
+      continue;
+    }
+    const g = ix.glued(t);
+    if (g) ids.add(g); else miss.push(t);
+  }
+  return { ids, miss };
+}
+function serviceOverlay(snapshot, workers, from, to) {
+  const out = [], unmatched = [];
+  const rows = snapshot && Array.isArray(snapshot.rows) ? snapshot.rows : [];
+  const ix = spIndex(workers.map((w) => ({ ...w }))), lo = Date.parse(from + 'T00:00:00Z'), hi = Date.parse(to + 'T00:00:00Z');
+  for (const r of rows) {
+    const v = Array.isArray(r.v) ? r.v : [];
+    const type = String(v[4] || '').trim().toUpperCase(), status = String(v[8] || '').trim();
+    if (!SP_TYPES.includes(type) || !SP_OK.includes(status.toLowerCase())) continue;
+    let a = spDate(v[15]), b = spDate(v[16]);
+    if (!a && b) a = b;
+    if (!a) continue;
+    if (!b || b < a) b = a;
+    b = Math.min(b, a + 92 * 864e5);
+    if (b < lo || a > hi) continue;
+    const ids = new Set(), miss = [];
+    for (const col of [9, 10, 11, 12, 13, 14]) {
+      const p = spPeople(v[col], ix);
+      p.ids.forEach((x) => ids.add(x));
+      miss.push(...p.miss);
+    }
+    const job = { row: Number(r.n) || 0, job: String(v[3] || '').trim(), type, customer: String(v[5] || '').trim(),
+      desc: String(v[6] || '').trim().slice(0, 300), status: status[0].toUpperCase() + status.slice(1).toLowerCase() };
+    if (miss.length) unmatched.push({ ...job, names: [...new Set(miss)] });
+    for (let t = Math.max(a, lo); t <= Math.min(b, hi); t += 864e5) for (const id of ids) out.push({ worker_id: id, day: spIso(t), ...job });
+  }
+  return { service: out, serviceUnmatched: unmatched };
+}
+
+// POST /api/manpower/confirm {text, items:[{worker_id, days:[...]}]} — turns "จอง …" bookings into confirmed work
+// (tentative → false, leading "จอง" removed). SC / PC / SSM only; every confirm is written to mp_change_log.
+async function manpowerConfirm(cfg, req, prof) {
+  if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
+  const raw = await req.text().catch(() => '');
+  if (raw.length > 100000) return json({ error: 'too large' }, 413);
+  let d;
+  try { d = JSON.parse(raw); } catch { return json({ error: 'json' }, 400); }
+  const text = String(d && d.text || '');
+  const items = Array.isArray(d && d.items) ? d.items.slice(0, 80) : [];
+  if (!text || !items.length) return json({ error: 'items' }, 400);
+  const newText = text.replace(/^จอง\s*/, '').trim() || text;
+  const now = new Date().toISOString(), who = prof.username || prof.email;
+  let n = 0;
+  for (const it of items) {
+    const wid = String(it && it.worker_id || ''), days = (Array.isArray(it && it.days) ? it.days : []).filter((x) => ISO_DAY.test(String(x))).slice(0, 200);
+    if (!/^[A-Za-z0-9_-]{1,20}$/.test(wid) || !days.length) continue;
+    const q = `/rest/v1/mp_assignments?worker_id=eq.${encodeURIComponent(wid)}&day=in.(${days.join(',')})&tentative=is.true&text=eq.${encodeURIComponent(text)}`;
+    const res = await fetch(cfg.url + q, { method: 'PATCH', headers: { ...authHeaders(cfg.service), prefer: 'return=representation' },
+      body: JSON.stringify({ tentative: false, text: newText, updated_by: who, updated_at: now }) });
+    if (!res.ok) return json({ error: 'supabase' }, 502);
+    const done = await res.json().catch(() => []);
+    n += Array.isArray(done) ? done.length : 0;
+  }
+  if (n) await fetch(cfg.url + '/rest/v1/mp_change_log', { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'return=minimal' },
+    body: JSON.stringify({ by_user: who, action: 'confirm', detail: { text, newText, items, cells: n } }) }).catch(() => {});
+  return json({ ok: true, confirmed: n, text: newText });
+}
+
+// POST /api/manpower/assign — SC / PC / SSM add or change the work of one person for one day or a range of days:
+//   {worker_id, from, to, customer, job, job_no, work_type, note, tentative, skip_off}
+// customer + job pick an existing mp_projects row (same customer and name, case-insensitive) or create a new one.
+// skip_off leaves out Sundays, company holidays and the person's own days off / leave. One row per person per day.
+// POST /api/manpower/clear {worker_id, days:[...]} removes planned work (not leave).
+const MP_TYPES = ['fab', 'assembly', 'install', 'service', 'other'];
+const MP_COLORS = ['#c2410c', '#0e7490', '#7c3aed', '#be185d', '#15803d', '#a16207', '#1d4ed8', '#9f1239', '#047857', '#6d28d9'];
+const mpStr = (v, n = 200) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
+async function mpBody(req) {
+  const raw = await req.text().catch(() => '');
+  if (raw.length > 20000) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+async function mpLog(cfg, who, action, detail) {
+  await fetch(cfg.url + '/rest/v1/mp_change_log', { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'return=minimal' },
+    body: JSON.stringify({ by_user: who, action, detail }) }).catch(() => {});
+}
+async function manpowerAssign(cfg, req, prof) {
+  if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
+  const d = await mpBody(req);
+  if (!d) return json({ error: 'json' }, 400);
+  const wid = mpStr(d.worker_id, 20), from = mpStr(d.from, 10), to = mpStr(d.to || d.from, 10);
+  const customer = mpStr(d.customer, 120), job = mpStr(d.job, 160), jobNo = mpStr(d.job_no, 40), note = mpStr(d.note, 300);
+  const type = MP_TYPES.includes(d.work_type) ? d.work_type : 'other';
+  if (!/^[A-Za-z0-9_-]{1,20}$/.test(wid) || !ISO_DAY.test(from) || !ISO_DAY.test(to) || to < from) return json({ error: 'input' }, 400);
+  if ((Date.parse(to) - Date.parse(from)) / 864e5 > 92) return json({ error: 'range too long' }, 400);
+  if (!job && !note) return json({ error: 'job' }, 400);
+  const who = prof.username || prof.email, now = new Date().toISOString();
+  const w = await call(cfg, `/rest/v1/mp_workers?select=id&id=eq.${encodeURIComponent(wid)}`, { method: 'GET', admin: true });
+  if (!w.ok || !w.data.length) return json({ error: 'worker' }, 404);
+  // project: existing (customer + name) or new
+  let code = null;
+  if (job) {
+    const all = await restAll(cfg, '/rest/v1/mp_projects?select=code,name,customer,job_no,sort');
+    if (!all) return json({ error: 'no_table' }, 503);
+    const low = (x) => String(x || '').toLowerCase();
+    const hit = all.find((p) => low(p.name) === low(job) && low(p.customer) === low(customer))
+      || (!customer ? all.find((p) => low(p.name) === low(job)) : null);
+    if (hit) {
+      code = hit.code;
+      if (jobNo && hit.job_no !== jobNo) await fetch(cfg.url + `/rest/v1/mp_projects?code=eq.${encodeURIComponent(code)}`, { method: 'PATCH', headers: { ...authHeaders(cfg.service), prefer: 'return=minimal' }, body: JSON.stringify({ job_no: jobNo, updated_at: now }) });
+    } else {
+      code = 'P' + Date.now().toString(36).toUpperCase();
+      const sort = all.reduce((m, p) => Math.max(m, p.sort || 0), 0) + 10;
+      const res = await fetch(cfg.url + '/rest/v1/mp_projects', { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'return=minimal' },
+        body: JSON.stringify({ code, name: job, customer: customer || null, job_no: jobNo || null, status: 'active', color: MP_COLORS[all.length % MP_COLORS.length], sort }) });
+      if (!res.ok) return json({ error: 'supabase' }, 502);
+    }
+  }
+  // days, optionally without days off
+  let days = [];
+  for (let t = Date.parse(from + 'T00:00:00Z'); t <= Date.parse(to + 'T00:00:00Z'); t += 864e5) days.push(new Date(t).toISOString().slice(0, 10));
+  if (d.skip_off !== false && days.length > 1) {
+    const span = `day=gte.${from}&day=lte.${to}`;
+    const [hol, abs] = await Promise.all([
+      restAll(cfg, `/rest/v1/mp_holidays?select=day&${span}`),
+      restAll(cfg, `/rest/v1/mp_absences?select=day&worker_id=eq.${encodeURIComponent(wid)}&${span}`),
+    ]);
+    const off = new Set([...(hol || []), ...(abs || [])].map((x) => x.day));
+    days = days.filter((x) => !off.has(x) && new Date(x + 'T00:00:00Z').getUTCDay() !== 0);
+  }
+  if (!days.length) return json({ error: 'no working day in range' }, 400);
+  const text = note || job;
+  const rows = days.map((day) => ({ worker_id: wid, day, project_code: code, kind: code ? 'work' : 'other', work_type: type, text, tentative: d.tentative === true, source: 'app', updated_by: who, updated_at: now }));
+  const res = await fetch(cfg.url + '/rest/v1/mp_assignments?on_conflict=worker_id,day', { method: 'POST',
+    headers: { ...authHeaders(cfg.service), prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
+  if (!res.ok) return json({ error: res.status === 400 ? 'run database/manpower-002.sql' : 'supabase' }, 502);
+  await mpLog(cfg, who, 'assign', { worker_id: wid, days, project_code: code, customer, job, job_no: jobNo, work_type: type, text, tentative: d.tentative === true });
+  return json({ ok: true, saved: days.length, project_code: code });
+}
+async function manpowerClear(cfg, req, prof) {
+  if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
+  const d = await mpBody(req);
+  const wid = mpStr(d && d.worker_id, 20), days = (Array.isArray(d && d.days) ? d.days : []).filter((x) => ISO_DAY.test(String(x))).slice(0, 100);
+  if (!/^[A-Za-z0-9_-]{1,20}$/.test(wid) || !days.length) return json({ error: 'input' }, 400);
+  const res = await fetch(cfg.url + `/rest/v1/mp_assignments?worker_id=eq.${encodeURIComponent(wid)}&day=in.(${days.join(',')})`, { method: 'DELETE', headers: { ...authHeaders(cfg.service), prefer: 'return=representation' } });
+  if (!res.ok) return json({ error: 'supabase' }, 502);
+  const gone = await res.json().catch(() => []);
+  if (gone.length) await mpLog(cfg, prof.username || prof.email, 'clear', { worker_id: wid, days, removed: gone });
+  return json({ ok: true, removed: gone.length });
+}
+
 async function manpowerApi(cfg, req, url, prof) {
+  const writes = { '/api/manpower/confirm': manpowerConfirm, '/api/manpower/assign': manpowerAssign, '/api/manpower/clear': manpowerClear };
+  if (writes[url.pathname]) {
+    if (req.method !== 'POST') return json({ error: 'method' }, 405);
+    return writes[url.pathname](cfg, req, prof);
+  }
   if (url.pathname !== '/api/manpower/board') return json({ error: 'not found' }, 404);
   if (req.method !== 'GET') return json({ error: 'method' }, 405);
   const from = url.searchParams.get('from') || '', to = url.searchParams.get('to') || '';
@@ -243,12 +444,21 @@ async function manpowerApi(cfg, req, url, prof) {
     restAll(cfg, '/rest/v1/mp_workers?select=id,emp_code,name_th,nickname,unit,trade,active,sort&order=sort.asc'),
     restAll(cfg, '/rest/v1/mp_projects?select=code,name,customer,job_no,status,color,sort,note&order=sort.asc'),
     restAll(cfg, `/rest/v1/mp_milestones?select=project_code,day,label&${span}&order=day.asc`),
-    restAll(cfg, `/rest/v1/mp_assignments?select=worker_id,day,project_code,kind,text,tentative&${span}&order=day.asc,worker_id.asc`),
+    restAll(cfg, `/rest/v1/mp_assignments?select=worker_id,day,project_code,kind,work_type,text,tentative,updated_by&${span}&order=day.asc,worker_id.asc`),
     restAll(cfg, `/rest/v1/mp_absences?select=worker_id,day,type&${span}&order=day.asc,worker_id.asc`),
     restAll(cfg, `/rest/v1/mp_holidays?select=day,type,name&${span}&order=day.asc`),
   ]);
   if (!workers || !projects) return json({ error: 'no_table' }, 503);
-  return json({ from, to, canEdit: canEditManpower(prof), workers, projects, milestones: milestones || [], assignments: assignments || [], absences: absences || [], holidays: holidays || [] });
+  let rows = assignments, needsMigration = false;
+  if (!rows) {   // database/manpower-002.sql not run yet: read without work_type
+    needsMigration = true;
+    rows = await restAll(cfg, `/rest/v1/mp_assignments?select=worker_id,day,project_code,kind,text,tentative&${span}&order=day.asc,worker_id.asc`);
+  }
+  const sp = await call(cfg, SPL_TABLE + '?select=data,updated_at&id=eq.main', { method: 'GET', admin: true }).catch(() => null);
+  const spRow = sp && sp.ok && Array.isArray(sp.data) ? sp.data[0] : null;
+  const overlay = serviceOverlay(spRow && spRow.data, workers, from, to);
+  return json({ from, to, canEdit: canEditManpower(prof), workers, projects, milestones: milestones || [], assignments: rows || [], absences: absences || [], holidays: holidays || [], needsMigration,
+    service: overlay.service, serviceUnmatched: overlay.serviceUnmatched, serviceUpdated: spRow ? (spRow.data && spRow.data.updated) || spRow.updated_at : null });
 }
 
 // Site Expense permissions are fixed by username (set by Dew, 9 Nov 2026), not by the admin checkboxes.
