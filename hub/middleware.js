@@ -131,6 +131,30 @@ function menuOfPath(path) {
   if (!m) return null; // not a tool page
   return MENU_IDS.find((id) => m[1].startsWith(id)) || '__admin';
 }
+// RAK_Master_Customer_List (Supabase, kept by Dew) feeds every customer field in the hub (Site Expense, Spare Part,
+// Service Plan ขอคน, Manpower). Customer_name_short is the value stored everywhere; a full-name and code column, when the
+// table has them, are only shown as hints. Cached for 5 minutes per server instance.
+let CUST_CACHE = null;
+async function customersApi(cfg) {
+  if (CUST_CACHE && Date.now() - CUST_CACHE.at < 5 * 60 * 1000) return json(CUST_CACHE.body);
+  const rows = await restAll(cfg, '/rest/v1/RAK_Master_Customer_List?select=*');
+  if (!rows) return json({ error: 'no_table', customers: [] }, 503);
+  const keys = rows.length ? Object.keys(rows[0]) : [];
+  const kShort = keys.find((k) => k.toLowerCase() === 'customer_name_short') || keys.find((k) => /short/i.test(k));
+  const kFull = keys.find((k) => /name/i.test(k) && k !== kShort && !/short/i.test(k));
+  const kCode = keys.find((k) => /code/i.test(k)) || keys.find((k) => /cust.*no/i.test(k));
+  const kActive = keys.find((k) => /^(active|is_active|status)$/i.test(k));
+  const byKey = new Map();
+  for (const r of rows) {
+    const short = String((kShort && r[kShort]) || '').trim();
+    if (!short) continue;
+    if (kActive && (r[kActive] === false || /^(inactive|false|no|0)$/i.test(String(r[kActive])))) continue;
+    if (!byKey.has(short.toLowerCase())) byKey.set(short.toLowerCase(), { short, full: String((kFull && r[kFull]) || '').trim(), code: String((kCode && r[kCode]) ?? '').trim() });
+  }
+  const body = { customers: [...byKey.values()].sort((a, b) => a.short.localeCompare(b.short, 'en', { sensitivity: 'base' })) };
+  CUST_CACHE = { at: Date.now(), body };
+  return json(body);
+}
 // Spare Part projects live in Supabase table public.spare_part_projects (database/spare_part_projects.sql).
 // The table has RLS on and no policies, so only this middleware (service key) can read or write it.
 const SP_TABLE = '/rest/v1/spare_part_projects';
@@ -1609,6 +1633,13 @@ export default async function middleware(req) {
       try { return await adminApi(cfg, req, path); } catch { return json({ error: 'supabase' }, 502); }
     }
     return adminPage(cfg, live);
+  }
+
+  if (path === '/api/customers') { // master customer list for every menu's customer field
+    if (!signedIn) return json({ error: 'login required' }, 401);
+    const live = await liveProfile(cfg, user);
+    if (!live) return json({ error: 'login required' }, 401);
+    try { return await customersApi(cfg); } catch { return json({ error: 'supabase', customers: [] }, 502); }
   }
 
   if (path.startsWith('/api/spare-part/')) {

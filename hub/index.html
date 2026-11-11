@@ -379,6 +379,46 @@ function render(){
   if (q) q.addEventListener("input", () => { document.getElementById("list").innerHTML = customerBlocks(rows(), q.value.trim().toLowerCase()); });
   setMenu(false);
 }
+/* Master customer list (Supabase RAK_Master_Customer_List via /api/customers). Every customer input in every menu gets one
+   shared, searchable list of Customer_name_short (full name shown as the hint). Inputs are found by selector, so a menu
+   only needs its customer field to match CUST_SEL (or carry data-customer). Values a menu already had are kept in the list. */
+window.SSMCustomers = (() => {
+  const CUST_SEL = 'input[name="customer"], input#fCus, input#dCus, input[data-q="customer"], input[data-h="customerShort"], input[data-customer]';
+  let LIST = [], P = null;
+  const extra = new Set();
+  const load = () => P || (P = fetch("/api/customers", { cache: "no-store" }).then(r => r.ok ? r.json() : { customers: [] })
+    .then(d => (LIST = Array.isArray(d.customers) ? d.customers : [])).catch(() => (LIST = [])));
+  function datalist() {
+    let dl = document.getElementById("ssmCustAll");
+    if (!dl) { dl = document.createElement("datalist"); dl.id = "ssmCustAll"; document.body.appendChild(dl); }
+    const known = new Set(LIST.map(c => c.short.toLowerCase()));
+    dl.innerHTML = LIST.map(c => `<option value="${esc(c.short)}" label="${esc([c.full && c.full !== c.short ? c.full : "", c.code].filter(Boolean).join(" · "))}">`).join("")
+      + [...extra].filter(v => !known.has(v.toLowerCase())).map(v => `<option value="${esc(v)}">`).join("");
+    return dl;
+  }
+  function attach(inp) {
+    if (inp.dataset.custBound) return;
+    inp.dataset.custBound = "1";
+    if (inp.list) [...inp.list.options].forEach(o => o.value && extra.add(o.value));
+    load().then(() => {
+      if (!LIST.length && !extra.size) return;
+      datalist();
+      inp.setAttribute("list", "ssmCustAll");
+      inp.setAttribute("autocomplete", "off");
+      if (!inp.placeholder || /^เช่น/.test(inp.placeholder)) inp.placeholder = "พิมพ์เพื่อค้นหาลูกค้า (ชื่อย่อ)";
+      inp.title = "เลือกจาก RAK_Master_Customer_List — พิมพ์บางส่วนของชื่อเพื่อค้นหา";
+    });
+    // Spare Part: choosing a short name fills the full customer name next to it when that box is empty
+    if (inp.dataset.h === "customerShort") inp.addEventListener("change", () => {
+      const c = LIST.find(x => x.short.toLowerCase() === inp.value.trim().toLowerCase());
+      const full = inp.closest("form, .sp-form, div") && inp.closest(".sp-form, form, div").querySelector('input[data-h="customer"]');
+      if (c && c.full && full && !full.value.trim()) { full.value = c.full; full.dispatchEvent(new Event("input", { bubbles: true })); }
+    });
+  }
+  const scan = () => document.querySelectorAll(CUST_SEL).forEach(attach);
+  new MutationObserver(scan).observe(document.body, { childList: true, subtree: true });
+  return { load, attach, scan, list: () => LIST };
+})();
 function setMini(mini){
   document.getElementById("shell").classList.toggle("mini", mini);
   const b = document.getElementById("sideToggle"); b.setAttribute("aria-label", mini ? "ขยายเมนู" : "ย่อเมนู"); b.setAttribute("aria-expanded", String(!mini));
