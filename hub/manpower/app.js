@@ -88,7 +88,7 @@
   const norm = s => String(s ?? "").toLowerCase().replace(/\s+/g, "");
   // Cells are coloured by work type (Dew, 11 Nov 2026); project colours stay on milestone rows only
   const WCOL = { fab: "#e8590c", assembly: "#1c7ed6", install: "#2f9e44", service: "#7048e8", other: "#868e96" };
-  const WSHORT = { fab: "Fab", assembly: "Assy", install: "Install", service: "Service", other: "" };
+  const WSHORT = { fab: "Fab", assembly: "Assy", install: "Install", service: "SO", other: "" };
   const typeOf = a => a.work_type && WCOL[a.work_type] ? a.work_type : (a.project_code === "SERVICE" ? "service" : "other");
   // old job = a project from the sheet not yet linked to RAK_Master_Project_on_hand by Job no. → light grey; new jobs → work-type colour
   const OLD_COL = "#c3c8ce";
@@ -104,7 +104,7 @@
     if (m && (m.customer || m.job_name)) return [t, m.customer, m.job_name].filter(Boolean).join(" | ");
     const cust = p && p.customer && p.code !== "SERVICE" ? p.customer : "";
     let tail = cust ? shortOf(p) : a.text.replace(/^จอง\s*/, "");
-    if (t === "Service" && !cust) tail = tail.replace(/^(SO|WR|IS)\s+/i, "");
+    if (t === "SO" && !cust) tail = tail.replace(/^(SO|WR|IS)\s+/i, "");
     return [t, cust, tail].filter(Boolean).join(" | ");
   }
   const projName = a => a.project_code && DATA.P.get(a.project_code) ? DATA.P.get(a.project_code).name : (KIND[a.kind] || KIND.other)[1];
@@ -231,7 +231,7 @@
       return `<td class="${base} job${a.tentative ? " tent" : ""}" style="--c:${esc(c)}" data-k="${esc(id)}" title="${esc((a.tentative ? "จอง · " : "") + txt + (txt.includes(a.text) ? "" : " — " + a.text))}"><span>${esc(txt)}</span>${flag}</td>`;
     }
     if (sv && !a && !(x && ABS[x.type] && ABS[x.type][1] === "lv") && matchSv(sv)) {
-      const txt = sv.map(j => ["Service", j.customer, j.job].filter(Boolean).join(" | ")).join(" / ");
+      const txt = sv.map(j => ["SO", j.customer, j.job].filter(Boolean).join(" | ")).join(" / ");
       return `<td class="${base} job sv" style="--c:${WCOL.service}" data-k="${esc(id)}" title="${esc(sv.map(spText).join(", "))}"><span>${esc(txt)}</span>${flag}</td>`;
     }
     if (x && sv) { const t = ABS[x.type] || [x.type, "lv", x.type]; return `<td class="${base} ab ${t[1]}" data-k="${esc(id)}" title="${esc(t[2])}"><span>${esc(t[0])}</span>${flag}</td>`; }
