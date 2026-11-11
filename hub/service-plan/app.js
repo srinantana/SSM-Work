@@ -60,7 +60,7 @@
       if (start && (!end || end < start)) end = start;
       if (start && (end - start) / 864e5 > MAX_SPAN) end = addDays(start, MAX_SPAN);
       const j = { id: "r" + r.n, n: r.n, job: clean(v[3]), type, customer: clean(v[5]), desc: String(v[6] ?? "").trim(), car: clean(v[7]),
-        status, ss: people(v[13]), start, end, rawStart: clean(v[15]), rawEnd: clean(v[16]) };
+        status, ss: people(v[13]), people: rowPeople(v), start, end, rawStart: clean(v[15]), rawEnd: clean(v[16]) };
       j.subject = [j.status, j.type, j.customer, j.job].filter(Boolean).join(" | ") + (j.ss ? " — " + j.ss : "");
       (start ? dated : undated).push(j);
     });
@@ -80,6 +80,7 @@
       if (!map[cls]) return null;
       const ss = ld ? (ld.nick || ld.name.split(" ")[0]) : "";
       return { id: "q" + r.id, rid: r.id, app: true, n: 1e6 + r.id, job: r.job_no || r.job_name, type: r.type, customer: r.customer, desc: [r.job_name, r.description].filter(Boolean).join("\n"), car: r.vehicle || "",
+        people: r.people.filter(p => p.status === "pending" || p.status === "confirmed").map(p => ({ name: p.nick || p.name.split(" ")[0], role: p.is_leader ? "SS" : p.unit })),
         status: map[cls], ss, start: fromKey(r.date_from), end: fromKey(r.date_to), rawStart: r.date_from ? "" : window.SPRequest.when(r), rawEnd: "",
         subject: [label, r.type, r.customer, r.job_no || r.job_name].filter(Boolean).join(" | ") + (ss ? " — " + ss : "") + (r.people.length ? " · " + r.people.length + " คน" : "") };
     }).filter(Boolean);
@@ -157,7 +158,7 @@
         ? `<span class="spc-src snap">● ข้อมูลสำรอง</span> ณ ${esc(META.updated ? META.updated.toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) : "–")}${META.why ? " · " + esc(META.why) : ""}`
         : `<span class="spc-src snap">● โหลดข้อมูลไม่สำเร็จ</span>`;
     const nq = window.SPRequest ? window.SPRequest.pending() : 0;
-    return `<div class="spc-bar spc-rq"><b>ขอคน <small>ทดลองใช้</small></b><button type="button" class="spc-btn pri" id="spcNew">+ ขอคน</button><a class="spc-btn" href="#service-plan/req">คำขอคน / Confirm${nq ? ` <i>${nq}</i>` : ""}</a><span>กรอกคำขอ เลือกคนจากแผน Manpower แล้วรอ Confirm (กอล์ฟ · โจ้ สำหรับช่างไฟฟ้า)</span></div>
+    return `<div class="spc-bar spc-rq"><a class="spc-btn" href="#service-plan/dash">📊 Dashboard</a><b>ขอคน <small>ทดลองใช้</small></b><button type="button" class="spc-btn pri" id="spcNew">+ ขอคน</button><a class="spc-btn" href="#service-plan/req">คำขอคน / Confirm${nq ? ` <i>${nq}</i>` : ""}</a><span>กรอกคำขอ เลือกคนจากแผน Manpower แล้วรอ Confirm (กอล์ฟ · โจ้ สำหรับช่างไฟฟ้า)</span></div>
     <div class="spc-bar">
       <div class="spc-nav"><a class="spc-btn" href="${href(S.view, step(-1))}" aria-label="ก่อนหน้า">‹</a><a class="spc-btn" href="${href(S.view, today())}">วันนี้</a><a class="spc-btn" href="${href(S.view, step(1))}" aria-label="ถัดไป">›</a><h2>${esc(title())}</h2></div>
       <div class="spc-views" role="tablist">${VIEWS.map(([v, t]) => `<a role="tab" aria-selected="${v === S.view}" href="${href(v, S.date)}">${t}</a>`).join("")}</div>
@@ -258,6 +259,80 @@
     el.querySelector(".spc-x").focus();
   }
 
+
+  /* ---------- dashboard: ปริมาณงาน + การใช้คน (#service-plan/dash/<month|year>/<yyyy-mm-dd>) ----------
+     Built from the same jobs as the calendar (ใบขอคน IS/SO/IN/WR + requests made in the app; งานรอนัดวัน counted apart).
+     Job-day = one job on one day. Man-day = one person on one job for one day (people from columns J–O of ใบขอคน:
+     ME, PP, EE, PC/PG, SS, ENG, and the people of app requests that are รอ PC / Confirm).
+     % ใช้งาน = a person's man-days ÷ working days (Mon–Sat) of the period — Service jobs only; plant work is in Manpower. */
+  const ROLES = ["ME", "PP", "EE", "PC/PG", "SS", "ENG"];
+  const pName = s => String(s || "").replace(/^(พี่|คุณ|น้อง|ช่าง)\s*/, "").replace(/\(.*?\)/g, "").trim();
+  function rowPeople(v) {
+    const out = [], seen = new Set();
+    ROLES.forEach((role, i) => String(v[9 + i] ?? "").split(/[\n,\/+&]| และ /).forEach(x => {
+      const n = pName(x);
+      if (n.length < 2 || n.length > 24 || /\d|^[-–.]+$|^(tbc|n\/a)$/i.test(n) || seen.has(n)) return;
+      seen.add(n); out.push({ name: n, role });
+    }));
+    return out;
+  }
+  function dashData() {
+    const mode = S.dmode, d0 = S.ddate;
+    const from = mode === "year" ? new Date(d0.getFullYear(), 0, 1) : new Date(d0.getFullYear(), d0.getMonth(), 1);
+    const to = mode === "year" ? new Date(d0.getFullYear(), 11, 31) : new Date(d0.getFullYear(), d0.getMonth() + 1, 0);
+    let work = 0; for (let d = from; d <= to; d = addDays(d, 1)) if (d.getDay() !== 0) work++;
+    const jobs = JOBS.filter(j => j.end >= from && j.start <= to);
+    const span = j => Math.round(((j.end > to ? to : j.end) - (j.start < from ? from : j.start)) / 864e5) + 1;
+    const add = (m, k, n, extra) => { const o = m.get(k) || { k, jobs: 0, days: 0, md: 0, ...extra }; o.jobs += 1; o.days += n.days; o.md += n.md; m.set(k, o); return o; };
+    const T = new Map(), ST = new Map(), C = new Map(), P = new Map(), V = new Map();
+    let days = 0, md = 0, noPpl = 0;
+    jobs.forEach(j => {
+      const n = { days: span(j), md: span(j) * (j.people || []).length };
+      days += n.days; md += n.md; if (!(j.people || []).length) noPpl++;
+      add(T, j.type, n); add(ST, j.status, n); add(C, j.customer || "(ไม่ระบุลูกค้า)", n);
+      (j.people || []).forEach(p => { const o = add(P, p.name, { days: n.days, md: n.days }, { roles: new Set() }); o.roles.add(p.role); });
+      String(j.car || "").split(/[\n,\/+]| และ /).map(x => x.replace(/\s+/g, " ").trim()).filter(x => x.length >= 3 && x.length <= 20 && /\d/.test(x)).forEach(c => add(V, c, n));
+    });
+    // 12 months of the year: jobs that start in the month, job-days and man-days that fall in it
+    const y = d0.getFullYear(), M = Array.from({ length: 12 }, (_, m) => ({ m, jobs: 0, days: 0, md: 0, t: {} }));
+    JOBS.forEach(j => {
+      if (j.end.getFullYear() < y || j.start.getFullYear() > y) return;
+      if (j.start.getFullYear() === y) { const o = M[j.start.getMonth()]; o.jobs++; o.t[j.type] = (o.t[j.type] || 0) + 1; }
+      for (let d = j.start; d <= j.end; d = addDays(d, 1)) if (d.getFullYear() === y) { M[d.getMonth()].days++; M[d.getMonth()].md += (j.people || []).length; }
+    });
+    const desc = (m, f) => [...m.values()].sort((a, b) => b[f] - a[f] || b.jobs - a.jobs);
+    return { from, to, work, jobs, days, md, noPpl, T, ST, C: desc(C, "days"), P: desc(P, "md"), V: desc(V, "days"), M,
+      drafts: UNDATED.filter(j => j.app).length, undated: UNDATED.filter(j => !j.app).length };
+  }
+  const TYC = { IS: "#2f6fd6", SO: "#188764", IN: "#c28a12", WR: "#c0392b", IJ: "#7c3aed", JO: "#6d7582" };
+  function viewDash() {
+    const D = dashData(), mode = S.dmode, d0 = S.ddate, nf = n => n.toLocaleString("th-TH");
+    const dh = (m, d) => "#service-plan/dash/" + m + "/" + key(d);
+    const stepD = n => mode === "year" ? new Date(d0.getFullYear() + n, 0, 1) : new Date(d0.getFullYear(), d0.getMonth() + n, 1);
+    const title = mode === "year" ? "ปี " + d0.getFullYear() : MF[d0.getMonth()] + " " + d0.getFullYear();
+    const kpi = (v, t, s) => `<div class="spd-k"><b>${v}</b><span>${t}</span>${s ? `<small>${s}</small>` : ""}</div>`;
+    const st = k => (D.ST.get(k) || { jobs: 0 }).jobs;
+    const bars = (rows, f, max, fmt, link) => rows.length ? `<div class="spd-bars">${rows.map(r => `<div class="spd-b"><span class="spd-bn" title="${esc(r.k)}">${link ? `<button type="button" class="spc-link" data-q="${esc(r.k)}">${esc(r.k)}</button>` : esc(r.k)}</span><span class="spd-bt"><i style="width:${Math.max(2, Math.round(r[f] / (max || 1) * 100))}%;${r.c ? "background:" + r.c : ""}"></i></span><span class="spd-bv">${fmt(r)}</span></div>`).join("")}</div>` : `<div class="spd-none">ไม่มีข้อมูลในช่วงนี้</div>`;
+    const tRows = TYPES.map(t => ({ ...(D.T.get(t) || { k: t, jobs: 0, days: 0, md: 0 }), c: TYC[t] })).filter(r => r.jobs);
+    const mMax = Math.max(1, ...D.M.map(o => o.days));
+    const months = `<div class="spd-m">${D.M.map(o => `<a class="spd-mc${mode === "month" && o.m === d0.getMonth() ? " on" : ""}" href="${dh("month", new Date(d0.getFullYear(), o.m, 1))}" title="${esc(MF[o.m])}: เริ่ม ${o.jobs} งาน · ${o.days} วันงาน · ${o.md} man-day">
+        <span class="spd-mv">${o.days || ""}</span><span class="spd-mb"><i style="height:${Math.round(o.days / mMax * 100)}%"></i></span><span class="spd-ml">${MS[o.m]}</span><span class="spd-mj">${o.jobs ? o.jobs + " งาน" : "–"}</span></a>`).join("")}</div>`;
+    const pMax = Math.max(1, ...D.P.map(p => p.md));
+    const ppl = D.P.length ? `<div class="spd-tw"><table class="spd-t"><thead><tr><th>ชื่อ</th><th>ตำแหน่งในงาน</th><th class="n">งาน</th><th class="n">Man-day</th><th>% ใช้งาน (จาก ${D.work} วันทำงาน จ.–ส.)</th></tr></thead><tbody>${D.P.map(p => { const u = Math.round(p.md / (D.work || 1) * 100); return `<tr><td><button type="button" class="spc-link" data-q="${esc(p.k)}">${esc(p.k)}</button></td><td>${esc([...p.roles].join(", "))}</td><td class="n">${p.jobs}</td><td class="n">${p.md}</td><td><span class="spd-u"><span class="spd-bt"><i class="${u > 100 ? "over" : u >= 80 ? "hi" : ""}" style="width:${Math.min(100, Math.max(2, u))}%"></i></span><b>${u}%</b></span></td></tr>`; }).join("")}</tbody></table></div>` : `<div class="spd-none">ยังไม่มีชื่อคนในงานของช่วงนี้</div>`;
+    return `<div class="spc-bar"><div class="spc-nav"><a class="spc-btn" href="#service-plan">‹ ปฏิทิน</a><a class="spc-btn" href="${dh(mode, stepD(-1))}" aria-label="ก่อนหน้า">‹</a><a class="spc-btn" href="${dh(mode, today())}">${mode === "year" ? "ปีนี้" : "เดือนนี้"}</a><a class="spc-btn" href="${dh(mode, stepD(1))}" aria-label="ถัดไป">›</a><h2>Dashboard · ${esc(title)}</h2></div>
+      <div class="spc-views" role="tablist"><a role="tab" aria-selected="${mode === "month"}" href="${dh("month", d0)}">เดือน</a><a role="tab" aria-selected="${mode === "year"}" href="${dh("year", d0)}">ปี</a></div></div>
+    <div class="spd-kp">${kpi(nf(D.jobs.length), "งานในช่วงนี้", `Complete ${st("Complete")} · Confirm ${st("Confirm")} · รอ ${st("New") + st("Checking")}`)}${kpi(nf(D.days), "วันงาน (Job-day)", "1 งาน × 1 วัน")}${kpi(nf(D.md), "Man-day", D.noPpl ? `${D.noPpl} งานยังไม่ระบุคน` : "คน × วัน")}${kpi(nf(D.P.length), "คนที่ออกงาน", D.P.length ? `เฉลี่ย ${(D.md / D.P.length).toFixed(1)} man-day / คน` : "")}${kpi(nf(D.drafts), "งานรอนัดวัน", D.undated ? `+ ${D.undated} งาน TBC ในใบขอคน` : "ยังไม่ได้วันจากลูกค้า")}</div>
+    <div class="spd-g">
+      <section class="spd-c w2"><h3>ปริมาณงานรายเดือน ปี ${d0.getFullYear()} <small>แท่ง = วันงาน · กดเดือนเพื่อดูรายละเอียด</small></h3>${months}</section>
+      <section class="spd-c"><h3>แยกตามประเภทงาน</h3>${bars(tRows, "days", Math.max(1, ...tRows.map(r => r.days)), r => `${r.jobs} งาน · ${r.days} วัน`)}</section>
+      <section class="spd-c"><h3>ลูกค้า <small>เรียงตามวันงาน</small></h3>${bars(D.C.slice(0, 10), "days", D.C.length ? D.C[0].days : 1, r => `${r.jobs} งาน · ${r.days} วัน`, true)}${D.C.length > 10 ? `<p class="spd-more">+ อีก ${D.C.length - 10} ลูกค้า</p>` : ""}</section>
+      <section class="spd-c w2"><h3>การใช้คน (Utilization) <small>${D.P.length} คน · เฉพาะงาน Service ในปฏิทินนี้</small></h3>${ppl}
+        <p class="spd-more">นับจากชื่อในใบขอคน (ME / PP / EE / PC / SS / ENG) และคำขอคนในแอป · งานในโรงงานไม่รวม — ดูภาพรวมทั้งหมดที่เมนู Manpower · กดชื่อเพื่อค้นงานของคนนั้นในปฏิทิน</p></section>
+      <section class="spd-c"><h3>การใช้รถ <small>วันงานต่อทะเบียน</small></h3>${bars(D.V.slice(0, 10), "days", D.V.length ? D.V[0].days : 1, r => `${r.jobs} งาน · ${r.days} วัน`)}</section>
+      <section class="spd-c"><h3>สถานะงาน</h3>${bars(STATUSES.map(s => ({ ...(D.ST.get(s) || { k: s, jobs: 0, days: 0 }), c: { New: "#2f6fd6", Checking: "#c28a12", Confirm: "#188764", Complete: "#6d7582" }[s] })).filter(r => r.jobs), "jobs", Math.max(1, ...STATUSES.map(s => st(s))), r => `${r.jobs} งาน`)}</section>
+    </div>`;
+  }
+
   /* ---------- render ---------- */
   function draw() {
     if (!ROOT || !document.body.contains(ROOT)) return;
@@ -267,6 +342,7 @@
       return;
     }
     if (!JOBS) { ROOT.innerHTML = `<div class="empty">กำลังโหลดแผนงาน…</div>`; ensure(false).then(draw); return; }
+    if (S.page === "dash") { ROOT.innerHTML = viewDash(); return; }
     const body = S.view === "day" ? viewDay() : S.view === "week" ? viewWeek() : S.view === "year" ? viewYear() : viewMonth();
     const qFocus = document.activeElement && document.activeElement.id === "spcQ", pos = qFocus ? document.activeElement.selectionStart : 0;
     ROOT.innerHTML = toolbar() + `<div class="spc-body v-${S.view}">${body}</div>` + undated();
@@ -276,6 +352,8 @@
     el.addEventListener("click", e => {
       const ev = e.target.closest("[data-j]");
       if (ev) { const id = ev.dataset.j; const j = JOBS.concat(UNDATED).find(x => x.id === id); if (j && j.app) window.SPRequest.open(j.rid, () => ensure(true).then(draw)); else if (j) detail(j); return; }
+      const dq = e.target.closest("[data-q]");
+      if (dq) { S.q = dq.dataset.q; location.hash = "#service-plan/" + (S.dmode === "year" ? "year" : "month") + "/" + key(S.ddate); return; }
       if (e.target.closest("#spcNew")) return void window.SPRequest.form(() => ensure(true).then(draw));
       const f = e.target.closest("[data-st],[data-ty]");
       if (f) {
@@ -295,7 +373,8 @@
     if (!document.getElementById("spcCss")) { const s = document.createElement("style"); s.id = "spcCss"; s.textContent = CSS; document.head.appendChild(s); }
     document.querySelectorAll(".spc-modal").forEach(m => m.remove());
     const [v, d] = (sub || "").split("/");
-    S.page = v === "req" ? "req" : "cal";
+    S.page = v === "req" ? "req" : v === "dash" ? "dash" : "cal";
+    if (S.page === "dash") { S.dmode = d === "year" ? "year" : "month"; S.ddate = fromKey((sub || "").split("/")[2]) || today(); }
     if (S.page === "cal") { S.view = VIEWS.some(x => x[0] === v) ? v : "month"; S.date = fromKey(d) || today(); }
     ROOT = el; bind(el);
     if (S.page === "req") return draw();
@@ -309,6 +388,18 @@
 .spc-bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
 .spc-rq{justify-content:flex-start;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 14px}.spc-rq b small{font-weight:500;color:var(--amber);font-size:11.5px}.spc-rq span{font-size:12px;color:var(--muted)}
 .spc-btn.pri{background:var(--rak);border-color:var(--rak);color:#fff;font-weight:600;cursor:pointer}.spc-btn.pri:hover{color:#fff}.spc-btn i{font-style:normal;background:var(--rak);color:#fff;border-radius:999px;font-size:11px;padding:0 6px;margin-left:6px}
+.spd-kp{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.spd-k{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:grid;gap:2px}.spd-k b{font-size:26px;line-height:1.2}.spd-k span{font-size:13px;color:#4a515c}.spd-k small{font-size:11.5px;color:var(--muted)}
+.spd-g{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.spd-c{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;min-width:0}.spd-c.w2{grid-column:1/-1}
+.spd-c h3{margin:0 0 10px;font-size:14.5px}.spd-c h3 small{font-weight:400;color:var(--muted);font-size:12px;margin-left:6px}
+.spd-bars{display:grid;gap:6px}.spd-b{display:grid;grid-template-columns:minmax(70px,32%) 1fr auto;gap:8px;align-items:center;font-size:12.5px}.spd-bn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.spd-bn .spc-link{color:var(--ink)}.spd-bv{color:var(--muted);white-space:nowrap;font-size:12px}
+.spd-bt{display:block;height:10px;background:#eef0f3;border-radius:5px;overflow:hidden;min-width:40px}.spd-bt i{display:block;height:100%;background:var(--rak);border-radius:5px}.spd-bt i.hi{background:#c28a12}.spd-bt i.over{background:#c0392b}
+.spd-m{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:6px}.spd-mc{display:grid;gap:3px;text-align:center;text-decoration:none;color:var(--ink);border-radius:8px;padding:4px 2px}.spd-mc:hover,.spd-mc.on{background:var(--blush)}
+.spd-mb{height:110px;display:flex;align-items:flex-end;justify-content:center}.spd-mb i{width:60%;min-height:2px;background:var(--rak);border-radius:4px 4px 0 0}.spd-mv{font-size:11.5px;color:#4a515c;min-height:16px}.spd-ml{font-size:12px;font-weight:600}.spd-mj{font-size:10.5px;color:var(--muted)}
+.spd-tw{overflow:auto;max-height:520px}.spd-t{width:100%;border-collapse:collapse;font-size:13px}.spd-t th{text-align:left;font-weight:600;font-size:12px;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff}
+.spd-t td{padding:5px 8px;border-bottom:1px solid #f0f2f4}.spd-t .n{text-align:right}.spd-u{display:grid;grid-template-columns:1fr 44px;gap:8px;align-items:center}.spd-u b{font-weight:600;font-size:12px;text-align:right}
+.spd-none{color:var(--muted);font-size:13px;padding:10px 0}.spd-more{margin:8px 0 0;font-size:11.5px;color:var(--muted)}
+@media (max-width:800px){.spd-g{grid-template-columns:1fr}.spd-m{grid-template-columns:repeat(6,1fr)}.spd-mb{height:70px}}
 .spc-nav{display:flex;align-items:center;gap:6px}.spc-nav h2{margin:0 0 0 8px;font-size:19px;font-weight:600}
 .spc-btn{display:inline-grid;place-items:center;min-width:36px;height:34px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:#fff;text-decoration:none;color:var(--ink);font-size:13.5px}
 .spc-btn:hover{border-color:#f0b9b9;color:var(--rak)}
