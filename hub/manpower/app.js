@@ -487,28 +487,44 @@
       <td><input name="sort" type="number" value="${esc(w ? w.sort : "")}" style="width:70px"></td><td class="c"><input name="active" type="checkbox" ${!w || w.active ? "checked" : ""}></td>
       <td><button type="button" class="mp-rs">${w ? "บันทึก" : "เพิ่มช่าง"}</button></td></tr>`;
     M.master = M.master || []; const mj = new Map(M.master.map(m => [jobKey(m.job_no), m]));
-    const pRow = p => `<tr data-code="${esc(p ? p.code : "")}"><td><input name="customer" value="${esc(p ? p.customer || "" : "")}" placeholder="ลูกค้า"></td>
-      <td><input name="name" value="${esc(p ? p.name : "")}" placeholder="ชื่องานเต็ม" required></td><td><input name="short_name" value="${esc(p ? p.short_name || "" : "")}" placeholder="ชื่อย่อ" size="10" maxlength="40"></td><td><input name="job_no" list="mpMJ" value="${esc(p ? p.job_no || "" : "")}" placeholder="Job no." size="10">${p && p.job_no && !mj.has(jobKey(p.job_no)) && M.master.length ? ` <em class="mp-warn" title="ไม่พบ Job no. นี้ใน RAK_Master_Project_on_hand">?</em>` : ""}</td>
+    // งาน / ลูกค้า: jobs come from RAK_Master_Project_on_hand (edited in Supabase); Manpower keeps only status + milestone colour.
+    // Projects imported from the old sheet that have no matching Job no. are listed below to be linked.
+    const linked = new Map(); M.projects.forEach(p => { if (p.job_no && mj.has(jobKey(p.job_no)) && !linked.has(jobKey(p.job_no))) linked.set(jobKey(p.job_no), p); });
+    const legacy = M.projects.filter(p => !(p.job_no && mj.has(jobKey(p.job_no))));
+    const mRow = m => { const p = linked.get(jobKey(m.job_no));
+      return `<tr data-code="${esc(p ? p.code : "")}" data-jn="${esc(m.job_no)}" data-q="${esc(lc([m.job_no, m.customer, m.job_full, m.job_name].join(" ")))}"><td>${esc(m.job_no)}</td><td>${esc(m.customer)}</td><td>${esc(m.job_full)}</td><td>${esc(m.job_name !== m.job_full ? m.job_name : "")}</td>
       <td><select name="status">${opt(STATUS, p ? p.status : "active")}</select></td><td><input name="color" type="color" value="${esc(p ? p.color : "#6d7582")}"></td>
-      <td><button type="button" class="mp-rs">${p ? "บันทึก" : "เพิ่มงาน"}</button></td></tr>`;
+      <td>${p ? `<span class="mp-on">ใช้ในแผน</span>` : ""}</td><td><button type="button" class="mp-rs mp-ms-save">บันทึก</button></td></tr>`; };
+    const lRow = p => `<tr data-code="${esc(p.code)}"><td>${esc(p.customer || "")}</td><td>${esc(p.name)}</td><td><input name="job_no" list="mpMJ" value="${esc(p.job_no || "")}" placeholder="เลือก Job no." size="12">${p.job_no ? ` <em class="mp-warn" title="ไม่พบ Job no. นี้ใน RAK_Master_Project_on_hand">?</em>` : ""}</td>
+      <td><select name="status">${opt(STATUS, p.status)}</select></td><td><input name="color" type="color" value="${esc(p.color)}"></td><td><button type="button" class="mp-rs mp-lg-save">บันทึก</button></td></tr>`;
+    const projBody = () => !M.masterTable ? `<p class="mp-hint"><b>อ่านตาราง RAK_Master_Project_on_hand ไม่ได้</b> · ตรวจชื่อตารางใน Supabase</p>` : `<p class="mp-hint">ข้อมูลงานมาจากตาราง <b>RAK_Master_Project_on_hand</b> (${M.master.length} งาน) · แก้ชื่องาน / ลูกค้า / ชื่อย่อ ที่ตารางนั้นใน Supabase · ที่นี่ตั้งได้เฉพาะสถานะและสี Milestone · ช่องในตารางแผนแสดง "ประเภทงาน | Customer_Name | Job_name"</p>
+        <input class="mp-mq" type="search" placeholder="ค้นหา Job no. / ลูกค้า / ชื่องาน">
+        <table class="mp-mt mp-mlist"><thead><tr><th>Job no.</th><th>Customer_Name</th><th>Job_Full_name</th><th>Job_name (ชื่อย่อ)</th><th>สถานะ</th><th>สี Milestone</th><th></th><th></th></tr></thead><tbody>${M.master.slice().sort((a, b) => String(b.job_no).localeCompare(String(a.job_no))).map(mRow).join("")}</tbody></table>
+        ${legacy.length ? `<h4>งานเดิมจากชีต ที่ยังไม่ได้ผูก Job no. (${legacy.length})</h4><p class="mp-hint">เลือก Job no. จาก master แล้วกดบันทึก · งานและ Milestone เดิมจะย้ายไปใช้ชื่อจาก master ให้ · งานรวมหลายลูกค้า (เช่น Service) ไม่ต้องผูกก็ได้</p>
+        <datalist id="mpMJ">${M.master.map(m => `<option value="${esc(m.job_no)}">${esc((m.customer ? m.customer + " · " : "") + (m.job_full || m.job_name))}</option>`).join("")}</datalist>
+        <table class="mp-mt"><thead><tr><th>ลูกค้า (เดิม)</th><th>ชื่องาน (เดิม)</th><th>Job no.</th><th>สถานะ</th><th>สี Milestone</th><th></th></tr></thead><tbody>${legacy.map(lRow).join("")}</tbody></table>` : ""}`;
     const years = [...new Set(M.holidays.map(h => h.day.slice(0, 4)))].sort();
     const hBody = `<form class="mp-hadd"><input type="date" name="day" min="2026-01-01" max="2027-12-31" required><input name="name" placeholder="ชื่อวันหยุด เช่น วันสงกรานต์"><select name="type"><option value="PH">PH · วันหยุดนักขัตฤกษ์</option><option value="EX">EX · วันหยุดพิเศษบริษัท</option></select><button type="submit" class="mp-rs">เพิ่มวันหยุด</button></form>
       <p class="mp-hint">วันอาทิตย์เป็นวันหยุดอยู่แล้ว ไม่ต้องเพิ่ม · ปี 2027 รอปฏิทินบริษัทจาก HR</p>
       ${years.map(y => `<h4>${y}</h4><table class="mp-mt"><tbody>${M.holidays.filter(h => h.day.startsWith(y)).map(h => `<tr><td>${esc(fmtD(h.day))}</td><td>${esc(DS[fromKey(h.day).getDay()])}</td><td>${esc(h.type)}</td><td>${esc(h.name || "")}</td><td><button type="button" class="mp-hd" data-day="${esc(h.day)}">ลบ</button></td></tr>`).join("")}</tbody></table>`).join("") || `<p class="mp-hint">ยังไม่มีวันหยุดบริษัท</p>`}`;
-    box.innerHTML = `<div class="mp-dtabs">${[["workers", `ช่าง (${M.workers.length})`], ["projects", `งาน / ลูกค้า (${M.projects.length})`], ["holidays", `วันหยุดบริษัท (${M.holidays.length})`]].map(([k, l]) => `<button type="button" data-t="${k}" class="${tab === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    box.innerHTML = `<div class="mp-dtabs">${[["workers", `ช่าง (${M.workers.length})`], ["projects", `งาน / ลูกค้า (${M.masterTable ? M.master.length : M.projects.length})`], ["holidays", `วันหยุดบริษัท (${M.holidays.length})`]].map(([k, l]) => `<button type="button" data-t="${k}" class="${tab === k ? "on" : ""}">${l}</button>`).join("")}</div>
       <div class="mp-card">${tab === "workers" ? `<p class="mp-hint">ใส่รหัสพนักงานให้คนที่ยังไม่มี (รหัส X###) แล้วกดบันทึก ข้อมูลงานและวันลาเดิมจะย้ายตามให้ · เอาติ๊ก "ทำงานอยู่" ออกเมื่อลาออก (ประวัติยังอยู่)</p>
         <table class="mp-mt"><thead><tr><th>รหัสพนักงาน</th><th>ชื่อ-นามสกุล</th><th>ชื่อเล่น</th><th>หน่วยงาน</th><th>ตำแหน่ง</th><th>ลำดับ</th><th>ทำงานอยู่</th><th></th></tr></thead><tbody>${wRow(null)}${M.workers.map(wRow).join("")}</tbody></table>`
-      : tab === "projects" ? `<p class="mp-hint">ช่องในตารางแสดง "ประเภทงาน | Customer_Name | Job_name" จากตาราง RAK_Master_Project_on_hand โดยจับคู่ด้วย <b>Job no.</b> · ใส่ Job no. ให้แต่ละงานแล้วกดบันทึก (พิมพ์เลขหรือชื่องานเพื่อค้นหา) · งานที่ยังไม่มี Job no. จะใช้ ลูกค้า | ชื่อย่อ ด้านล่างแทน · สีใช้กับแถว Milestone${M.masterTable ? ` · พบงานใน master ${M.master.length} งาน` : ` · <b>ยังอ่านตาราง master ไม่ได้</b>`}</p>
-        <datalist id="mpMJ">${M.master.map(m => `<option value="${esc(m.job_no)}">${esc((m.customer ? m.customer + " · " : "") + (m.job_full || m.job_name))}</option>`).join("")}</datalist>
-        <table class="mp-mt"><thead><tr><th>ลูกค้า</th><th>ชื่องานเต็ม</th><th>ชื่อย่อ (แสดงในตาราง)</th><th>Job no.</th><th>สถานะ</th><th>สี Milestone</th><th></th></tr></thead><tbody>${pRow(null)}${M.projects.map(pRow).join("")}</tbody></table>`
+      : tab === "projects" ? projBody()
       : hBody}</div><div class="mp-msg mp-pmsg" role="status"></div>`;
     const msg = box.querySelector(".mp-pmsg");
     const done = async (fn, okText) => { msg.textContent = "กำลังบันทึก…"; try { await fn(); msg.textContent = okText; if (DATA) DATA.want = ""; DCACHE.clear(); ensure(); dataPage(box).then(() => { box.querySelector(".mp-pmsg").textContent = okText; }); } catch (err) { msg.textContent = "บันทึกไม่สำเร็จ (" + err.message + ")"; } };
     box.querySelectorAll("[data-t]").forEach(b => b.addEventListener("click", () => { S.dtab = b.dataset.t; dataPage(box); }));
     box.querySelectorAll("tr[data-id] .mp-rs").forEach(b => b.addEventListener("click", () => { const tr = b.closest("tr"), v = n => tr.querySelector(`[name=${n}]`);
       done(() => post("/api/manpower/master/worker", { id: tr.dataset.id, emp_code: v("emp_code").value.trim(), name_th: v("name_th").value, nickname: v("nickname").value, unit: v("unit").value, trade: v("trade").value, sort: v("sort").value, active: v("active").checked }), tr.dataset.id ? "บันทึกข้อมูลช่างแล้ว" : "เพิ่มช่างแล้ว"); }));
-    box.querySelectorAll("tr[data-code] .mp-rs").forEach(b => b.addEventListener("click", () => { const tr = b.closest("tr"), v = n => tr.querySelector(`[name=${n}]`);
-      done(() => post("/api/manpower/master/project", { code: tr.dataset.code, customer: v("customer").value, name: v("name").value, short_name: v("short_name").value, job_no: v("job_no").value, status: v("status").value, color: v("color").value }), tr.dataset.code ? "บันทึกงานแล้ว" : "เพิ่มงานแล้ว"); }));
+    box.querySelectorAll(".mp-ms-save").forEach(b => b.addEventListener("click", () => { const tr = b.closest("tr"), v = n => tr.querySelector(`[name=${n}]`);
+      done(() => post("/api/manpower/master/project", { code: tr.dataset.code, job_no: tr.dataset.jn, status: v("status").value, color: v("color").value }), "บันทึกงานแล้ว"); }));
+    box.querySelectorAll(".mp-lg-save").forEach(b => b.addEventListener("click", () => { const tr = b.closest("tr"), v = n => tr.querySelector(`[name=${n}]`), p = M.projects.find(x => x.code === tr.dataset.code) || {};
+      const jn = v("job_no").value.trim();
+      if (jn && !mj.has(jobKey(jn))) { msg.textContent = "ไม่พบ Job no. " + jn + " ในตาราง master"; return; }
+      done(() => post("/api/manpower/master/project", { code: tr.dataset.code, name: p.name, customer: p.customer, job_no: jn, status: v("status").value, color: v("color").value }), jn ? "ผูก Job no. แล้ว" : "บันทึกงานแล้ว"); }));
+    const mq = box.querySelector(".mp-mq");
+    if (mq) mq.addEventListener("input", () => { const q = lc(mq.value); box.querySelectorAll(".mp-mlist tbody tr").forEach(tr => { tr.hidden = !!q && !tr.dataset.q.includes(q); }); });
     const hf = box.querySelector(".mp-hadd");
     if (hf) hf.addEventListener("submit", e => { e.preventDefault(); done(() => post("/api/manpower/master/holiday", { day: hf.day.value, name: hf.name.value, type: hf.type.value }), "เพิ่มวันหยุดแล้ว"); });
     box.querySelectorAll(".mp-hd").forEach(b => b.addEventListener("click", () => done(() => post("/api/manpower/master/holiday-delete", { day: b.dataset.day }), "ลบวันหยุดแล้ว")));
@@ -900,7 +916,7 @@ button.mp-lg:hover,.mp-lg.on{border-color:var(--rak);color:var(--rak)}.mp-lg b{f
 .mp-mt tbody tr:first-child{background:#fbfcf8}
 .mp-rs{border:1px solid var(--rak);background:#fff;color:var(--rak);border-radius:7px;padding:4px 10px;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}.mp-rs:hover{background:var(--rak);color:#fff}
 .mp-hd{border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;font-size:12px}.mp-hd:hover{color:var(--rak)}
-.mp-hadd{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.mp-hint{font-size:12px;color:var(--muted);margin:6px 0 10px}.mp-card h4{margin:14px 0 4px;font-size:13px}.mp-warn{color:#c92a2a;font-weight:700;font-style:normal;cursor:help}
+.mp-hadd{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.mp-hint{font-size:12px;color:var(--muted);margin:6px 0 10px}.mp-card h4{margin:14px 0 4px;font-size:13px}.mp-warn{color:#c92a2a;font-weight:700;font-style:normal;cursor:help}.mp-on{font-size:11px;color:#2f9e44;white-space:nowrap}.mp-mlist{width:100%}.mp-mq{width:320px;max-width:100%;margin:0 0 8px;padding:6px 10px}
 .mp-pmsg{padding:0;font-size:13px}.mp-more{padding-top:10px}
 .mp-madd{margin-left:8px;border:1px solid var(--rak);background:#fff;color:var(--rak);border-radius:6px;padding:1px 8px;font:inherit;font-size:11px;cursor:pointer}.mp-madd:hover{background:var(--rak);color:#fff}
 .mp-ms td[data-m]{cursor:pointer}.mp-ms td[data-m].ed:hover{background:#fff6f6;box-shadow:inset 0 0 0 1px #f0b9b9}
