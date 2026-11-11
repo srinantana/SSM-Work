@@ -155,6 +155,106 @@ async function customersApi(cfg) {
   CUST_CACHE = { at: Date.now(), body };
   return json(body);
 }
+// ---- Customer name clean-up: compare names already saved in each menu with RAK_Master_Customer_List ----
+// Sources: mp_projects.customer (Manpower), sp_requests.customer (Service Plan ขอคน), spare_part_projects data.customerShort
+// (Spare Part), and column F of the Google Sheet rows in service_plan_snapshot. The first three are rewritten to the master
+// short name; the sheet cannot be edited from here, so its names are mapped when read (auto match + table customer_alias,
+// database/customer_alias.sql). Admin page → "เทียบชื่อลูกค้ากับ Master".
+const CUST_NOISE = /\b(co|company|ltd|limited|public|pcl|plc|inc|corp|corporation|thailand|thai|the)\b|บริษัท|จำกัด|มหาชน|ประเทศไทย/g;
+const custNorm = (s) => String(s || '').toLowerCase().replace(/\(.*?\)/g, ' ').replace(CUST_NOISE, ' ').replace(/[^a-z0-9฀-๿]+/g, '');
+const custFlat = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9฀-๿]+/g, '');
+async function customerMaster(cfg) {
+  const r = await customersApi(cfg);
+  const d = await r.clone().json().catch(() => ({}));
+  return Array.isArray(d.customers) ? d.customers : [];
+}
+async function customerAliases(cfg) {
+  const r = await call(cfg, '/rest/v1/customer_alias?select=alias_key,short', { method: 'GET', admin: true });
+  if (!r.ok || !Array.isArray(r.data)) return null;
+  return new Map(r.data.map((x) => [String(x.alias_key), String(x.short)]));
+}
+// Returns { short, how } — how: exact | alias | auto | guess | none
+function customerMatch(name, master, aliases) {
+  const raw = String(name || '').trim();
+  if (!raw) return { short: '', how: 'none' };
+  const ex = master.find((c) => c.short.toLowerCase() === raw.toLowerCase());
+  if (ex) return { short: ex.short, how: ex.short === raw ? 'exact' : 'auto' };
+  if (aliases && aliases.has(custFlat(raw))) return { short: aliases.get(custFlat(raw)), how: 'alias' };
+  const f = custFlat(raw), n = custNorm(raw);
+  const same = master.filter((c) => custFlat(c.short) === f || (n && (custNorm(c.short) === n || (c.full && custNorm(c.full) === n))) || (c.code && c.code.toLowerCase() === raw.toLowerCase()));
+  if (same.length === 1) return { short: same[0].short, how: 'auto' };
+  if (n.length >= 3) {
+    const part = master.filter((c) => { const a = custNorm(c.short), b = custNorm(c.full); return (a.length >= 3 && (n.startsWith(a) || a.startsWith(n))) || (b.length >= 3 && (b.startsWith(n) || n.startsWith(b))); });
+    if (part.length === 1) return { short: part[0].short, how: 'guess' };
+  }
+  return { short: '', how: 'none' };
+}
+// Name mapper for read-time use (Google Sheet rows): exact / alias / auto only — never a guess.
+async function customerCanon(cfg) {
+  const master = await customerMaster(cfg).catch(() => []);
+  if (!master.length) return (x) => x;
+  const aliases = await customerAliases(cfg).catch(() => null);
+  const memo = new Map();
+  return (x) => {
+    const k = String(x || '');
+    if (!memo.has(k)) { const m = customerMatch(k, master, aliases); memo.set(k, m.how === 'exact' || m.how === 'alias' || m.how === 'auto' ? m.short : k); }
+    return memo.get(k);
+  };
+}
+function canonSnapshot(data, canon) {
+  if (!data || !Array.isArray(data.rows)) return data;
+  return { ...data, rows: data.rows.map((r) => (Array.isArray(r.v) && r.v[5] ? { ...r, v: r.v.map((c, i) => (i === 5 ? canon(c) : c)) } : r)) };
+}
+async function customerCompare(cfg) {
+  const master = await customerMaster(cfg);
+  const aliases = await customerAliases(cfg);
+  const count = (arr) => { const m = new Map(); for (const v of arr) { const k = String(v || '').trim(); if (k) m.set(k, (m.get(k) || 0) + 1); } return m; };
+  const src = {};
+  const mp = await restAll(cfg, '/rest/v1/mp_projects?select=customer');
+  if (mp) src.manpower = count(mp.map((x) => x.customer));
+  const rq = await restAll(cfg, '/rest/v1/sp_requests?select=customer');
+  if (rq) src.request = count(rq.map((x) => x.customer));
+  const sp = await restAll(cfg, '/rest/v1/spare_part_projects?select=data');
+  if (sp) src.sparepart = count(sp.map((x) => (x.data && (x.data.customerShort || x.data.customer)) || ''));
+  const sn = await call(cfg, SPL_TABLE + '?select=data&id=eq.main', { method: 'GET', admin: true });
+  const snRows = sn.ok && Array.isArray(sn.data) && sn.data[0] && sn.data[0].data && Array.isArray(sn.data[0].data.rows) ? sn.data[0].data.rows : null;
+  if (snRows) src.sheet = count(snRows.map((r) => Array.isArray(r.v) ? r.v[5] : ''));
+  const rows = [];
+  for (const [source, m] of Object.entries(src)) for (const [name, n] of m) rows.push({ source, name, n, ...customerMatch(name, master, aliases) });
+  return json({ master: master.length, aliasTable: aliases !== null, rows });
+}
+async function customerApply(cfg, body, by) {
+  const list = (Array.isArray(body.changes) ? body.changes : []).slice(0, 2000)
+    .map((c) => ({ source: String(c.source || ''), from: String(c.from || '').trim(), to: String(c.to || '').trim() }))
+    .filter((c) => c.from && c.to && c.from !== c.to);
+  const master = new Set((await customerMaster(cfg)).map((c) => c.short));
+  const out = { updated: 0, alias: 0, skipped: [], aliasTable: true };
+  const patch = (table, col, from, to) => call(cfg, `/rest/v1/${table}?${col}=eq.${encodeURIComponent(from)}`, { method: 'PATCH', admin: true, body: { [col]: to } });
+  let spRows = null;
+  for (const c of list) {
+    if (!master.has(c.to)) { out.skipped.push(c.from + ' → ' + c.to + ' (ไม่อยู่ใน Master)'); continue; }
+    if (c.source === 'manpower') { const r = await patch('mp_projects', 'customer', c.from, c.to); r.ok ? out.updated++ : out.skipped.push(c.from); }
+    else if (c.source === 'request') { const r = await patch('sp_requests', 'customer', c.from, c.to); r.ok ? out.updated++ : out.skipped.push(c.from); }
+    else if (c.source === 'sparepart') {
+      spRows = spRows || await restAll(cfg, '/rest/v1/spare_part_projects?select=id,data') || [];
+      for (const row of spRows) {
+        const d = row.data || {};
+        if (String(d.customerShort || d.customer || '').trim() !== c.from) continue;
+        d.customerShort = c.to;
+        const r = await call(cfg, `/rest/v1/spare_part_projects?id=eq.${encodeURIComponent(row.id)}`, { method: 'PATCH', admin: true, body: { data: d, updated_at: new Date().toISOString() } });
+        r.ok ? out.updated++ : out.skipped.push(c.from);
+      }
+    }
+    // every confirmed mapping is also remembered, so the Google Sheet names (and future look-ups) follow it
+    if (out.aliasTable) {
+      const r = await fetch(cfg.url + '/rest/v1/customer_alias?on_conflict=alias_key', { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify([{ alias_key: custFlat(c.from), alias: c.from, short: c.to, updated_by: by, updated_at: new Date().toISOString() }]) }).catch(() => null);
+      if (r && r.ok) out.alias++; else if (!r || r.status === 404) out.aliasTable = false;
+    }
+  }
+  CUST_CACHE = null;
+  return json(out);
+}
 // Spare Part projects live in Supabase table public.spare_part_projects (database/spare_part_projects.sql).
 // The table has RLS on and no policies, so only this middleware (service key) can read or write it.
 const SP_TABLE = '/rest/v1/spare_part_projects';
@@ -265,7 +365,8 @@ async function servicePlanApi(cfg, req, url) {
   const r = await call(cfg, SPL_TABLE + '?select=data&id=eq.main', { method: 'GET', admin: true });
   if (!r.ok) return json({ error: 'no_table' }, 503);
   const row = Array.isArray(r.data) && r.data[0];
-  return row && row.data ? json(row.data) : json({ error: 'no_data' }, 503);
+  if (!row || !row.data) return json({ error: 'no_data' }, 503);
+  return json(canonSnapshot(row.data, await customerCanon(cfg).catch(() => (x) => x)));
 }
 
 // Manpower (วางแผนกำลังคน) replaces the Google Sheet "26 (PD)- ตารางงานและวันหยุดช่าง 2569" (retired after a one-time
@@ -714,7 +815,7 @@ async function manpowerApi(cfg, req, url, prof) {
   }
   const sp = await call(cfg, SPL_TABLE + '?select=data,updated_at&id=eq.main', { method: 'GET', admin: true }).catch(() => null);
   const spRow = sp && sp.ok && Array.isArray(sp.data) ? sp.data[0] : null;
-  const overlay = serviceOverlay(spRow && spRow.data, workers, from, to);
+  const overlay = serviceOverlay(canonSnapshot(spRow && spRow.data, await customerCanon(cfg).catch(() => (x) => x)), workers, from, to);
   const [rq, canApprove] = await Promise.all([sprBoard(cfg, from, to), sprCanApprove(cfg, prof).catch(() => false)]);
   return json({ from, to, requests: rq.requests, pendingRequests: rq.pendingRequests, canApprove, canEdit: canEditManpower(prof), canMilestone: canEditMilestone(prof), workers, projects, milestones: milestones || [], assignments: rows || [], absences: absences || [], holidays: holidays || [], needsMigration,
     service: overlay.service, serviceUnmatched: overlay.serviceUnmatched, serviceUpdated: spRow ? (spRow.data && spRow.data.updated) || spRow.updated_at : null });
@@ -794,7 +895,7 @@ async function sprAvail(cfg, from, to, exclude) {
   for (const p of ov.people) { const r = R.get(p.request_id); if (!r || r.id === exclude) continue; for (const d of mpDays(r.date_from < from ? from : r.date_from, r.date_to > to ? to : r.date_to)) put(p.worker_id + '|' + d, 'a', 'มีคำขอรอ PC: ' + sprLabel(r)); }
   for (const a of asg || []) put(a.worker_id + '|' + a.day, a.tentative ? 'h' : 'b', a.text);
   const spRow = sp && sp.ok && Array.isArray(sp.data) ? sp.data[0] : null;
-  for (const s of serviceOverlay(spRow && spRow.data, workers, from, to).service) put(s.worker_id + '|' + s.day, 'b', ['ใบขอคน', s.type, s.customer, s.job].filter(Boolean).join(' '));
+  for (const s of serviceOverlay(canonSnapshot(spRow && spRow.data, await customerCanon(cfg).catch(() => (x) => x)), workers, from, to).service) put(s.worker_id + '|' + s.day, 'b', ['ใบขอคน', s.type, s.customer, s.job].filter(Boolean).join(' '));
   const own = new Map(); // the person's weekly day off / holiday: noted, still bookable
   for (const x of abs || []) { if (SPR_DAYOFF.includes(x.type)) own.set(x.worker_id + '|' + x.day, 'วันหยุดของช่าง (' + x.type + ')'); else cell.set(x.worker_id + '|' + x.day, ['o', x.type]); }
   const off = days.map((d) => H.has(d) ? H.get(d) : new Date(d + 'T00:00:00Z').getUTCDay() === 0 ? 'วันอาทิตย์' : '');
@@ -1194,8 +1295,10 @@ async function adminApi(cfg, req, path) {
     const t = await readEmployeeTable(cfg);
     return t ? json({ table: t.table, count: t.rows.length }) : json({ error: 'no table' }, 404);
   }
+  if (path === '/admin/api/customers/compare' && req.method === 'GET') return customerCompare(cfg);
   if (req.method !== 'POST') return json({ error: 'method' }, 405);
   const body = await req.json().catch(() => ({}));
+  if (path === '/admin/api/customers/apply') return customerApply(cfg, body, 'admin');
 
   // Reset step 1: usernames for every employee (from the Supabase table, or rows sent from the Excel file).
   if (path === '/admin/api/plan') {
@@ -1361,6 +1464,13 @@ td{padding:10px 14px;border-bottom:1px solid #edf0f4;vertical-align:middle}tr:la
 <main>
 <div><h1>ผู้ใช้งาน</h1><p class="sub">เข้าระบบในชื่อ ${esc(me.username || me.email)} · บัญชีใหม่และบัญชีที่รีเซ็ตจะใช้รหัสเริ่มต้น และต้องตั้งรหัสใหม่ตอนเข้าครั้งแรก · บัญชีใหม่ยังเข้าเมนูไม่ได้ ติ๊กเมนูที่ให้สิทธิ์ (มีผลทันที)</p></div>
 <div class="cards" id="stats"></div>
+<section class="panel" id="custPanel"><h2>🔗 เทียบชื่อลูกค้ากับ Master (RAK_Master_Customer_List)</h2>
+<p class="muted">ตรวจชื่อลูกค้าที่บันทึกไว้แล้วใน Manpower, Service Plan (ขอคน), Spare Part และ Google Sheet ใบขอคน แล้วเปลี่ยนเป็นชื่อย่อ (Customer_name_short) · ✓ ตรงแล้ว · 🤖 ระบบจับคู่ให้ (ตรวจก่อนบันทึก) · ❓ หาไม่เจอ ให้เลือกเอง หรือเว้นว่างไว้ = ไม่เปลี่ยน</p>
+<div class="row"><button class="btn primary" id="custCmp">ตรวจเทียบชื่อลูกค้า</button><label class="chk"><input type="checkbox" id="custOnly" checked>ซ่อนรายการที่ตรงแล้ว</label><span class="muted" id="custInfo"></span></div>
+<div id="custMsg"></div>
+<div class="tbl" id="custTbl" hidden><table><thead><tr><th>แหล่งข้อมูล</th><th>ชื่อเดิม</th><th>จำนวน</th><th>ผลเทียบ</th><th>เปลี่ยนเป็น (ชื่อย่อใน Master)</th></tr></thead><tbody id="custRows"></tbody></table></div>
+<div class="row" id="custAct" hidden><button class="btn primary" id="custApply">บันทึกการเปลี่ยนชื่อ</button><span class="muted">Google Sheet แก้จากเว็บไม่ได้ — ระบบจะจำการจับคู่ไว้ แล้วแสดงเป็นชื่อย่อแทน</span></div>
+<datalist id="custMaster"></datalist></section>
 <section class="panel" style="border-color:#f0b9b9"><h2>🔄 รีเซ็ตผู้ใช้ทั้งหมดจาก RAK_Employee</h2>
 <p class="muted">ลบบัญชีทั้งหมด แล้วสร้างใหม่จากรายชื่อพนักงาน · ชื่อผู้ใช้ = ชื่อ EN เต็ม . นามสกุลตัวแรก (ซ้ำ → เพิ่มตัวถัดไปของนามสกุล) · รหัสผ่านครั้งแรกเป็นรหัสเริ่มต้น และบังคับเปลี่ยนตอนเข้าครั้งแรก · บัญชี Super admin ไม่ถูกลบแต่ถูกรีเซ็ตรหัสเหมือนทุกคน · สิทธิ์เมนูเดิมจะหายทั้งหมด</p>
 <div class="row"><span id="srcInfo" class="muted">กำลังตรวจหาตาราง RAK_Employee ใน Supabase…</span></div>
@@ -1498,6 +1608,41 @@ document.getElementById("addOne").addEventListener("click",async e=>{
   e.target.disabled=true;const r=await post("/admin/api/import",{rows:[{first,last,nick}]});e.target.disabled=false;
   say(r.ok?report(r.d):"เพิ่มไม่สำเร็จ",!r.ok||(r.d.failed||[]).length>0);
   ["nFirst","nLast","nName"].forEach(id=>document.getElementById(id).value="");nPrev();await load();
+});
+/* customer name clean-up */
+let CUSTROWS=[];
+const SRCNAME={manpower:"Manpower (งาน)",request:"Service Plan (ขอคน)",sparepart:"Spare Part",sheet:"Google Sheet ใบขอคน"};
+const HOW={exact:"✓ ตรงแล้ว",auto:"🤖 จับคู่ได้",alias:"🤖 เคยจับคู่ไว้",guess:"🤖 น่าจะเป็น",none:"❓ หาไม่เจอ"};
+function drawCust(){
+  const only=document.getElementById("custOnly").checked;
+  const list=CUSTROWS.filter(r=>!only||r.how!=="exact");
+  document.getElementById("custRows").innerHTML=list.map(r=>'<tr><td class="muted">'+esc(SRCNAME[r.source]||r.source)+'</td><td><b style="font-weight:600">'+esc(r.name)+'</b></td><td>'+r.n+'</td><td><span class="pill '+(r.how==="exact"?"p-ok":r.how==="none"?"p-wait":"p-user")+'">'+HOW[r.how]+'</span></td><td>'+(r.how==="exact"?'<span class="muted">—</span>':'<input type="search" list="custMaster" data-i="'+CUSTROWS.indexOf(r)+'" value="'+esc(r.short)+'" placeholder="เลือกชื่อย่อ หรือเว้นว่าง = ไม่เปลี่ยน" style="min-width:240px">')+'</td></tr>').join("")||'<tr><td colspan="5" class="muted">ทุกชื่อตรงกับ Master แล้ว 🎉</td></tr>';
+  document.getElementById("custTbl").hidden=false;
+  document.getElementById("custAct").hidden=!list.some(r=>r.how!=="exact");
+}
+document.getElementById("custOnly").addEventListener("change",()=>{ if(CUSTROWS.length) drawCust(); });
+document.getElementById("custCmp").addEventListener("click",async e=>{
+  e.target.disabled=true;say("กำลังตรวจเทียบ…",0,"custMsg");
+  try{
+    const [c,m]=await Promise.all([fetch("/admin/api/customers/compare",{cache:"no-store"}).then(r=>r.json()),fetch("/api/customers",{cache:"no-store"}).then(r=>r.json())]);
+    if(!c.rows){say("ตรวจไม่สำเร็จ — อ่านตาราง RAK_Master_Customer_List ไม่ได้",1,"custMsg");return;}
+    document.getElementById("custMaster").innerHTML=(m.customers||[]).map(x=>'<option value="'+esc(x.short)+'" label="'+esc(x.full||"")+'">').join("");
+    CUSTROWS=c.rows.sort((a,b)=>(a.source+a.name).localeCompare(b.source+b.name));
+    const k=h=>CUSTROWS.filter(r=>r.how===h).length;
+    document.getElementById("custInfo").textContent="Master "+c.master+" ราย · ตรงแล้ว "+k("exact")+" · จับคู่ให้ "+(k("auto")+k("alias")+k("guess"))+" · หาไม่เจอ "+k("none");
+    say(c.aliasTable?"":"ยังไม่มีตาราง customer_alias — ชื่อใน Google Sheet จะจับคู่ได้เฉพาะชื่อที่ตรงอัตโนมัติ (รัน database/customer_alias.sql ใน Supabase เพื่อให้จำการจับคู่ได้)",!c.aliasTable,"custMsg");
+    drawCust();
+  }catch(err){say("ตรวจไม่สำเร็จ",1,"custMsg");}finally{e.target.disabled=false;}
+});
+document.getElementById("custApply").addEventListener("click",async e=>{
+  const changes=[...document.querySelectorAll("#custRows input[data-i]")].map(i=>({r:CUSTROWS[+i.dataset.i],to:i.value.trim()})).filter(x=>x.to&&x.to!==x.r.name).map(x=>({source:x.r.source,from:x.r.name,to:x.to}));
+  if(!changes.length){say("ไม่มีรายการที่ต้องเปลี่ยน",0,"custMsg");return;}
+  if(!confirm("เปลี่ยนชื่อลูกค้า "+changes.length+" รายการเป็นชื่อย่อใน Master?"))return;
+  e.target.disabled=true;say("กำลังบันทึก…",0,"custMsg");
+  const r=await post("/admin/api/customers/apply",{changes});e.target.disabled=false;
+  if(!r.ok){say("บันทึกไม่สำเร็จ",1,"custMsg");return;}
+  say("เปลี่ยนแล้ว "+r.d.updated+" รายการ · จำการจับคู่ "+r.d.alias+" ชื่อ"+(r.d.skipped.length?" · ข้าม: "+esc(r.d.skipped.join(", ")):"")+(r.d.aliasTable?"":" · ยังไม่มีตาราง customer_alias จึงยังจำการจับคู่ของ Google Sheet ไม่ได้"),r.d.skipped.length>0||!r.d.aliasTable,"custMsg");
+  document.getElementById("custCmp").click();
 });
 load();
 </script></body></html>`;
