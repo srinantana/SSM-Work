@@ -262,6 +262,10 @@ const thKey = (s) => String(s || '').replace(/\s+/g, ' ').trim();
 const MILESTONE_EDIT = { usernames: ['nantana.s', 'kitisak.s'], namesTh: ['นันทนา ศรีสกุลเตียว', 'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์', 'อรอิศรา พงศ์ผาติโรจน์'] };
 const canEditManpower = (prof) => MANPOWER_EDIT.usernames.includes(String(prof.username || '').toLowerCase())
   || MANPOWER_EDIT.namesTh.includes(thKey(prof.nameTh));
+// Edit the plan but may NOT Confirm Manpower (turn จอง into confirmed work): สปาย prakaikaew.p (set by Dew, 11 Nov 2026)
+const MANPOWER_NO_CONFIRM = { usernames: ['prakaikaew.p'], namesTh: ['ประกายแก้ว ปัญญา'] };
+const canConfirmManpower = (prof) => canEditManpower(prof)
+  && !MANPOWER_NO_CONFIRM.usernames.includes(String(prof.username || '').toLowerCase()) && !MANPOWER_NO_CONFIRM.namesTh.includes(thKey(prof.nameTh));
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const canEditMilestone = (prof) => MILESTONE_EDIT.usernames.includes(String(prof.username || '').toLowerCase()) || MILESTONE_EDIT.namesTh.includes(thKey(prof.nameTh));
 // PostgREST returns at most 1000 rows per request; page through with limit/offset.
@@ -363,7 +367,7 @@ function serviceOverlay(snapshot, workers, from, to) {
 // POST /api/manpower/confirm {text, items:[{worker_id, days:[...]}]} — turns "จอง …" bookings into confirmed work
 // (tentative → false, leading "จอง" removed). SC / PC / SSM only; every confirm is written to mp_change_log.
 async function manpowerConfirm(cfg, req, prof) {
-  if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
+  if (!canConfirmManpower(prof)) return json({ error: 'forbidden' }, 403);
   const raw = await req.text().catch(() => '');
   if (raw.length > 100000) return json({ error: 'too large' }, 413);
   let d;
@@ -473,6 +477,11 @@ async function manpowerAssign(cfg, req, prof) {
   const text = note || job, rows = [];
   for (const [wid, days] of per) for (const day of days) rows.push({ worker_id: wid, day, project_code: code, kind: code ? 'work' : 'other', work_type: type, text, tentative: d.tentative === true, source: 'app', updated_by: who, updated_at: now });
   if (!rows.length) return json({ error: 'no working day in range' }, 400);
+  if (d.tentative !== true && !canConfirmManpower(prof)) {
+    const booked = await restAll(cfg, `/rest/v1/mp_assignments?select=worker_id,day&tentative=is.true&worker_id=in.(${ids.map(encodeURIComponent).join(',')})&day=gte.${from}&day=lte.${to}`);
+    const keep = new Set((booked || []).map((b) => b.worker_id + '|' + b.day));
+    rows.forEach((r) => { if (keep.has(r.worker_id + '|' + r.day)) r.tentative = true; });
+  }
   const res = await fetch(cfg.url + '/rest/v1/mp_assignments?on_conflict=worker_id,day', { method: 'POST',
     headers: { ...authHeaders(cfg.service), prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
   if (!res.ok) return json({ error: res.status === 400 ? 'run database/manpower-002.sql' : 'supabase' }, 502);
@@ -719,7 +728,7 @@ async function manpowerApi(cfg, req, url, prof) {
   const spRow = sp && sp.ok && Array.isArray(sp.data) ? sp.data[0] : null;
   const overlay = serviceOverlay(spRow && spRow.data, workers, from, to);
   const [rq, canApprove, master] = await Promise.all([sprBoard(cfg, from, to), sprCanApprove(cfg, prof).catch(() => false), readMasterProjects(cfg).catch(() => ({ table: null, rows: [] }))]);
-  return json({ from, to, master: master.rows, masterTable: master.table, requests: rq.requests, pendingRequests: rq.pendingRequests, canApprove, canEdit: canEditManpower(prof), canMilestone: canEditMilestone(prof), workers, projects, milestones: milestones || [], assignments: rows || [], absences: absences || [], holidays: holidays || [], needsMigration,
+  return json({ from, to, master: master.rows, masterTable: master.table, requests: rq.requests, pendingRequests: rq.pendingRequests, canApprove, canEdit: canEditManpower(prof), canConfirm: canConfirmManpower(prof), canMilestone: canEditMilestone(prof), workers, projects, milestones: milestones || [], assignments: rows || [], absences: absences || [], holidays: holidays || [], needsMigration,
     service: overlay.service, serviceUnmatched: overlay.serviceUnmatched, serviceUpdated: spRow ? (spRow.data && spRow.data.updated) || spRow.updated_at : null });
 }
 

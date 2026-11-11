@@ -158,7 +158,7 @@
       tips: ["แก้ข้อมูลงานที่ Google Sheet ใบขอคนเท่านั้น หน้าเว็บนี้ใช้ดู", "แสดงเฉพาะประเภท IS / SO / IN / WR ที่สถานะ New, Checking, Confirm, Complete"] },
 
     { id: "manpower", title: "Manpower", emoji: "👷", menu: "manpower",
-      who: "ดู: ทุกคนที่ได้รับสิทธิ์เมนู · ลงงาน / แก้ไข: SC (อาร์ต หนุ่ม สปาย), PC (กอล์ฟ แพร ไอซ์ ซี), เอ๋, SSM (ดิว) · Milestone: ดิว กอล์ฟ เอ๋",
+      who: "ดู: ทุกคนที่ได้รับสิทธิ์เมนู · ลงงาน / แก้ไข: SC (อาร์ต หนุ่ม สปาย), PC (กอล์ฟ แพร ไอซ์ ซี), เอ๋, SSM (ดิว) · Confirm Manpower (งานจอง): ทุกคนที่แก้ได้ ยกเว้นสปาย · Milestone: ดิว กอล์ฟ เอ๋",
       intro: "Planning Board คน × วัน แทน Google Sheet ตารางงานและวันหยุดช่าง — ใครอยู่งานไหน ลา หรือว่าง",
       steps: [
         ["อ่าน Planning Board", [
