@@ -455,7 +455,8 @@ async function manpowerAssign(cfg, req, prof) {
     const all = await restAll(cfg, '/rest/v1/mp_projects?select=code,name,customer,job_no,sort');
     if (!all) return json({ error: 'no_table' }, 503);
     const low = (x) => String(x || '').toLowerCase();
-    const hit = all.find((p) => low(p.name) === low(job) && low(p.customer) === low(customer))
+    const hit = (jobNo && all.find((p) => p.job_no && jobKey(p.job_no) === jobKey(jobNo)))
+      || all.find((p) => low(p.name) === low(job) && low(p.customer) === low(customer))
       || (!customer ? all.find((p) => low(p.name) === low(job)) : null);
     if (hit) {
       code = hit.code;
@@ -574,12 +575,14 @@ async function manpowerMaster(cfg, req, prof, kind) {
     return json({ ok: true, id: newId });
   }
   if (kind === 'project') {
-    const code = mpStr(d.code, 20), name = mpStr(d.name, 160);
+    const code = mpStr(d.code, 20), jn = mpStr(d.job_no, 40);
+    const mh = jn ? (await readMasterProjects(cfg).catch(() => ({ rows: [] }))).rows.find((m) => jobKey(m.job_no) === jobKey(jn)) : null;
+    const name = mh ? mpStr(mh.job_full || mh.job_name, 160) : mpStr(d.name, 160);
     const status = ['active', 'hold', 'postponed', 'cancelled', 'done'].includes(d.status) ? d.status : 'active';
     const color = /^#[0-9a-fA-F]{6}$/.test(String(d.color || '')) ? d.color : '#6d7582';
     if (!name || (code && !/^[A-Za-z0-9_-]{1,20}$/.test(code))) return json({ error: 'input' }, 400);
-    const row = { name, customer: mpStr(d.customer, 120) || null, job_no: mpStr(d.job_no, 40) || null, status, color, updated_at: now };
-    if (d.short_name !== undefined) row.short_name = mpStr(d.short_name, 40) || null;
+    const row = { name, customer: (mh ? mpStr(mh.customer, 120) : mpStr(d.customer, 120)) || null, job_no: (mh ? mh.job_no : jn) || null, status, color, updated_at: now };
+    if (d.short_name !== undefined && !mh) row.short_name = mpStr(d.short_name, 40) || null;
     let res, newCode = code;
     if (code) res = await fetch(cfg.url + `/rest/v1/mp_projects?code=eq.${encodeURIComponent(code)}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) });
     else {
