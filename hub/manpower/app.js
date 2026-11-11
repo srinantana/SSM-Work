@@ -94,6 +94,8 @@
   const OLD_COL = "#c3c8ce";
   const isOld = a => { const p = a.project_code ? DATA.P.get(a.project_code) : null; return !!p && p.code !== "SERVICE" && !masterOf(p); };
   const colorOf = a => isOld(a) ? OLD_COL : a.kind === "admin" && typeOf(a) === "other" ? "#adb5bd" : WCOL[typeOf(a)];
+  const MSC = { FAT: "#f08c00", INST: "#1c7ed6", SAT: "#2f9e44" };
+  const msKind = l => { const u = String(l || "").trim().toUpperCase(); return /^FAT\b/.test(u) ? "FAT" : /^(INST|INSTALL|ติดตั้ง)/.test(u) || u === "ติดตั้ง" ? "INST" : /^SAT\b|COMMISSION/.test(u) ? "SAT" : ""; };
   const shortOf = p => p ? (p.short_name || p.name) : "";
   // master row (RAK_Master_Project_on_hand) for a project, matched by Job no.
   const masterOf = p => p && p.job_no ? DATA.MJ.get(jobKey(p.job_no)) : null;
@@ -172,11 +174,23 @@
     if (S.miles && (DATA.milestones.length || cm)) {
       const byP = new Map();
       DATA.milestones.forEach(m => { if (matchM(m.project_code)) { if (!byP.has(m.project_code)) byP.set(m.project_code, new Map()); const x = byP.get(m.project_code); if (!x.has(m.day)) x.set(m.day, []); x.get(m.day).push(m.label); } });
-      const rows = DATA.projects.filter(p => byP.has(p.code)).map(p => `<tr class="mp-ms"><th class="mp-name"><i style="background:${esc(p.color)}"></i>${esc(p.name)}${p.status !== "active" ? ` <em>${esc(p.status)}</em>` : ""}</th>${ds.map(d => {
-        const k = key(d), t = byP.get(p.code).get(k), dm = cm ? ` data-m="${esc(p.code + "|" + k)}"` : "";
-        return t ? `<td class="mp-c ms" style="--c:${esc(p.color)}" title="${esc(t.join(" · "))}"${dm}><span>◆ ${esc(t.join(" · "))}</span></td>` : `<td class="mp-c ${dayOff(k, d) ? "we" : ""}${cm ? " ed" : ""}"${dm}></td>`;
-      }).join("")}</tr>`).join("");
-      if (rows || cm) miles = `<tr class="mp-grp"><th class="mp-name">◆ Milestone${cm ? ` <button type="button" class="mp-madd" title="เพิ่ม Milestone">+ เพิ่ม</button>` : ""}</th><td colspan="${ds.length}"></td></tr>` + rows;
+      // FAT = own point · INST = bar running up to the next SAT · SAT = end of that bar; other labels use the project colour
+      const rows = DATA.projects.filter(p => byP.has(p.code)).map(p => {
+        const M = byP.get(p.code), all = [...M.keys()].sort();
+        const sats = all.filter(k => M.get(k).some(l => msKind(l) === "SAT"));
+        const bars = all.filter(k => M.get(k).some(l => msKind(l) === "INST")).map(st => [st, sats.find(k => k >= st) || st]);
+        const inBar = k => bars.some(([a, b]) => k > a && k < b);
+        return `<tr class="mp-ms"><th class="mp-name"><i style="background:${esc(p.color)}"></i>${esc(p.name)}${p.status !== "active" ? ` <em>${esc(p.status)}</em>` : ""}</th>${ds.map(d => {
+          const k = key(d), t = M.get(k), dm = cm ? ` data-m="${esc(p.code + "|" + k)}"` : "";
+          if (t) {
+            const kinds = t.map(msKind), kd = kinds.includes("SAT") ? "SAT" : kinds.includes("INST") ? "INST" : kinds.includes("FAT") ? "FAT" : "";
+            const lab = kinds.includes("FAT") && kd !== "FAT" ? "FAT" : kd;
+            return `<td class="mp-c ms${kd ? " ms-" + kd.toLowerCase() : ""}${lab === "FAT" && kd !== "FAT" ? " ms-also-fat" : ""}" style="--c:${esc(kd ? MSC[kd] : p.color)}" title="${esc(t.join(" · "))}"${dm}><span>${kd === "INST" || kd === "SAT" ? "" : "◆ "}${esc(t.join(" · "))}</span></td>`;
+          }
+          if (inBar(k)) return `<td class="mp-c ms ms-bar" style="--c:${MSC.INST}" title="ติดตั้ง (INST → SAT)"${dm}></td>`;
+          return `<td class="mp-c ${dayOff(k, d) ? "we" : ""}${cm ? " ed" : ""}"${dm}></td>`;
+        }).join("")}</tr>`; }).join("");
+      if (rows || cm) miles = `<tr class="mp-grp"><th class="mp-name">◆ Milestone${cm ? ` <button type="button" class="mp-madd" title="เพิ่ม Milestone">+ เพิ่ม</button>` : ""}<span class="mp-mslg"><i style="background:${MSC.FAT}"></i>FAT<i class="bar" style="background:${MSC.INST}"></i>INST<i style="background:${MSC.SAT}"></i>SAT</span></th><td colspan="${ds.length}"></td></tr>` + rows;
     }
     // people grouped by unit (CUR.W = on-screen order, used by drag-select)
     CUR.W = UNITS.flatMap(([u]) => W.filter(w => w.unit === u).map(w => w.id));
@@ -869,10 +883,11 @@ button.mp-lg:hover,.mp-lg.on{border-color:var(--rak);color:var(--rak)}.mp-lg b{f
 .mp-c.ab.off{background:#eceef2}.mp-c.ab.off span{color:#8b939f}
 .mp-c.ab.ph{background:#fde3e3}.mp-c.ab.ph span{color:var(--rak)}
 .mp-c.ab.lv{background:#fff1cc}.mp-c.ab.lv span{color:var(--amber)}
-.mp-c.ms{background:color-mix(in srgb,var(--c) 12%,#fff)}.mp-c.ms span{font-weight:600;color:var(--c);font-size:10px}
+.mp-c.ms{background:color-mix(in srgb,var(--c) 12%,#fff)}.mp-c.ms span{font-weight:600;color:var(--c);font-size:10px}.mp-c.ms-bar,.mp-c.ms-inst,.mp-c.ms-sat{background:color-mix(in srgb,var(--c) 45%,#fff)}.mp-c.ms-inst span,.mp-c.ms-sat span{color:#fff;text-shadow:0 0 2px rgba(0,0,0,.35)}.mp-c.ms-sat{background:var(--c)}.mp-c.ms-inst{background:color-mix(in srgb,var(--c) 75%,#fff)}.mp-c.ms-fat{background:var(--c)}.mp-c.ms-fat span{color:#fff}.mp-c.ms-also-fat{box-shadow:inset 4px 0 0 ${MSC.FAT}}
+.mp-mslg{margin-left:8px;font-size:10px;font-weight:400;color:var(--muted);display:inline-flex;gap:3px;align-items:center}.mp-mslg i{width:9px;height:9px;border-radius:50%;display:inline-block;margin-left:5px}.mp-mslg i.bar{width:16px;border-radius:2px}
 .mp-z-week .mp-c,.mp-z-week .mp-d{min-width:104px;max-width:104px}.mp-z-week .mp-c{height:44px}.mp-z-week .mp-c span{-webkit-line-clamp:3}
 .mp-z-month .mp-c,.mp-z-month .mp-d{min-width:58px;max-width:58px}.mp-z-month .mp-c span{font-size:9.5px}
-.mp-z-quarter .mp-c,.mp-z-quarter .mp-d{min-width:22px;max-width:22px}.mp-z-quarter .mp-c.job{background:color-mix(in srgb,var(--c) 42%,#fff);box-shadow:none}.mp-z-quarter .mp-c.job.tent{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--c) 42%,#fff) 0 3px,#fff 3px 6px)}.mp-z-quarter .mp-c.ms{background:var(--c)}.mp-z-quarter .mp-c{height:26px}.mp-z-quarter .mp-c.job span,.mp-z-quarter .mp-c.ms span{display:none}.mp-z-quarter .mp-c.ab span{font-size:8.5px}
+.mp-z-quarter .mp-c,.mp-z-quarter .mp-d{min-width:22px;max-width:22px}.mp-z-quarter .mp-c.job{background:color-mix(in srgb,var(--c) 42%,#fff);box-shadow:none}.mp-z-quarter .mp-c.job.tent{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--c) 42%,#fff) 0 3px,#fff 3px 6px)}.mp-z-quarter .mp-c.ms{background:var(--c)}.mp-z-quarter .mp-c.ms-bar{background:color-mix(in srgb,var(--c) 55%,#fff)}.mp-z-quarter .mp-c{height:26px}.mp-z-quarter .mp-c.job span,.mp-z-quarter .mp-c.ms span{display:none}.mp-z-quarter .mp-c.ab span{font-size:8.5px}
 .mp-grid tfoot th,.mp-grid tfoot td{position:sticky;background:#fff;font-weight:600;font-size:11px}
 .mp-grid tfoot tr:nth-child(1) th,.mp-grid tfoot tr:nth-child(1) td{bottom:52px;border-top:2px solid var(--line)}
 .mp-grid tfoot tr:nth-child(2) th,.mp-grid tfoot tr:nth-child(2) td{bottom:26px}
