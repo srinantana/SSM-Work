@@ -661,7 +661,7 @@ async function manpowerApi(cfg, req, url, prof) {
 // required when confirmed work is hit). ดิว / กอล์ฟ (everyone) and โจ้ (EE) confirm or reject — from Service Plan or Manpower, the
 // status is the same row (sp_request_people.status). Confirm writes every day of the range (minus leave) into
 // mp_assignments (work_type service, source 'sp', not tentative) and replaces what was planned there (kept in mp_change_log).
-// Tables: database/service_plan_requests.sql. API under /api/service-plan/req/ (list, avail, create, decide, cancel).
+// Tables: database/service_plan_requests.sql + service_plan_requests-002.sql (งานรอนัดวัน). API under /api/service-plan/req/ (list, avail, create, update, decide, cancel).
 const SPR_TYPES = ['IS', 'SO', 'IN', 'WR', 'IJ', 'JO'];
 // Rights (set by Dew, 10 Nov 2026 22:45):
 //   Confirm / Reject — ดิว (SSM) and กอล์ฟ: everyone · โจ้ (เจนรบ แก้วกระแสร์): electricians (unit EE) only
@@ -766,41 +766,77 @@ async function sprList(cfg, prof) {
   return json({ me: { username: prof.username || prof.email, name: prof.nameTh || prof.name }, canApprove: !!scope, approveUnits: scope === 'all' ? null : scope, canRequest, vehicles, customers,
     requests: reqs.data.map((r) => ({ ...r, req_no: sprNo(r), people: by.get(r.id) || [] })) });
 }
-async function sprCreate(cfg, req, prof) {
+// POST create {…} / update {id, …}. draft: true = "งานรอนัดวัน": job details only, no dates and no people yet (Service
+// support notes the job before the customer confirms a date); expect_date / expect_note say roughly when. A draft is
+// edited or turned into a real request (dates + people → รอ PC) through update; requests already sent cannot be edited.
+async function sprSave(cfg, req, prof, update) {
   if (!(await sprCanRequest(cfg, prof))) return json({ error: 'บัญชีนี้ยังไม่มีสิทธิ์ขอคน ติดต่อดิว (SSM)' }, 403);
   const d = await mpBody(req);
   if (!d) return json({ error: 'json' }, 400);
-  const type = String(d.type || '').toUpperCase(), customer = mpStr(d.customer, 120), job = mpStr(d.job_name, 160);
-  const from = mpStr(d.from, 10), to = mpStr(d.to || d.from, 10);
-  if (!SPR_TYPES.includes(type) || !customer || !job || !ISO_DAY.test(from) || !ISO_DAY.test(to) || to < from) return json({ error: 'กรอกประเภท ลูกค้า ชื่องาน และช่วงวันให้ครบ' }, 400);
-  if ((Date.parse(to) - Date.parse(from)) / 864e5 > 61) return json({ error: 'ช่วงวันยาวเกิน 62 วัน แบ่งเป็นหลายคำขอ' }, 400);
-  const want = (Array.isArray(d.people) ? d.people : []).slice(0, 40).map((p) => ({ id: mpStr(p && p.worker_id, 20), leader: !!(p && p.is_leader), reason: mpStr(p && p.reason, 300) })).filter((p) => MP_ID.test(p.id));
-  if (!want.length) return json({ error: 'เลือกคนอย่างน้อย 1 คน' }, 400);
-  const av = await sprAvail(cfg, from, to, 0);
-  if (!av) return json({ error: 'no_table' }, 503);
-  const A = new Map(av.workers.map((w) => [w.id, w])), rows = [], seen = new Set();
-  for (const p of want) {
-    if (seen.has(p.id)) continue; seen.add(p.id);
-    const w = A.get(p.id);
-    if (!w) return json({ error: 'ไม่พบรายชื่อ ' + p.id }, 404);
-    if (!/[^o]/.test(w.c)) return json({ error: `${w.nick || w.name} ลาตลอดช่วงที่ขอ เลือกคนอื่น` }, 409);
-    const conflicts = [];
-    av.days.forEach((day, i) => { if ('hba'.includes(w.c[i])) conflicts.push({ day, s: w.c[i], t: String(w.t[i] || '').slice(0, 160) }); });
-    const busy = /b/.test(w.c), swap = /[hb]/.test(w.c);
-    if (busy && !p.reason) return json({ error: `${w.nick || w.name} มีงานที่ยืนยันแล้ว ต้องใส่เหตุผลที่ขอสลับ` }, 400);
-    rows.push({ worker_id: p.id, is_leader: p.leader, mode: swap ? 'swap' : 'book', reason: p.reason || null, conflicts: conflicts.slice(0, 62), status: 'pending' });
+  const who = prof.username || prof.email, id = Number(d.id) || 0, draft = !!d.draft;
+  let old = null;
+  if (update) {
+    const cur = await call(cfg, `/rest/v1/sp_requests?select=*&id=eq.${id}`, { method: 'GET', admin: true });
+    if (!cur.ok) return json({ error: 'no_table' }, 503);
+    old = cur.data[0];
+    if (!old) return json({ error: 'not found' }, 404);
+    if (!old.draft || old.cancelled) return json({ error: 'แก้ไขได้เฉพาะงานรอนัดวัน คำขอที่ส่งแล้วแก้ไม่ได้' }, 409);
   }
-  if (rows.filter((r) => r.is_leader).length > 1) return json({ error: 'เลือกหัวหน้าทีม (SS) ได้ 1 คน' }, 400);
-  const who = prof.username || prof.email, H = { ...authHeaders(cfg.service), prefer: 'return=representation' };
-  const ins = await fetch(cfg.url + '/rest/v1/sp_requests', { method: 'POST', headers: H, body: JSON.stringify({ type, customer, job_name: job, job_no: mpStr(d.job_no, 40) || null,
-    description: String(d.description || '').trim().slice(0, 2000) || null, vehicle: mpStr(d.vehicle, 60) || null, date_from: from, date_to: to, requested_by: who, requested_name: prof.nameTh || prof.name || who }) });
-  if (!ins.ok) return json({ error: ins.status === 404 ? 'no_table' : 'supabase' }, ins.status === 404 ? 503 : 502);
-  const r = (await ins.json())[0];
-  const pp = await fetch(cfg.url + '/rest/v1/sp_request_people', { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'return=minimal' }, body: JSON.stringify(rows.map((x) => ({ ...x, request_id: r.id }))) });
-  if (!pp.ok) { await fetch(cfg.url + `/rest/v1/sp_requests?id=eq.${r.id}`, { method: 'DELETE', headers: authHeaders(cfg.service) }).catch(() => {}); return json({ error: 'supabase' }, 502); }
-  await mpLog(cfg, who, 'sp-request', { id: r.id, req_no: sprNo(r), type, customer, job, from, to, people: rows.map((x) => ({ worker_id: x.worker_id, mode: x.mode })) });
-  return json({ ok: true, id: r.id, req_no: sprNo(r), swaps: rows.filter((x) => x.mode === 'swap').length });
+  const type = String(d.type || '').toUpperCase(), customer = mpStr(d.customer, 120), job = mpStr(d.job_name, 160);
+  if (!SPR_TYPES.includes(type) || !customer || !job) return json({ error: 'กรอกประเภท ลูกค้า และชื่องาน' }, 400);
+  const expect = mpStr(d.expect_date, 10);
+  if (expect && !ISO_DAY.test(expect)) return json({ error: 'วันที่คาดว่าจะเข้างานไม่ถูกต้อง' }, 400);
+  const base = { type, customer, job_name: job, job_no: mpStr(d.job_no, 40) || null, description: String(d.description || '').trim().slice(0, 2000) || null,
+    vehicle: mpStr(d.vehicle, 60) || null, expect_date: expect || null, expect_note: mpStr(d.expect_note, 160) || null, draft, updated_at: new Date().toISOString() };
+  let rows = [];
+  if (draft) { base.date_from = null; base.date_to = null; }
+  else {
+    const from = mpStr(d.from, 10), to = mpStr(d.to || d.from, 10);
+    if (!ISO_DAY.test(from) || !ISO_DAY.test(to) || to < from) return json({ error: 'เลือกช่วงวันให้ครบ' }, 400);
+    if ((Date.parse(to) - Date.parse(from)) / 864e5 > 61) return json({ error: 'ช่วงวันยาวเกิน 62 วัน แบ่งเป็นหลายคำขอ' }, 400);
+    const want = (Array.isArray(d.people) ? d.people : []).slice(0, 40).map((p) => ({ id: mpStr(p && p.worker_id, 20), leader: !!(p && p.is_leader), reason: mpStr(p && p.reason, 300) })).filter((p) => MP_ID.test(p.id));
+    if (!want.length) return json({ error: 'เลือกคนอย่างน้อย 1 คน' }, 400);
+    const av = await sprAvail(cfg, from, to, 0);
+    if (!av) return json({ error: 'no_table' }, 503);
+    const A = new Map(av.workers.map((w) => [w.id, w])), seen = new Set();
+    for (const p of want) {
+      if (seen.has(p.id)) continue; seen.add(p.id);
+      const w = A.get(p.id);
+      if (!w) return json({ error: 'ไม่พบรายชื่อ ' + p.id }, 404);
+      if (!/[^o]/.test(w.c)) return json({ error: `${w.nick || w.name} ลาตลอดช่วงที่ขอ เลือกคนอื่น` }, 409);
+      const conflicts = [];
+      av.days.forEach((day, i) => { if ('hba'.includes(w.c[i])) conflicts.push({ day, s: w.c[i], t: String(w.t[i] || '').slice(0, 160) }); });
+      const busy = /b/.test(w.c), swap = /[hb]/.test(w.c);
+      if (busy && !p.reason) return json({ error: `${w.nick || w.name} มีงานที่ยืนยันแล้ว ต้องใส่เหตุผลที่ขอสลับ` }, 400);
+      rows.push({ worker_id: p.id, is_leader: p.leader, mode: swap ? 'swap' : 'book', reason: p.reason || null, conflicts: conflicts.slice(0, 62), status: 'pending' });
+    }
+    if (rows.filter((r) => r.is_leader).length > 1) return json({ error: 'เลือกหัวหน้าทีม (SS) ได้ 1 คน' }, 400);
+    base.date_from = from; base.date_to = to;
+  }
+  const H = { ...authHeaders(cfg.service), prefer: 'return=representation' };
+  let res = update
+    ? await fetch(cfg.url + `/rest/v1/sp_requests?id=eq.${id}&draft=is.true`, { method: 'PATCH', headers: H, body: JSON.stringify(base) })
+    : await fetch(cfg.url + '/rest/v1/sp_requests', { method: 'POST', headers: H, body: JSON.stringify({ ...base, requested_by: who, requested_name: prof.nameTh || prof.name || who }) });
+  if (res.status === 400 && !update && !draft) { // 002 not run yet: ordinary requests still work without the new columns
+    const { draft: _d, expect_date: _e, expect_note: _n, ...plain } = base;
+    res = await fetch(cfg.url + '/rest/v1/sp_requests', { method: 'POST', headers: H, body: JSON.stringify({ ...plain, requested_by: who, requested_name: prof.nameTh || prof.name || who }) });
+  }
+  if (!res.ok) return json({ error: res.status === 404 ? 'no_table' : res.status === 400 ? 'ยังไม่ได้รัน database/service_plan_requests-002.sql ใน Supabase' : 'supabase' }, res.status === 404 || res.status === 400 ? 503 : 502);
+  const r = (await res.json())[0];
+  if (!r) return json({ error: 'รายการนี้ถูกแก้ไปแล้ว รีเฟรชหน้า' }, 409);
+  if (rows.length) {
+    const pp = await fetch(cfg.url + '/rest/v1/sp_request_people', { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'return=minimal' }, body: JSON.stringify(rows.map((x) => ({ ...x, request_id: r.id }))) });
+    if (!pp.ok) { // put it back as it was
+      if (update) await fetch(cfg.url + `/rest/v1/sp_requests?id=eq.${r.id}`, { method: 'PATCH', headers: H, body: JSON.stringify({ draft: true, date_from: null, date_to: null }) }).catch(() => {});
+      else await fetch(cfg.url + `/rest/v1/sp_requests?id=eq.${r.id}`, { method: 'DELETE', headers: authHeaders(cfg.service) }).catch(() => {});
+      return json({ error: 'supabase' }, 502);
+    }
+  }
+  await mpLog(cfg, who, draft ? (update ? 'sp-draft-edit' : 'sp-draft') : 'sp-request', { id: r.id, req_no: sprNo(r), type, customer, job, from: base.date_from, to: base.date_to, expect: base.expect_date, from_draft: !!update, people: rows.map((x) => ({ worker_id: x.worker_id, mode: x.mode })) });
+  return json({ ok: true, id: r.id, req_no: sprNo(r), draft, swaps: rows.filter((x) => x.mode === 'swap').length });
 }
+const sprCreate = (cfg, req, prof) => sprSave(cfg, req, prof, false);
+const sprUpdate = (cfg, req, prof) => sprSave(cfg, req, prof, true);
 // existing project with the same customer + job name, or a new one
 async function sprProject(cfg, customer, job, jobNo) {
   const all = await restAll(cfg, '/rest/v1/mp_projects?select=code,name,customer,job_no,sort');
@@ -868,7 +904,7 @@ async function sprCancel(cfg, req, prof) {
   if (!r.ok) return json({ error: 'no_table' }, 503);
   const row = r.data[0], who = prof.username || prof.email;
   if (!row) return json({ error: 'not found' }, 404);
-  if (row.requested_by !== who && !(await sprCanApprove(cfg, prof))) return json({ error: 'ยกเลิกได้เฉพาะผู้ขอ' }, 403);
+  if (row.requested_by !== who && !(await sprCanApprove(cfg, prof)) && !(row.draft && await sprCanRequest(cfg, prof))) return json({ error: 'ยกเลิกได้เฉพาะผู้ขอ' }, 403);
   const people = await restAll(cfg, `/rest/v1/sp_request_people?select=id,status&request_id=eq.${id}`);
   if ((people || []).some((p) => p.status === 'confirmed')) return json({ error: 'มีคนที่ PC Confirm แล้ว ติดต่อ PC เพื่อแก้แผน' }, 409);
   const H = { ...authHeaders(cfg.service), prefer: 'return=minimal' }, now = new Date().toISOString();
@@ -888,7 +924,7 @@ async function sprApi(cfg, req, url, prof) {
     const av = await sprAvail(cfg, from, to, 0);
     return av ? json(av) : json({ error: 'no_table' }, 503);
   }
-  const post = { create: sprCreate, decide: sprDecide, cancel: sprCancel }[p];
+  const post = { create: sprCreate, update: sprUpdate, decide: sprDecide, cancel: sprCancel }[p];
   if (!post) return json({ error: 'not found' }, 404);
   return req.method === 'POST' ? post(cfg, req, prof) : json({ error: 'method' }, 405);
 }

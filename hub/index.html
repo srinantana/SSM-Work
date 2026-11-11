@@ -166,6 +166,11 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:#f1f3
   .side-acct a.out{color:var(--rak)}
 }
 @media (prefers-reduced-motion: reduce){.side,.mod{transition:none}.mod:hover{transform:none}}
+.due{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;background:#f3edff;border-bottom:1px solid #d9c9fb;color:#3b2a66;padding:8px 20px;font-size:13px}
+.due[hidden]{display:none}.due b{white-space:nowrap}.due-l{display:flex;flex-wrap:wrap;gap:6px;flex:1 1 300px;align-items:center}
+.due-l button{border:1px solid #c9b6f5;background:#fff;border-radius:999px;padding:3px 11px;font:inherit;font-size:12.5px;color:#3b2a66;cursor:pointer;text-align:left}
+.due-l button:hover{background:#ebe2ff}.due-l button.late{border-color:#e6b0aa;color:#a93226}.due-l i{font-style:normal;color:#6d28d9;margin-left:4px}.due-l button.late i{color:#c0392b}
+.due-l a{color:#6d28d9;font-size:12.5px}.due-x{border:0;background:none;color:#6d28d9;font:inherit;font-size:12.5px;cursor:pointer;text-decoration:underline}
 </style>
 </head>
 <body>
@@ -207,6 +212,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:#f1f3
       <div class="crumb" id="crumb"></div>
       <span class="chip" id="who">SSM Work</span><span id="acct" hidden><a class="logout" id="admin" href="/admin" hidden>จัดการผู้ใช้</a> <a class="logout" href="/auth/password">เปลี่ยนรหัสผ่าน</a> <a class="logout" href="/auth/logout">ออกจากระบบ</a></span>
     </div>
+    <div class="due" id="sprDue" role="status" hidden></div>
     <main class="content" id="content" tabindex="-1"></main>
   </div>
 </div>
@@ -357,9 +363,30 @@ function setMenu(open){ document.getElementById("shell").classList.toggle("open"
 window.addEventListener("hashchange", () => { render(); document.getElementById("content").focus({preventScroll:true}); window.scrollTo(0,0); });
 document.getElementById("menuBtn").addEventListener("click", e => { e.stopPropagation(); setMenu(!document.getElementById("shell").classList.contains("open")); });
 document.querySelector(".main").addEventListener("click", () => { if (document.getElementById("shell").classList.contains("open")) setMenu(false); });
+// Service Plan · งานรอนัดวัน: reminder across the top of every page from 3 weeks before the expected date
+// (hub/sp-request/app.js → SPRequest.due()), for everyone who can open Service Plan. "ปิด" hides it until the list changes.
+let DUE_HIDE = "";
+function dueBanner(){
+  const box = document.getElementById("sprDue");
+  if (!window.SPRequest || !allowed("service-plan")) { box.hidden = true; return; }
+  window.SPRequest.load().then(() => {
+    const list = window.SPRequest.due(), sig = list.map(r => r.id + ":" + r.expect_date).join(",");
+    if (!list.length || sig === DUE_HIDE) { box.hidden = true; return; }
+    const today = new Date(); today.setHours(0,0,0,0);
+    const left = r => { const n = Math.round((new Date(r.expect_date + "T00:00:00") - today) / 864e5); return n < 0 ? `เลยกำหนด ${-n} วัน` : n === 0 ? "ถึงกำหนดวันนี้" : `อีก ${n} วัน`; };
+    const e = t => String(t ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+    box.innerHTML = `<b>⏰ งานรอนัดวัน ใกล้ถึงกำหนด ${list.length} งาน</b><span class="due-l">${list.slice(0, 6).map(r => `<button type="button" data-due="${r.id}" class="${r.expect_date < new Date().toISOString().slice(0,10) ? "late" : ""}">${e(r.type)} · ${e(r.customer)} · ${e(r.job_name)} <i>${e(window.SPRequest.when(r))} — ${left(r)}</i></button>`).join("")}${list.length > 6 ? `<a href="#service-plan/req">+ อีก ${list.length - 6} งาน</a>` : ""}</span><button type="button" class="due-x" data-due-x aria-label="ปิดการแจ้งเตือน">ปิด</button>`;
+    box.hidden = false;
+    box.onclick = ev => {
+      if (ev.target.closest("[data-due-x]")) { DUE_HIDE = sig; box.hidden = true; return; }
+      const b = ev.target.closest("[data-due]"); if (b) window.SPRequest.open(+b.dataset.due, dueBanner);
+    };
+  }).catch(() => { box.hidden = true; });
+}
 fetch("/auth/me", {cache:"no-store"}).then(r => r.ok ? r.json() : null).then(u => {
   if (!u || !u.email) return;
   ME = u; window.SSM_ME = u; render();
+  dueBanner(); window.addEventListener("spr-change", dueBanner);
   document.getElementById("who").textContent = "👋 " + (u.name || u.email);
   document.getElementById("who").title = u.username || u.email;
   document.getElementById("acct").hidden = false;

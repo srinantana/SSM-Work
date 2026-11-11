@@ -36,6 +36,7 @@
   // overall status of a request, from its people
   function status(r) {
     if (r.cancelled) return ["ยกเลิก", "x"];
+    if (r.draft) return ["รอนัดวัน", "d"];
     const n = s => r.people.filter(p => p.status === s).length, p = n("pending"), c = n("confirmed"), j = n("rejected");
     if (p && !c && !j) return ["รอ PC", "p"];
     if (p) return ["Confirm บางส่วน · รอ PC", "m"];
@@ -43,6 +44,10 @@
     return c ? ["Confirm", "c"] : ["ไม่อนุมัติ", "r"];
   }
   const subject = r => [r.type, r.customer, r.job_name].filter(Boolean).join(" | ");
+  const drafts = () => L ? L.requests.filter(r => r.draft && !r.cancelled) : [];
+  const when = r => r.date_from ? fmtR(r.date_from, r.date_to) : r.expect_date ? "คาดว่า ~" + fmtR(r.expect_date, r.expect_date) + (r.expect_note ? " (" + r.expect_note + ")" : "") : r.expect_note || "ยังไม่ระบุวัน";
+  // drafts whose expected date is within 3 weeks (or already past): shown at the top of every page by hub/index.html
+  const due = () => { const lim = addD(iso(new Date()), 21); return drafts().filter(r => r.expect_date && r.expect_date <= lim).sort((a, b) => a.expect_date < b.expect_date ? -1 : 1); };
   const pending = () => L ? L.requests.filter(r => !r.cancelled && r.people.some(p => p.status === "pending")) : [];
 
   function css() {
@@ -66,18 +71,18 @@
   /* ---------- list ---------- */
   function listHtml() {
     const me = L.me.username, f = VIEW || (L.canApprove ? "wait" : "mine");
-    const sets = { wait: pending(), mine: L.requests.filter(r => r.requested_by === me), all: L.requests };
+    const sets = { wait: pending(), draft: drafts(), mine: L.requests.filter(r => r.requested_by === me), all: L.requests };
     const rows = sets[f] || [];
     const tab = (k, t) => `<button type="button" data-f="${k}" class="${f === k ? "on" : ""}">${t} <b>${sets[k].length}</b></button>`;
-    return `<div class="spr-top"><div class="spr-tabs">${tab("wait", "รอ Confirm")}${tab("mine", "คำขอของฉัน")}${tab("all", "ทั้งหมด")}</div>
+    return `<div class="spr-top"><div class="spr-tabs">${tab("wait", "รอ Confirm")}${tab("draft", "รอนัดวัน")}${tab("mine", "คำขอของฉัน")}${tab("all", "ทั้งหมด")}</div>
       ${L.canRequest ? `<button type="button" class="spr-btn pri" data-new>+ ขอคน</button>` : ""}</div>
       <p class="spr-hint">${L.canApprove ? "คุณมีสิทธิ์ <b>Confirm / Reject</b> คำขอ" + (L.approveUnits ? " เฉพาะช่างไฟฟ้า (" + L.approveUnits.join(", ") + ")" : " ทุกคน") : L.canRequest ? "ส่งคำขอแล้วรอ Confirm (กอล์ฟ · โจ้ สำหรับช่างไฟฟ้า) · ผู้ขอ = ชื่อที่ login: <b>" + esc(L.me.name) + "</b>" : "บัญชีนี้ดูคำขอได้อย่างเดียว (ยังไม่มีสิทธิ์ขอคน)"}</p>
-      ${rows.length ? `<div class="spr-list">${rows.map(card).join("")}</div>` : `<div class="spr-empty">${f === "wait" ? "ไม่มีคำขอรอ Confirm" : f === "mine" ? "ยังไม่มีคำขอของคุณ" : "ยังไม่มีคำขอ"}</div>`}`;
+      ${rows.length ? `<div class="spr-list">${rows.map(card).join("")}</div>` : `<div class="spr-empty">${f === "draft" ? "ไม่มีงานรอนัดวัน — กด “+ ขอคน” แล้วเลือก “บันทึกเป็นงานรอนัดวัน” เมื่อยังไม่ได้วันจากลูกค้า" : f === "wait" ? "ไม่มีคำขอรอ Confirm" : f === "mine" ? "ยังไม่มีคำขอของคุณ" : "ยังไม่มีคำขอ"}</div>`}`;
   }
   function card(r) {
     const [t, c] = status(r), sw = r.people.some(p => p.mode === "swap" && p.status === "pending");
     return `<button type="button" class="spr-card st-${c}" data-open="${r.id}">
-      <span class="spr-row"><b>${esc(r.req_no)}</b><span class="spr-pill st-${c}">${esc(t)}</span>${sw ? `<span class="spr-pill sw">ขอสลับคน</span>` : ""}<span class="spr-when">📅 ${esc(fmtR(r.date_from, r.date_to))}</span></span>
+      <span class="spr-row"><b>${esc(r.req_no)}</b><span class="spr-pill st-${c}">${esc(t)}</span>${sw ? `<span class="spr-pill sw">ขอสลับคน</span>` : ""}<span class="spr-when">📅 ${esc(when(r))}</span></span>
       <span class="spr-sub">${esc(subject(r))}${r.job_no ? " | " + esc(r.job_no) : ""}</span>
       <span class="spr-ppl">${r.people.map(p => `<i class="st-${PST[p.status][1]}" title="${esc(p.name + " · " + PST[p.status][0])}">${p.is_leader ? "★ " : ""}${esc(who(p))}</i>`).join("")}</span>
       <span class="spr-by">ผู้ขอ ${esc(r.requested_name || r.requested_by)}${r.vehicle ? " · 🚗 " + esc(r.vehicle) : ""}</span></button>`;
@@ -119,7 +124,7 @@
       m.el.querySelector(".spr-dlg").innerHTML = `<header class="st-${c}"><div><span class="spr-pill st-${c}">${esc(t)}</span> <span class="spr-pill ty">${esc(r.type)}</span> <small>${esc(r.req_no)}</small><h3>${esc(subject(r))}</h3></div><button type="button" class="spr-x" aria-label="ปิด">✕</button></header>
         <div class="spr-body">
           <dl class="spr-dl"><dt>ลูกค้า</dt><dd>${esc(r.customer)}</dd><dt>ชื่องาน</dt><dd>${esc(r.job_name)}</dd>${r.job_no ? `<dt>เลขงาน</dt><dd>${esc(r.job_no)}</dd>` : ""}
-            <dt>ช่วงวัน</dt><dd>${esc(fmtR(r.date_from, r.date_to))}</dd><dt>ทะเบียนรถ</dt><dd><b>${esc(r.vehicle || "–")}</b></dd>
+            <dt>${r.date_from ? "ช่วงวัน" : "คาดว่าจะเข้างาน"}</dt><dd>${esc(when(r))}</dd><dt>ทะเบียนรถ</dt><dd><b>${esc(r.vehicle || "–")}</b></dd>
             ${r.description ? `<dt>รายละเอียด</dt><dd class="pre">${esc(r.description)}</dd>` : ""}
             <dt>ผู้ขอ</dt><dd>${esc(r.requested_name || r.requested_by)} · ${esc(new Date(r.created_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }))}</dd></dl>
           <h4>คนที่ขอ (${r.people.length})</h4>
@@ -133,11 +138,13 @@
             ${pend.length > 1 ? `<button type="button" class="spr-btn ok" data-act="confirm" data-id="all">✓ Confirm ทั้ง ${pend.length} คน${L.approveUnits ? " (ช่างไฟฟ้า)" : ""}</button><button type="button" class="spr-btn no" data-act="reject" data-id="all">✕ Reject ทั้งหมด</button>` : ""}
             <small>Confirm แล้วระบบจะลงงาน Service ใน Manpower board ให้ทันที (ทุกวันในช่วง รวมวันอาทิตย์ / วันหยุด ยกเว้นวันลา)${pend.some(p => p.mode === "swap") ? " · <b>คำขอสลับ: งานเดิมของคนนั้นในวันดังกล่าวจะถูกแทนที่</b> (เก็บไว้ในประวัติการแก้ไข)" : ""}</small></div>` : ""}
           ${allPend.length && !pend.length ? `<p class="spr-hint">รอ Confirm — กอล์ฟ (ทุกคน) · โจ้ (เฉพาะช่างไฟฟ้า)</p>` : ""}
-          ${(mine || L.canApprove) && !r.cancelled && !anyC && allPend.length ? `<button type="button" class="spr-link" data-cancel>ยกเลิกคำขอนี้</button>` : ""}
+          ${r.draft && !r.cancelled ? `<div class="spr-act"><small style="flex:1 1 260px;font-size:13px;color:#4a515c">งานนี้ยังไม่ได้นัดวันกับลูกค้า — ยังไม่ขึ้นปฏิทินและไม่กันคิวใครใน Manpower</small>${L.canRequest ? `<button type="button" class="spr-btn pri" data-edit>ใส่วัน + เลือกคน / แก้ไข</button>` : ""}</div>` : ""}
+          ${!r.cancelled && ((r.draft && L.canRequest) || ((mine || L.canApprove) && !anyC && allPend.length)) ? `<button type="button" class="spr-link" data-cancel>${r.draft ? "ยกเลิกงานนี้" : "ยกเลิกคำขอนี้"}</button>` : ""}
           <div class="spr-msg" role="status">${msg || ""}</div></div>`;
     };
     draw();
     m.el.addEventListener("click", async e => {
+      if (e.target.closest("[data-edit]")) { m.close(); return void buildForm(onChange, r); }
       const b = e.target.closest("[data-act]"), cx = e.target.closest("[data-cancel]");
       if (!b && !cx) return;
       const msg = m.el.querySelector(".spr-msg"), note = (m.el.querySelector("#sprNote") || {}).value || "";
@@ -151,7 +158,7 @@
           const res = await call("decide", { ids, action: b.dataset.act, note });
           done = b.dataset.act === "confirm" ? `Confirm แล้ว ${res.done} คน · ลง Manpower ${res.cells} ช่อง${res.replaced ? " (แทนที่งานเดิม " + res.replaced + " ช่อง)" : ""}` : `Reject แล้ว ${res.done} คน`;
         }
-        await load(true); draw(esc(done)); onChange && onChange();
+        await load(true); draw(esc(done)); onChange && onChange(); window.dispatchEvent(new Event("spr-change"));
       } catch (err) { await load(true).catch(() => {}); draw(`<span class="err">${esc(err.message)}</span>`); }
     });
   }
@@ -160,27 +167,30 @@
   function form(onChange) {
     return load().then(() => L.canRequest ? buildForm(onChange) : void modal(`<header><h3>+ ขอคน</h3><button type="button" class="spr-x">✕</button></header><div class="spr-body"><div class="spr-empty">บัญชีนี้ยังไม่มีสิทธิ์ขอคน — ผู้ที่ขอได้: ดิว อิ๋ม ปุ๋ม หนุ่ม สปาย อาร์ต แพรวา ไอซ์ ซี กอล์ฟ โจ้<br>ติดต่อดิว (SSM) เพื่อเพิ่มสิทธิ์</div></div>`), err => void modal(`<header><h3>+ ขอคน</h3><button type="button" class="spr-x">✕</button></header><div class="spr-body"><div class="spr-empty err">${esc(err.message)}</div></div>`));
   }
-  function buildForm(onChange) {
+  function buildForm(onChange, ed) {   // ed = a draft (งานรอนัดวัน) being edited / given dates
     const F = { people: new Map(), tab: "day", day: "all", free: true, person: "", av: null, key: "", unit: "" };
-    const t0 = iso(new Date());
-    const m = modal(`<header><h3>+ ขอคน <small>ทดลองใช้</small></h3><button type="button" class="spr-x" aria-label="ปิด">✕</button></header>
+    const t0 = iso(new Date()), d0 = ed && ed.expect_date && ed.expect_date > t0 ? ed.expect_date : t0, V = k => esc(ed && ed[k] || "");
+    const vs = (L ? L.vehicles : []), vOther = ed && ed.vehicle && !vs.includes(ed.vehicle);
+    const m = modal(`<header><h3>${ed ? "งานรอนัดวัน " + esc(ed.req_no) : "+ ขอคน"} <small>ทดลองใช้</small></h3><button type="button" class="spr-x" aria-label="ปิด">✕</button></header>
       <form class="spr-body spr-form" novalidate>
         <p class="spr-hint">ผู้ขอ: <b>${esc(L ? L.me.name : "")}</b> (ตามชื่อที่ login) · ขอได้ครบ 7 วัน รวมวันอาทิตย์และวันหยุด</p>
         <div class="spr-grid">
-          <label>ประเภท<select name="type" required>${TYPES.map(t => `<option>${t}</option>`).join("")}</select></label>
-          <label class="w2">ชื่อลูกค้า<input name="customer" required maxlength="120" list="sprCust" autocomplete="off"><datalist id="sprCust">${(L ? L.customers : []).map(c => `<option value="${esc(c)}">`).join("")}</datalist></label>
-          <label class="w3">ชื่องาน<input name="job_name" required maxlength="160" placeholder="เช่น PM ประจำปี Line 2 / ซ่อมปั๊ม"></label>
-          <label><span>เลขงาน <small>(ถ้ามี)</small></span><input name="job_no" maxlength="40"></label>
-          <label>ตั้งแต่วันที่<input type="date" name="from" required min="${addD(t0, -30)}" value="${t0}"></label>
-          <label>ถึงวันที่<input type="date" name="to" required value="${t0}"></label>
-          <label class="w2">ทะเบียนรถ<select name="veh"><option value="">— ยังไม่ระบุ / ไม่ใช้รถ —</option>${(L ? L.vehicles : []).map(v => `<option>${esc(v)}</option>`).join("")}<option value="__other">อื่น ๆ (พิมพ์เอง)</option></select><input name="veh2" maxlength="60" placeholder="พิมพ์ทะเบียนรถ" hidden></label>
-          <label class="w3"><span>รายละเอียดงาน <small>(ถ้ามี)</small></span><textarea name="description" rows="2" maxlength="2000"></textarea></label>
+          <label>ประเภท<select name="type" required>${TYPES.map(t => `<option ${ed && ed.type === t ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+          <label class="w2">ชื่อลูกค้า<input name="customer" required maxlength="120" list="sprCust" autocomplete="off" value="${V("customer")}"><datalist id="sprCust">${(L ? L.customers : []).map(c => `<option value="${esc(c)}">`).join("")}</datalist></label>
+          <label class="w3">ชื่องาน<input name="job_name" required maxlength="160" value="${V("job_name")}" placeholder="เช่น PM ประจำปี Line 2 / ซ่อมปั๊ม"></label>
+          <label><span>เลขงาน <small>(ถ้ามี)</small></span><input name="job_no" maxlength="40" value="${V("job_no")}"></label>
+          <label>ตั้งแต่วันที่<input type="date" name="from" required min="${addD(t0, -30)}" value="${d0}"></label>
+          <label>ถึงวันที่<input type="date" name="to" required value="${d0}"></label>
+          <label class="w2">ทะเบียนรถ<select name="veh"><option value="">— ยังไม่ระบุ / ไม่ใช้รถ —</option>${vs.map(v => `<option ${ed && ed.vehicle === v ? "selected" : ""}>${esc(v)}</option>`).join("")}<option value="__other" ${vOther ? "selected" : ""}>อื่น ๆ (พิมพ์เอง)</option></select><input name="veh2" maxlength="60" placeholder="พิมพ์ทะเบียนรถ" value="${vOther ? V("vehicle") : ""}" ${vOther ? "" : "hidden"}></label>
+          <label class="w3"><span>รายละเอียดงาน <small>(ถ้ามี)</small></span><textarea name="description" rows="2" maxlength="2000">${V("description")}</textarea></label>
         </div>
+        <div class="spr-dr"><b>ยังไม่ได้วันจากลูกค้า?</b> ใส่วันที่คาดว่าจะเข้างาน แล้วกด “บันทึกเป็นงานรอนัดวัน” — ไม่ต้องเลือกวันและคน ระบบจะเตือนด้านบนของทุกหน้าล่วงหน้า 3 สัปดาห์
+          <div class="spr-grid"><label>คาดว่าจะเข้างานประมาณ<input type="date" name="expect" value="${V("expect_date")}"></label><label class="w2"><span>หมายเหตุเรื่องวัน <small>(ถ้ามี)</small></span><input name="expect_note" maxlength="160" value="${V("expect_note")}" placeholder="เช่น ปลาย พ.ย. / รอลูกค้ายืนยัน shutdown"></label></div></div>
         <h4>เลือกคน</h4>
         <div id="sprPick"><div class="spr-empty">เลือกช่วงวันก่อน</div></div>
         <h4>คนที่เลือก <span id="sprN"></span></h4>
         <div id="sprSel"></div>
-        <div class="spr-foot"><div class="spr-msg" role="status"></div><button type="submit" class="spr-btn pri">ส่งคำขอให้ PC Confirm</button></div>
+        <div class="spr-foot"><div class="spr-msg" role="status"></div><span class="spr-fb"><button type="button" class="spr-btn" data-draft>${ed ? "บันทึกงานรอนัดวัน" : "บันทึกเป็นงานรอนัดวัน"}</button><button type="submit" class="spr-btn pri">ส่งคำขอให้ PC Confirm</button></span></div>
       </form>`, true);
     const f = m.el.querySelector("form"), pick = m.el.querySelector("#sprPick"), sel = m.el.querySelector("#sprSel"), msg = m.el.querySelector(".spr-msg");
     const rng = () => ({ a: f.from.value, b: f.to.value });
@@ -267,23 +277,26 @@
       if (e.target.name === "leader") F.people.forEach((p, id) => { p.leader = id === e.target.value; });
     });
     m.el.addEventListener("input", e => { const r = e.target.dataset && e.target.dataset.reason; if (r && F.people.has(r)) F.people.get(r).reason = e.target.value; });
-    f.addEventListener("submit", async e => {
-      e.preventDefault();
-      const say = t => { msg.innerHTML = `<span class="err">${esc(t)}</span>`; };
+    const say = t => { msg.innerHTML = `<span class="err">${esc(t)}</span>`; };
+    async function send(draft) {
       if (!f.customer.value.trim() || !f.job_name.value.trim()) return say("กรอกชื่อลูกค้าและชื่องาน");
-      if (!F.av || !F.people.size) return say("เลือกคนอย่างน้อย 1 คน");
-      for (const [id, p] of F.people) { const w = F.av.workers.find(x => x.id === id), k = w ? cat(w) : "o"; if (k === "o") return say(`${w ? w.nick || w.name : id} ลาตลอดช่วง เอาออกจากรายชื่อ`); if (k === "b" && !p.reason.trim()) return say(`ใส่เหตุผลที่ขอสลับ ${w.nick || w.name} (งานเดิมยืนยันแล้ว)`); }
-      const btn = f.querySelector("[type=submit]"); btn.disabled = true; msg.textContent = "กำลังส่งคำขอ…";
+      if (!draft) {
+        if (!F.av || !F.people.size) return say("เลือกคนอย่างน้อย 1 คน — หรือกด “บันทึกเป็นงานรอนัดวัน” ถ้ายังไม่ได้วันจากลูกค้า");
+        for (const [id, p] of F.people) { const w = F.av.workers.find(x => x.id === id), k = w ? cat(w) : "o"; if (k === "o") return say(`${w ? w.nick || w.name : id} ลาตลอดช่วง เอาออกจากรายชื่อ`); if (k === "b" && !p.reason.trim()) return say(`ใส่เหตุผลที่ขอสลับ ${w.nick || w.name} (งานเดิมยืนยันแล้ว)`); }
+      }
+      const btns = f.querySelectorAll(".spr-fb button"); btns.forEach(b => { b.disabled = true; }); msg.textContent = "กำลังบันทึก…";
       try {
-        const res = await call("create", { type: f.type.value, customer: f.customer.value, job_name: f.job_name.value, job_no: f.job_no.value, description: f.description.value,
-          vehicle: f.veh.value === "__other" ? f.veh2.value : f.veh.value, from: f.from.value, to: f.to.value,
-          people: [...F.people].map(([worker_id, p]) => ({ worker_id, is_leader: p.leader, reason: p.reason })) });
-        await load(true); VIEW = "mine";
-        msg.innerHTML = `ส่งคำขอ <b>${esc(res.req_no)}</b> แล้ว${res.swaps ? " (ขอสลับ " + res.swaps + " คน)" : ""} — รอ PC Confirm`;
-        onChange && onChange();
+        const res = await call(ed ? "update" : "create", { id: ed ? ed.id : undefined, draft, type: f.type.value, customer: f.customer.value, job_name: f.job_name.value, job_no: f.job_no.value, description: f.description.value,
+          vehicle: f.veh.value === "__other" ? f.veh2.value : f.veh.value, expect_date: f.expect.value, expect_note: f.expect_note.value, from: f.from.value, to: f.to.value,
+          people: draft ? [] : [...F.people].map(([worker_id, p]) => ({ worker_id, is_leader: p.leader, reason: p.reason })) });
+        await load(true); VIEW = draft ? "draft" : "mine";
+        msg.innerHTML = draft ? `บันทึกงานรอนัดวัน <b>${esc(res.req_no)}</b> แล้ว` : `ส่งคำขอ <b>${esc(res.req_no)}</b> แล้ว${res.swaps ? " (ขอสลับ " + res.swaps + " คน)" : ""} — รอ PC Confirm`;
+        onChange && onChange(); window.dispatchEvent(new Event("spr-change"));
         setTimeout(m.close, 1200);
-      } catch (err) { btn.disabled = false; say(err.message); if (err.status === 409 || err.status === 400) { F.key = ""; avail(); } }
-    });
+      } catch (err) { btns.forEach(b => { b.disabled = false; }); say(err.message); if (!draft && (err.status === 409 || err.status === 400)) { F.key = ""; avail(); } }
+    }
+    f.addEventListener("submit", e => { e.preventDefault(); send(false); });
+    f.querySelector("[data-draft]").addEventListener("click", () => send(true));
     (L ? Promise.resolve() : load().catch(() => {})).then(avail);
   }
 
@@ -295,7 +308,9 @@
 .spr-dlg h4{margin:14px 0 6px;font-size:13.5px}
 .spr-x{border:1px solid var(--line);background:#fff;border-radius:8px;width:32px;height:32px;flex:none;cursor:pointer}
 .spr-body{padding:14px 18px 18px;display:grid;gap:8px}
-.st-p{--c:#c28a12;--cs:#fff4da}.st-c{--c:#188764;--cs:#e9f7f0}.st-r{--c:#c0392b;--cs:#fdecea}.st-x{--c:#6d7582;--cs:#eef0f3}.st-m{--c:#2f6fd6;--cs:#e8f0fd}
+.st-p{--c:#c28a12;--cs:#fff4da}.st-c{--c:#188764;--cs:#e9f7f0}.st-r{--c:#c0392b;--cs:#fdecea}.st-x{--c:#6d7582;--cs:#eef0f3}.st-m{--c:#2f6fd6;--cs:#e8f0fd}.st-d{--c:#7c3aed;--cs:#f3edff}
+.spr-dr{background:#f7f3ff;border:1px dashed #c9b6f5;border-radius:10px;padding:10px 12px;font-size:12.5px;color:#4a515c;display:grid;gap:8px;margin-top:4px}.spr-dr b{color:#6d28d9}
+.spr-fb{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
 .spr-pill{display:inline-block;font-size:11px;font-weight:600;border-radius:999px;padding:1px 9px;background:#fff;color:var(--c,#4a515c);border:1px solid var(--c,#c9ced6);white-space:nowrap}
 .spr-pill.ty{color:#fff;background:#22252b;border-color:#22252b}.spr-pill.sw{color:#b4530a;border-color:#e8a15a;background:#fff3e6}.spr-pill.bk{color:#188764;border-color:#8fd0b8;background:#effaf5}
 .spr-top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
@@ -351,5 +366,5 @@ i.av-f,.spr-pill.av-f{background:#bfe8d4}i.av-a,.spr-pill.av-a{background:#cfe0f
 @media (max-width:640px){.spr-grid{grid-template-columns:1fr 1fr}.spr-grid .w2{grid-column:1/-1}.spr-w{grid-template-columns:84px 1fr}.spr-w .spr-strip,.spr-w .spr-ws{grid-column:1/-1}.spr-dl{grid-template-columns:1fr}.spr-modal{padding:0}.spr-dlg{border-radius:0;min-height:100vh}.spr-cg i em{display:none}}
 `;
 
-  window.SPRequest = { load, page, openList, open, form, status, pending: () => pending().length, data: () => L };
+  window.SPRequest = { load, page, openList, open, form, status, due, when, drafts, pending: () => pending().length, data: () => L };
 })();

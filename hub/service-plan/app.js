@@ -74,15 +74,15 @@
     if (!window.SPRequest) return [];
     const d = await window.SPRequest.load(force !== false).catch(() => null);
     if (!d) return [];
-    const map = { p: "New", m: "Checking", c: "Confirm" };
+    const map = { p: "New", m: "Checking", c: "Confirm", d: "New" };   // d = งานรอนัดวัน (no dates yet → the undated box)
     return d.requests.map(r => {
       const [label, cls] = window.SPRequest.status(r), ld = r.people.find(p => p.is_leader);
       if (!map[cls]) return null;
       const ss = ld ? (ld.nick || ld.name.split(" ")[0]) : "";
       return { id: "q" + r.id, rid: r.id, app: true, n: 1e6 + r.id, job: r.job_no || r.job_name, type: r.type, customer: r.customer, desc: [r.job_name, r.description].filter(Boolean).join("\n"), car: r.vehicle || "",
-        status: map[cls], ss, start: fromKey(r.date_from), end: fromKey(r.date_to),
-        subject: [label, r.type, r.customer, r.job_no || r.job_name].filter(Boolean).join(" | ") + (ss ? " — " + ss : "") + " · " + r.people.length + " คน" };
-    }).filter(j => j && j.start && j.end);
+        status: map[cls], ss, start: fromKey(r.date_from), end: fromKey(r.date_to), rawStart: r.date_from ? "" : window.SPRequest.when(r), rawEnd: "",
+        subject: [label, r.type, r.customer, r.job_no || r.job_name].filter(Boolean).join(" | ") + (ss ? " — " + ss : "") + (r.people.length ? " · " + r.people.length + " คน" : "") };
+    }).filter(Boolean);
   }
 
   /* ---------- load ---------- */
@@ -99,7 +99,8 @@
     }
     if (!data) { META = { src: "none", why }; JOBS = []; UNDATED = []; return; }
     const { dated, undated } = toJobs(data.rows);
-    JOBS = dated.concat(await appJobs(force)).sort((a, b) => a.start - b.start); UNDATED = undated;
+    const app = await appJobs(force);
+    JOBS = dated.concat(app.filter(j => j.start && j.end)).sort((a, b) => a.start - b.start); UNDATED = app.filter(j => !j.start).concat(undated);
     META = { src, why, updated: data.updated ? new Date(data.updated) : null, fetched: new Date(), gid: data.gid || DEFAULT_GID, sheet: data.sheet || "" };
   }
   function ensure(force) {
@@ -225,7 +226,7 @@
   function undated() {
     const list = UNDATED.filter(visible);
     if (!list.length) return "";
-    return `<details class="spc-und"><summary>ยังไม่ระบุวันเข้างาน (TBC ฯลฯ) · ${list.length} งาน</summary><div class="spc-day">${list.map(j => card(j).replace(/📅 [^·]*·/, `📅 ${esc(j.rawStart || "ไม่ระบุ")} ·`)).join("")}</div></details>`;
+    return `<details class="spc-und"><summary>ยังไม่ระบุวันเข้างาน (งานรอนัดวัน / TBC) · ${list.length} งาน</summary><div class="spc-day">${list.map(j => card(j).replace(/📅 [^·]*·/, `📅 ${esc(j.rawStart || "ไม่ระบุ")} ·`)).join("")}</div></details>`;
   }
 
   /* ---------- detail ---------- */
