@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SSM Work · RAK Engineering</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23121212'/%3E%3Ctext x='16' y='20.3' font-family='Arial,Helvetica,sans-serif' font-size='11.5' font-weight='700' fill='%23fff' text-anchor='middle' letter-spacing='-0.2'%3ESSM%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Layout idea: RAK app shell (same theme as the SSM Work app) — white sidebar with the black RAK brand block and four module links, content pane on the right. Duotone icons in RAK red on blush tiles. */
+:root{
+  --rak:#c70404; --rak-dark:#a00303; --blush:#fff0f0; --blush-2:#ffd9d9;
+  --ink:#22252b; --muted:#6d7582; --line:#e6e8ed; --bg:#f5f6f8; --paper:#ffffff;
+  --amber:#946719; --amber-soft:#fff4da; --green:#188764; --green-soft:#e9f7f0;
+  --font:"IBM Plex Sans Thai","Leelawadee UI","Tahoma",system-ui,sans-serif;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.65 var(--font)}
+a{color:inherit}
+button{font:inherit;cursor:pointer}
+:focus-visible{outline:3px solid #df8989;outline-offset:2px}
+.ic{width:22px;height:22px;flex:none}
+symbol .d{fill:var(--blush-2)}
+symbol .s{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+symbol .f{fill:currentColor}
+
+.shell{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:100%}
+.side{background:var(--paper);border-right:1px solid var(--line);position:sticky;top:0;height:100vh;padding:20px 14px;display:flex;flex-direction:column}
+.brand{display:block;text-decoration:none;padding:4px 6px 16px;border-bottom:1px solid var(--line)}
+.brand img{display:block;width:100%;height:auto}
+.brand .word{display:none;color:var(--ink);font-weight:700;font-size:22px;letter-spacing:.06em}
+.brand .word b{color:var(--rak)}
+.brand .tag{display:block;margin-top:10px;white-space:nowrap;font-size:11.4px;font-weight:600;letter-spacing:.9px;color:#3b4049;text-transform:uppercase}
+.ws{font-size:10px;letter-spacing:1.7px;color:#9a9ea7;margin:26px 12px 10px}
+.nav{list-style:none;margin:0;padding:0;display:grid;gap:3px}
+.nav a{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;text-decoration:none;color:#626b78;font-size:14px}
+.nav a:hover{background:#f7f8fa;color:var(--ink)}
+.nav a[aria-current="page"]{background:var(--blush);color:var(--rak);font-weight:600}
+.nav .tile{display:grid;place-items:center;width:34px;height:34px;border-radius:9px;background:#f4f5f7;color:#8b95a4;flex:none}
+.nav a[aria-current="page"] .tile{background:#fff;color:var(--rak);box-shadow:0 1px 0 var(--blush-2)}
+.nav .cnt{margin-left:auto;font-size:11px;background:var(--rak);color:#fff;border-radius:999px;min-width:22px;text-align:center;padding:0 7px;font-weight:600}
+.nav .soon{margin-left:auto;font-size:10px;background:var(--amber-soft);color:var(--amber);border-radius:999px;padding:1px 8px;white-space:nowrap}
+.side-foot{margin-top:auto;border-top:1px solid var(--line);padding:16px 12px 0;font-size:11px;color:#7c8491;display:flex;align-items:center;gap:8px}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green);flex:none}
+
+.main{min-width:0}
+.topbar{height:68px;background:var(--paper);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:0 32px}
+.menu-btn{display:none;border:1px solid var(--line);background:#fff;border-radius:7px;padding:6px 10px;color:var(--ink)}
+.crumb{font-size:12.5px;color:#8d95a2}
+.crumb b{color:#424a57;font-weight:500}
+.crumb i{font-style:normal;margin:0 10px;color:#c3c8d0}
+.logout{font-size:11.5px;color:var(--muted);text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:3px 11px}
+.logout:hover{color:var(--rak);border-color:#f0b9b9}
+.topbar .chip{margin-left:auto;font-size:11px;padding:4px 11px;background:var(--blush);color:var(--rak);border-radius:999px;font-weight:500}
+.content{max-width:1180px;margin:0 auto;padding:28px 32px 56px;display:grid;gap:22px}
+.content:focus{outline:none}
+
+.hero{display:flex;flex-wrap:wrap;gap:18px 28px;align-items:center;justify-content:space-between}
+.hero-l{display:flex;gap:18px;align-items:center;flex:1 1 auto;min-width:0}
+.hero-ic{display:grid;place-items:center;width:64px;height:64px;border-radius:18px;background:var(--blush);color:var(--rak)}
+.hero-ic .ic{width:38px;height:38px}
+.eyebrow{font-size:10px;letter-spacing:2.2px;color:var(--rak);font-weight:600;text-transform:uppercase}
+h1{font-size:28px;font-weight:600;line-height:1.3;letter-spacing:-.4px;margin:2px 0 4px;text-wrap:balance}
+.hero p{margin:0;color:var(--muted);font-size:13px;text-wrap:pretty}
+.stats{display:flex;gap:12px}
+.stat{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 18px;min-width:96px}
+.stat b{display:block;font-size:26px;font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums}
+.stat span{font-size:11px;color:var(--muted)}
+
+.quote{display:flex;align-items:center;gap:14px;margin:0;background:linear-gradient(120deg,#fff 0%,var(--blush) 100%);border:1px solid var(--blush-2);border-left:4px solid var(--rak);border-radius:12px;padding:12px 18px;min-width:0}
+.quote .q-label{flex:none;display:flex;align-items:center;gap:6px;font-size:11px;letter-spacing:1px;color:var(--rak);font-weight:600;background:#fff;border:1px solid var(--blush-2);border-radius:999px;padding:3px 11px}
+.quote .q-label .ic{width:14px;height:14px}
+.quote blockquote{margin:0;min-width:0;font-size:15px;line-height:1.5;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media (max-width:860px){.quote{flex-direction:column;align-items:flex-start;gap:8px}.quote blockquote{white-space:normal;font-size:14px}}
+h2.sec{font-size:15px;font-weight:600;margin:4px 0 -6px;display:flex;align-items:center;gap:8px}
+.modules{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+.mod{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;text-decoration:none;background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:18px;transition:transform .15s,box-shadow .15s,border-color .15s}
+.mod:hover{border-color:#f0b9b9;box-shadow:0 8px 24px -14px rgba(199,4,4,.45);transform:translateY(-2px)}
+.mod .tile{grid-row:span 3;display:grid;place-items:center;width:52px;height:52px;border-radius:14px;background:var(--blush);color:var(--rak)}
+.mod .tile .ic{width:30px;height:30px}
+.mod .m-name{font-weight:600;font-size:16px}
+.mod .m-desc{font-size:12.5px;color:var(--muted);line-height:1.5}
+.badge{justify-self:start;display:inline-block;font-size:10.5px;padding:2px 9px;border-radius:999px;font-weight:500}
+.badge.live{background:var(--green-soft);color:var(--green)}
+.badge.soon{background:var(--amber-soft);color:var(--amber)}
+.badge.beta,.nav .soon.beta{background:#e6eefc;color:#2c4a7a}
+
+.search-wrap{position:relative}
+.search-wrap .ic{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#a0a8b4;width:18px;height:18px}
+.search{width:100%;border:1px solid #dce1e8;background:var(--paper);border-radius:8px;padding:11px 12px 11px 40px;font:inherit;color:inherit}
+.customer{background:var(--paper);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.c-head{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line);background:#fcfcfd}
+.c-head .av{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;background:#f1f3f6;color:#5d6673}
+.c-head h3{margin:0;font-size:17px;font-weight:600}
+.c-head .meta{color:var(--muted);font-size:12.5px}
+.lvl{font-size:10px;font-weight:600;color:var(--rak);background:var(--blush);border-radius:4px;padding:1px 6px;letter-spacing:.04em}
+.project{display:grid;grid-template-columns:minmax(200px,270px) 1fr;gap:18px;padding:18px}
+.project + .project{border-top:1px solid var(--line)}
+.p-info .jo{font-size:13px;color:var(--rak);font-weight:600;font-variant-numeric:tabular-nums}
+.p-info h4{margin:3px 0 8px;font-size:15px;font-weight:600;line-height:1.4}
+.p-info .row{display:flex;flex-wrap:wrap;gap:6px;font-size:11.5px;color:var(--muted)}
+.pill{border:1px solid var(--line);border-radius:999px;padding:0 9px;background:#fff}
+.pill.status{border-color:#bfe3d3;background:var(--green-soft);color:var(--green)}
+.tools{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;align-content:start}
+.tool{display:grid;grid-template-columns:auto 1fr auto;gap:2px 12px;align-items:center;text-decoration:none;border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:#fafbfc}
+.tool:hover{border-color:#f0b9b9;background:var(--blush)}
+.tool .tile{grid-row:span 2;display:grid;place-items:center;width:40px;height:40px;border-radius:11px;background:#fff;color:var(--rak);border:1px solid var(--blush-2)}
+.tool .t-name{font-weight:600}
+.tool .t-mod{font-size:11px;color:var(--muted)}
+.tool .go{grid-row:span 2;color:var(--rak);font-size:18px}
+.tool .t-desc{grid-column:1/-1;font-size:12px;color:var(--muted);line-height:1.5;margin-top:6px}
+
+.tbl{background:var(--paper);border:1px solid var(--line);border-radius:12px;overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:680px;font-size:13px}
+th{font-size:11px;font-weight:500;color:#8390a1;background:#f7f8fa;padding:11px 16px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+td{padding:14px 16px;border-bottom:1px solid #edf0f4;vertical-align:top}
+tr:last-child td{border-bottom:0}
+td .jo{color:var(--rak);font-weight:600}
+td .sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+a.open{display:inline-flex;align-items:center;gap:6px;text-decoration:none;background:var(--rak);color:#fff;border-radius:7px;padding:6px 14px;font-size:12.5px;font-weight:500;white-space:nowrap}
+a.open:hover{background:var(--rak-dark)}
+
+.soon-card{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:30px;display:grid;grid-template-columns:auto 1fr;gap:22px;align-items:start}
+.soon-card .big{display:grid;place-items:center;width:96px;height:96px;border-radius:26px;background:var(--blush);color:var(--rak)}
+.soon-card .big .ic{width:56px;height:56px}
+.soon-card h3{margin:0 0 4px;font-size:18px;font-weight:600}
+.soon-card p{margin:0 0 12px;color:var(--muted);font-size:13px}
+.plan{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.plan li{display:flex;gap:10px;align-items:flex-start;font-size:13.5px}
+.plan li .ck{flex:none;width:20px;height:20px;border-radius:6px;border:1.5px dashed #e4b4b4;margin-top:2px}
+.note{font-size:11.5px;color:var(--muted)}
+code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:#f1f3f6;border-radius:4px;padding:1px 5px}
+.empty{color:var(--muted);padding:26px;text-align:center;border:1px dashed #dce2eb;border-radius:12px;background:#fafbfd}
+.foot{font-size:11px;color:#a0a6b0;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-top:8px}
+
+@media (max-width:860px){
+  .shell{grid-template-columns:1fr}
+  .side{position:fixed;inset:0 auto 0 0;width:264px;z-index:20;transform:translateX(-102%);transition:transform .2s;box-shadow:none}
+  .shell.open .side{transform:none;box-shadow:0 0 0 100vmax rgba(18,18,18,.35)}
+  .menu-btn{display:inline-flex}
+  .topbar{padding:0 16px;height:60px}
+  .topbar .chip{display:none}
+  #acct{margin-left:auto;min-width:0;display:flex;gap:6px;overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+  #acct:not([hidden]) ~ *{display:none}
+  .crumb{flex:none}
+  .logout{flex:none;font-size:11px;padding:3px 9px}
+  .content{padding:20px 16px 44px}
+  .project{grid-template-columns:1fr}
+  .soon-card{grid-template-columns:1fr}
+  h1{font-size:24px}
+}
+.side-acct{display:none}
+@media (max-width:600px){
+  #acct,.topbar .chip{display:none!important}
+  .side-acct:not([hidden]){display:grid;gap:4px;margin-top:auto;border-top:1px solid var(--line);padding:14px 4px 4px}
+  .side-acct:not([hidden]) + .side-foot{margin-top:10px}
+  .side-acct .sa-who{display:flex;align-items:center;gap:10px;padding:4px 8px 8px;font-weight:600;font-size:14px;min-width:0}
+  .side-acct .sa-who small{display:block;font-weight:400;font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+  .side-acct .sa-av{display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:50%;background:var(--blush);color:var(--rak);font-size:16px}
+  .side-acct a{display:block;text-decoration:none;color:#4a5260;font-size:14px;padding:9px 12px;border-radius:8px}
+  .side-acct a:hover{background:#f7f8fa}
+  .side-acct a.out{color:var(--rak)}
+}
+@media (prefers-reduced-motion: reduce){.side,.mod{transition:none}.mod:hover{transform:none}}
+.due{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;background:#f3edff;border-bottom:1px solid #d9c9fb;color:#3b2a66;padding:8px 20px;font-size:13px}
+.due[hidden]{display:none}.due b{white-space:nowrap}.due-l{display:flex;flex-wrap:wrap;gap:6px;flex:1 1 300px;align-items:center}
+.due-l button{border:1px solid #c9b6f5;background:#fff;border-radius:999px;padding:3px 11px;font:inherit;font-size:12.5px;color:#3b2a66;cursor:pointer;text-align:left}
+.due-l button:hover{background:#ebe2ff}.due-l button.late{border-color:#e6b0aa;color:#a93226}.due-l i{font-style:normal;color:#6d28d9;margin-left:4px}.due-l button.late i{color:#c0392b}
+.due-l a{color:#6d28d9;font-size:12.5px}.due-x{border:0;background:none;color:#6d28d9;font:inherit;font-size:12.5px;cursor:pointer;text-decoration:underline}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <!-- Home: house with a little heart -->
+  <symbol id="i-home" viewBox="0 0 24 24"><path class="d" d="M4.5 11 12 5l7.5 6v8.2a1.3 1.3 0 0 1-1.3 1.3H5.8a1.3 1.3 0 0 1-1.3-1.3z"/><path class="s" d="M3 11.8 12 4.5l9 7.3M5 10.5v8.7a1.3 1.3 0 0 0 1.3 1.3h11.4a1.3 1.3 0 0 0 1.3-1.3v-8.7"/><path class="f" d="M12 17.6s-3.1-1.9-3.1-3.9a1.6 1.6 0 0 1 3.1-.6 1.6 1.6 0 0 1 3.1.6c0 2-3.1 3.9-3.1 3.9z"/></symbol>
+  <!-- Site Expense: wallet with a coin -->
+  <symbol id="i-expense" viewBox="0 0 24 24"><rect class="d" x="3.5" y="7" width="17" height="12.5" rx="3"/><path class="s" d="M17.5 7V5.6a1.4 1.4 0 0 0-1.8-1.3L5.2 7"/><rect class="s" x="3.5" y="7" width="17" height="12.5" rx="3"/><path class="s" d="M20.5 11.5h-3.3a1.75 1.75 0 0 0 0 3.5h3.3"/><circle class="f" cx="17.3" cy="13.25" r=".9"/><circle class="s" cx="8.5" cy="13.3" r="2.4"/><path class="s" d="M8.5 12.2v2.2"/></symbol>
+  <!-- Spare Part: smiling gear -->
+  <symbol id="i-gear" viewBox="0 0 24 24"><path class="d" d="M12 6.2a5.8 5.8 0 1 1 0 11.6 5.8 5.8 0 0 1 0-11.6z"/><path class="s" d="M10.4 3.5h3.2l.5 2.2 1.6.7 1.9-1.2 2.3 2.3-1.2 1.9.7 1.6 2.2.5v3.2l-2.2.5-.7 1.6 1.2 1.9-2.3 2.3-1.9-1.2-1.6.7-.5 2.2h-3.2l-.5-2.2-1.6-.7-1.9 1.2-2.3-2.3 1.2-1.9-.7-1.6-2.2-.5v-3.2l2.2-.5.7-1.6-1.2-1.9 2.3-2.3 1.9 1.2 1.6-.7z"/><circle class="f" cx="10.2" cy="11" r=".95"/><circle class="f" cx="13.8" cy="11" r=".95"/><path class="s" d="M10 13.6a2.6 2.6 0 0 0 4 0"/></symbol>
+  <!-- Service Plan: calendar with a wrench -->
+  <symbol id="i-plan" viewBox="0 0 24 24"><rect class="d" x="3.5" y="5" width="17" height="15.5" rx="2.6"/><rect class="s" x="3.5" y="5" width="17" height="15.5" rx="2.6"/><path class="s" d="M3.5 9.5h17M8 3v4M16 3v4"/><path class="s" d="M14.6 12.4a2.3 2.3 0 0 0-2.9 2.9l-2.4 2.4a.9.9 0 0 0 1.3 1.3l2.4-2.4a2.3 2.3 0 0 0 2.9-2.9l-1.3 1.3-1.2-.3-.3-1.2z"/></symbol>
+  <!-- Manpower: two people with a hard hat -->
+  <symbol id="i-team" viewBox="0 0 24 24"><circle class="d" cx="9" cy="9" r="3.4"/><path class="d" d="M3 19.5a6 6 0 0 1 12 0z"/><circle class="s" cx="9" cy="9.6" r="2.8"/><path class="s" d="M5.6 8.4a3.4 3.4 0 0 1 6.8 0zM9 4.6v.9M3 19.5a6 6 0 0 1 12 0M16 7.2a2.6 2.6 0 1 1 0 5.2M17.2 14.4a5 5 0 0 1 3.8 5.1"/></symbol>
+  <!-- Manual: open book -->
+  <symbol id="i-book" viewBox="0 0 24 24"><path class="d" d="M3.5 5.5c3-1 6-1 8.5.8 2.5-1.8 5.5-1.8 8.5-.8v13c-3-1-6-1-8.5.8-2.5-1.8-5.5-1.8-8.5-.8z"/><path class="s" d="M3.5 5.5c3-1 6-1 8.5.8 2.5-1.8 5.5-1.8 8.5-.8v13c-3-1-6-1-8.5.8-2.5-1.8-5.5-1.8-8.5-.8zM12 6.3v13"/><path class="s" d="M6.5 9.3c1.3-.3 2.5-.2 3.5.3M14 9.6c1-.5 2.2-.6 3.5-.3"/></symbol>
+  <!-- Punch List: clipboard with ticks -->
+  <symbol id="i-punch" viewBox="0 0 24 24"><rect class="d" x="5" y="5" width="14" height="16" rx="2.5"/><rect class="s" x="5" y="5" width="14" height="16" rx="2.5"/><rect class="s" x="9" y="3" width="6" height="3.6" rx="1.2" style="fill:#fff"/><path class="s" d="m8.3 11.2 1.3 1.3 2.2-2.4M13.5 11.4h2.4M8.3 16l1.3 1.3 2.2-2.4M13.5 16.2h2.4"/></symbol>
+  <!-- Customer: little factory -->
+  <symbol id="i-factory" viewBox="0 0 24 24"><path class="d" d="M3.5 20V10l5 3V10l5 3V7.5h3V4h2.5v16z"/><path class="s" d="M3.5 20V10l5 3V10l5 3V7.5h3V4h2.5v16zM2.5 20h19M7 16.5h1.5M11 16.5h1.5M15 16.5h1.5"/></symbol>
+  <!-- Project: hard hat -->
+  <symbol id="i-hat" viewBox="0 0 24 24"><path class="d" d="M5 15a7 7 0 0 1 14 0z"/><path class="s" d="M5 15a7 7 0 0 1 14 0M3 15h18v1.6a1.4 1.4 0 0 1-1.4 1.4H4.4A1.4 1.4 0 0 1 3 16.6zM10 8.3V6.5h4v1.8M12 6.5V15"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle class="s" cx="10.5" cy="10.5" r="6"/><path class="s" d="m15 15 5 5"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path class="s" d="M4 7h16M4 12h16M4 17h10"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path class="f" d="M12 3.5c.5 3.8 2.2 5.5 6 6-3.8.5-5.5 2.2-6 6-.5-3.8-2.2-5.5-6-6 3.8-.5 5.5-2.2 6-6zM18.5 15.5c.2 1.6.9 2.3 2.5 2.5-1.6.2-2.3.9-2.5 2.5-.2-1.6-.9-2.3-2.5-2.5 1.6-.2 2.3-.9 2.5-2.5z"/></symbol>
+</svg>
+
+<div class="shell" id="shell">
+  <aside class="side" aria-label="เมนูหลัก">
+    <a class="brand" href="#home"><img src="assets/rak-logo-light.png" alt="RAK Engineering" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><span class="word"><b>RAK</b> ENGINEERING</span><span class="tag">Site &amp; Service Management</span></a>
+    <div class="ws">SSM WORK</div>
+    <ul class="nav" id="nav"></ul>
+    <div class="side-acct" id="sideAcct" hidden><div class="sa-who"><span class="sa-av">👋</span><span style="min-width:0"><span id="saName"></span><small id="saEmail"></small></span></div><a href="/admin" id="saAdmin" hidden>จัดการผู้ใช้</a><a href="/auth/password">เปลี่ยนรหัสผ่าน</a><a class="out" href="/auth/logout">ออกจากระบบ</a></div>
+    <div class="side-foot"><span class="dot"></span><span id="sideFoot">พร้อมใช้งาน</span></div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <button class="menu-btn" id="menuBtn" aria-controls="nav" aria-expanded="false" aria-label="เปิดเมนู"><svg class="ic"><use href="#i-menu"/></svg></button>
+      <div class="crumb" id="crumb"></div>
+      <span class="chip" id="who">SSM Work</span><span id="acct" hidden><a class="logout" id="admin" href="/admin" hidden>จัดการผู้ใช้</a> <a class="logout" href="/auth/password">เปลี่ยนรหัสผ่าน</a> <a class="logout" href="/auth/logout">ออกจากระบบ</a></span>
+    </div>
+    <div class="due" id="sprDue" role="status" hidden></div>
+    <main class="content" id="content" tabindex="-1"></main>
+  </div>
+</div>
+<script src="/spare-part/app.js"></script>
+<script src="/site-expense/app.js"></script>
+<script src="/sp-request/app.js"></script>
+<script src="/service-plan/app.js"></script>
+<script src="/manpower/app.js"></script>
+<script src="/manual/app.js"></script>
+<script>
+"use strict";
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const icon = (id, cls="ic") => `<svg class="${cls}" aria-hidden="true"><use href="#${id}"/></svg>`;
+
+/* Menu. Add a module here, then tag its tools in registry.json with "module": "<id>". */
+const MODULES = [
+  {id:"home",        icon:"i-home",    name:"Home",         th:"ภาพรวม",                  desc:"ลูกค้า โปรเจค และเครื่องมือทั้งหมดของ SSM"},
+  {id:"site-expense",icon:"i-expense", beta:true, name:"Site Expense", th:"ประเมินค่าใช้จ่ายหน้างาน",  desc:"Dashboard Budget vs Actual · Estimate จาก SOW → Budgetary · บันทึก Actual รายวันจากหน้างาน",
+     plan:["Dashboard: Budget vs Actual ค้นหาด้วย Project no.","Estimate จาก Scope of Work → อนุมัติ → เปิด Job → Budgetary","Actual record: ทีมหน้างานบันทึกค่าใช้จ่ายรายวัน"]},
+  {id:"spare-part",  icon:"i-gear",    live:true, name:"Spare Part",   th:"รายการอะไหล่แนะนำ",        desc:"รายการอะไหล่แนะนำให้ลูกค้า แยกตามระบบ อ้างอิง P&ID และ Aux list",
+     plan:["สร้างรายการอะไหล่จาก P&ID + Aux list + BOM","จุดใช้งานตาม P&ID และข้อมูลผู้ผลิต","Export Excel ตามแบบฟอร์มลูกค้า"]},
+  {id:"punch-list",  icon:"i-punch",   name:"Punch List",   th:"ติดตามงานค้างก่อนส่งมอบ",    desc:"บันทึกและติดตาม punch list ระหว่างติดตั้ง จนถึง SAT และปิดงาน",
+     plan:["บันทึกรายการพร้อมรูปถ่ายและผู้รับผิดชอบ","สถานะ Open / In progress / Closed","รายงานให้ลูกค้าก่อน SAT","สรุปจำนวนงานค้างรายโปรเจค"]},
+  {id:"service-plan",icon:"i-plan",    live:true, name:"Service Plan", th:"แผนงานบริการลูกค้า",         desc:"ปฏิทินงานบริการ IS / SO / IN / WR จากใบร้องขอคน (Google Sheet) · มุมมองรายวัน สัปดาห์ เดือน ปี",
+     plan:["ปฏิทินรายวัน / สัปดาห์ / เดือน / ปี จาก Google Sheet ใบขอคน","กดดูรายละเอียดงาน + ทะเบียนรถ","แจ้งเตือนก่อนถึงกำหนดเข้าบริการ","บันทึกผลการบริการ"]},
+  {id:"manpower",    icon:"i-team",    live:true, name:"Manpower",     th:"วางแผนกำลังคน",              desc:"ภาพรวม Manpower / Man-day summary · Planning Board คน × วัน ใครอยู่งานไหน ลา หรือว่าง · Milestone โปรเจกต์",
+     plan:["Planning Board คน × วัน แยกหน่วยงาน ME / PP / EE / PC / SC (ดูอย่างเดียว)","ลงงาน แก้ไข และบันทึกการลา โดย SC / PC / SSM พร้อมเตือนจองซ้ำ","Overview, Project Timeline, ค้นหาคนว่าง และ export","เชื่อม Service Plan และ Site Expense (man-day × rate)"]},
+  // Manual stays the LAST menu: open to every signed-in user, always sorted to the bottom (see visibleModules).
+  {id:"manual",      icon:"i-book",    live:true, always:true, name:"คู่มือการใช้งาน", th:"คู่มือ SSM Work",       desc:"วิธีใช้งาน SSM Work ทีละเมนู · เข้าระบบ เปลี่ยนรหัสผ่าน และสิทธิ์การใช้งาน"},
+];
+let REG = {customers:[]};
+let ME = null; // from /auth/me: {email, name, role, modules:[...]} — the server enforces the same rules
+const allowed = id => id === "home" || (id === "manual" && ME !== null) || !!(ME && (ME.modules || []).includes(id));
+const visibleModules = () => MODULES.filter(m => allowed(m.id)).sort((a, b) => (a.id === "manual") - (b.id === "manual")); // manual always last
+
+function rows(){
+  const out = [];
+  REG.customers.forEach(c => (c.projects||[]).forEach(p => (p.tools||[]).forEach(t => { if (allowed(t.module)) out.push({c, p, t}); })));
+  return out;
+}
+const toolsOf = mod => rows().filter(r => r.t.module === mod);
+const modOf = id => MODULES.find(m => m.id === id);
+function route(){ const id = (location.hash || "#home").slice(1).split("/")[0]; return MODULES.some(m => m.id === id) ? id : "home"; }
+const subRoute = () => (location.hash || "").slice(1).split("/").slice(1).join("/");
+
+function renderNav(){
+  const cur = route();
+  document.getElementById("nav").innerHTML = visibleModules().map(m => {
+    const n = toolsOf(m.id).length;
+    const tail = m.beta ? `<span class="soon beta">ทดลอง</span>` : m.id === "home" || m.live ? "" : (n ? `<span class="cnt">${n}</span>` : `<span class="soon">เร็วๆ นี้</span>`);
+    return `<li><a href="#${m.id}" ${m.id===cur?'aria-current="page"':""}><span class="tile">${icon(m.icon)}</span>${esc(m.name)}${tail}</a></li>`;
+  }).join("");
+  document.getElementById("sideFoot").textContent = REG.updated ? "อัปเดตรายการ " + REG.updated : "พร้อมใช้งาน";
+  const m = modOf(cur);
+  document.getElementById("crumb").innerHTML = cur === "home" ? `<b>Home</b>` : `SSM Work<i>/</i><b>${esc(m.name)}</b>`;
+}
+
+function hero(m, extra=""){
+  return `<div class="hero"><div class="hero-l"><span class="hero-ic">${icon(m.icon)}</span><div><div class="eyebrow">${esc(m.th)}</div><h1>${esc(m.id==="home" ? "Welcome to Site & Service Management" : m.name)}</h1><p>${esc(m.id==="home" ? "รวมเครื่องมือและเอกสารของงานติดตั้งและบริการ แยกตามลูกค้าและโปรเจค" : m.desc)}</p></div></div>${extra}</div>`;
+}
+
+function customerBlocks(list, q){
+  const by = new Map();
+  list.forEach(r => {
+    const hay = [r.c.name, r.c.id, r.p.jo, r.p.name, (r.p.tags||[]).join(" "), r.t.name, r.t.th].join(" ").toLowerCase();
+    if (q && !hay.includes(q)) return;
+    if (!by.has(r.c.id)) by.set(r.c.id, {c:r.c, projects:new Map()});
+    const cc = by.get(r.c.id);
+    if (!cc.projects.has(r.p.id)) cc.projects.set(r.p.id, {p:r.p, tools:[]});
+    cc.projects.get(r.p.id).tools.push(r.t);
+  });
+  if (!by.size) return `<div class="empty">${q ? `ไม่พบรายการที่ตรงกับ “${esc(q)}”` : "ยังไม่มีรายการ"}</div>`;
+  return [...by.values()].map(({c, projects}) => `
+    <section class="customer" aria-label="${esc(c.name)}">
+      <div class="c-head"><span class="av">${icon("i-factory")}</span><span class="lvl">L2 ลูกค้า</span><h3>${esc(c.name)}</h3><span class="meta">${esc(c.site||"")} · ${projects.size} โปรเจค</span></div>
+      ${[...projects.values()].map(({p, tools}) => `
+      <div class="project">
+        <div class="p-info">
+          <span class="lvl">L3 โปรเจค</span> <span class="jo">JO ${esc(p.jo)}</span>
+          <h4>${esc(p.name)}</h4>
+          <div class="row">${p.status?`<span class="pill status">${esc(p.status)}</span>`:""}${p.due?`<span class="pill">ส่งมอบ ${esc(p.due)}</span>`:""}${(p.tags||[]).map(t=>`<span class="pill">${esc(t)}</span>`).join("")}</div>
+        </div>
+        <div class="tools">${tools.map(t => { const m = modOf(t.module);
+          return `<a class="tool" href="${esc(t.path)}"><span class="tile">${icon(m ? m.icon : "i-spark")}</span><span class="t-name">${esc(t.name)}</span><span class="go">→</span><span class="t-mod">${esc(m ? m.name : (t.type||"Tool"))}</span><span class="t-desc">${esc(t.desc||"")}</span></a>`;
+        }).join("")}</div>
+      </div>`).join("")}
+    </section>`).join("");
+}
+
+function pageHome(){
+  const mine = visibleModules().filter(m => m.id !== "home" && m.id !== "manual");
+  const quote = `<figure class="quote" title="นโยบายคุณภาพ RAK Engineering Co., Ltd.">
+    <figcaption class="q-label">${icon("i-spark","ic")} นโยบายคุณภาพ</figcaption>
+    <blockquote>“มุ่งมั่นผลิตสินค้าที่มีคุณภาพ ส่งมอบตรงเวลา และมีประสิทธิภาพในการบริการ เพื่อสร้างความพึงพอใจให้กับลูกค้า”</blockquote></figure>`;
+  const mods = mine.map(m => {
+    const n = toolsOf(m.id).length;
+    return `<a class="mod" href="#${m.id}"><span class="tile">${icon(m.icon)}</span><span class="m-name">${esc(m.name)}</span><span class="m-desc">${esc(m.th)}</span><span class="badge ${m.beta?"beta":n||m.live?"live":"soon"}">${m.beta ? "ทดลองใช้งาน" : n ? "ใช้งานได้ · " + n + " รายการ" : m.live ? "ใช้งานได้" : "กำลังพัฒนา"}</span></a>`;
+  }).join("");
+  const menus = ME === null ? `<div class="empty">กำลังโหลดเมนู…</div>`
+    : mods ? `<div class="modules">${mods}</div>`
+    : `<div class="empty">บัญชีนี้ยังไม่ได้รับสิทธิ์เข้าเมนูใด ติดต่อผู้ดูแลระบบ</div>`;
+  return hero(modOf("home")) + quote
+    + `<h2 class="sec">${icon("i-spark","ic")} เมนูของคุณ</h2>${menus}`;
+}
+
+function pageDenied(m){
+  return hero(m) + `<div class="soon-card"><span class="big">${icon(m.icon)}</span><div><h3>ยังไม่มีสิทธิ์เข้าเมนูนี้</h3><p>ขอสิทธิ์เมนู ${esc(m.name)} ได้จากผู้ดูแลระบบ</p><a class="open" href="#home">← กลับหน้าแรก</a></div></div>`;
+}
+
+function pageModule(m){
+  const list = toolsOf(m.id);
+  const planList = `<ul class="plan">${(m.plan||[]).map(x=>`<li><span class="ck"></span>${esc(x)}</li>`).join("")}</ul>`;
+  if (!list.length){
+    return hero(m)
+      + `<div class="soon-card"><span class="big">${icon(m.icon)}</span><div><span class="badge soon">กำลังพัฒนา</span><h3 style="margin-top:8px">เมนูนี้กำลังจะมาเร็วๆ นี้</h3><p>ขอบเขตที่วางไว้สำหรับเมนู ${esc(m.name)}</p>${planList}
+         <p class="note" style="margin-top:14px">เมื่อมีเครื่องมือแล้ว ใส่ <code>"module": "${esc(m.id)}"</code> ให้รายการใน <code>registry.json</code> จะขึ้นในหน้านี้เอง</p></div></div>`;
+  }
+  const table = `<div class="tbl"><table><thead><tr><th>ลูกค้า</th><th>JO</th><th>โปรเจค</th><th>รายการ</th><th></th></tr></thead><tbody>${
+    list.map(r => `<tr><td>${esc(r.c.name)}<div class="sub">${esc(r.c.site||"")}</div></td><td><span class="jo">${esc(r.p.jo)}</span></td><td>${esc(r.p.name)}${r.p.status?`<div class="sub">${esc(r.p.status)}</div>`:""}</td><td><b style="font-weight:600">${esc(r.t.name)}</b><div class="sub">${esc(r.t.desc||"")}</div></td><td><a class="open" href="${esc(r.t.path)}">เปิด →</a></td></tr>`).join("")
+  }</tbody></table></div>`;
+  return hero(m, `<div class="stats"><div class="stat"><b>${list.length}</b><span>รายการ</span></div></div>`)
+    + table
+    + ((m.plan||[]).length ? `<div class="soon-card"><span class="big">${icon("i-spark")}</span><div><span class="badge live">แผนพัฒนาต่อ</span><h3 style="margin-top:8px">สิ่งที่จะเพิ่มในเมนูนี้</h3>${planList}</div></div>` : "");
+}
+
+function render(){
+  const id = route(), m = modOf(id);
+  document.title = (id === "home" ? "SSM Work" : m.name + " · SSM Work") + " · RAK Engineering";
+  const sp = id === "spare-part" && ME !== null && allowed(id) && window.SparePart;
+  const se = id === "site-expense" && ME !== null && allowed(id) && window.SiteExpense;
+  const pl = id === "service-plan" && ME !== null && allowed(id) && window.ServicePlan;
+  const mp = id === "manpower" && ME !== null && allowed(id) && window.Manpower;
+  const mn = id === "manual" && ME !== null && window.Manual;
+  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : mn ? hero(m) + `<div id="mnRoot"></div>` : sp ? (subRoute() ? "" : hero(m)) + `<div id="spRoot"></div>` : se ? (subRoute() ? "" : hero(m)) + `<div id="seRoot"></div>` : pl ? `<div id="plRoot" class="spc-root"></div>` : mp ? `<div id="mpRoot" class="mp-root"></div>` : allowed(id) ? pageModule(m) : pageDenied(m))
+    + `<div class="foot"><span>RAK Engineering Co., Ltd. · Site &amp; Service Management</span><span>${REG.updated ? "อัปเดตรายการ " + esc(REG.updated) : ""}</span></div>`;
+  renderNav();
+  if (sp) window.SparePart.mount(document.getElementById("spRoot"), subRoute());
+  if (se) window.SiteExpense.mount(document.getElementById("seRoot"), subRoute());
+  if (pl) window.ServicePlan.mount(document.getElementById("plRoot"), subRoute());
+  if (mp) window.Manpower.mount(document.getElementById("mpRoot"), subRoute());
+  if (mn) window.Manual.mount(document.getElementById("mnRoot"), subRoute());
+  const q = document.getElementById("q");
+  if (q) q.addEventListener("input", () => { document.getElementById("list").innerHTML = customerBlocks(rows(), q.value.trim().toLowerCase()); });
+  setMenu(false);
+}
+function setMenu(open){ document.getElementById("shell").classList.toggle("open", open); document.getElementById("menuBtn").setAttribute("aria-expanded", String(open)); }
+
+window.addEventListener("hashchange", () => { render(); document.getElementById("content").focus({preventScroll:true}); window.scrollTo(0,0); });
+document.getElementById("menuBtn").addEventListener("click", e => { e.stopPropagation(); setMenu(!document.getElementById("shell").classList.contains("open")); });
+document.querySelector(".main").addEventListener("click", () => { if (document.getElementById("shell").classList.contains("open")) setMenu(false); });
+// Service Plan · งานรอนัดวัน: reminder across the top of every page from 3 weeks before the expected date
+// (hub/sp-request/app.js → SPRequest.due()), for everyone who can open Service Plan. "ปิด" hides it until the list changes.
+let DUE_HIDE = "";
+function dueBanner(){
+  const box = document.getElementById("sprDue");
+  if (!window.SPRequest || !allowed("service-plan")) { box.hidden = true; return; }
+  window.SPRequest.load().then(() => {
+    const list = window.SPRequest.due(), sig = list.map(r => r.id + ":" + r.expect_date).join(",");
+    if (!list.length || sig === DUE_HIDE) { box.hidden = true; return; }
+    const today = new Date(); today.setHours(0,0,0,0);
+    const left = r => { const n = Math.round((new Date(r.expect_date + "T00:00:00") - today) / 864e5); return n < 0 ? `เลยกำหนด ${-n} วัน` : n === 0 ? "ถึงกำหนดวันนี้" : `อีก ${n} วัน`; };
+    const e = t => String(t ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+    box.innerHTML = `<b>⏰ งานรอนัดวัน ใกล้ถึงกำหนด ${list.length} งาน</b><span class="due-l">${list.slice(0, 6).map(r => `<button type="button" data-due="${r.id}" class="${r.expect_date < new Date().toISOString().slice(0,10) ? "late" : ""}">${e(r.type)} · ${e(r.customer)} · ${e(r.job_name)} <i>${e(window.SPRequest.when(r))} — ${left(r)}</i></button>`).join("")}${list.length > 6 ? `<a href="#service-plan/req">+ อีก ${list.length - 6} งาน</a>` : ""}</span><button type="button" class="due-x" data-due-x aria-label="ปิดการแจ้งเตือน">ปิด</button>`;
+    box.hidden = false;
+    box.onclick = ev => {
+      if (ev.target.closest("[data-due-x]")) { DUE_HIDE = sig; box.hidden = true; return; }
+      const b = ev.target.closest("[data-due]"); if (b) window.SPRequest.open(+b.dataset.due, dueBanner);
+    };
+  }).catch(() => { box.hidden = true; });
+}
+fetch("/auth/me", {cache:"no-store"}).then(r => r.ok ? r.json() : null).then(u => {
+  if (!u || !u.email) return;
+  ME = u; window.SSM_ME = u; render();
+  dueBanner(); window.addEventListener("spr-change", dueBanner);
+  document.getElementById("who").textContent = "👋 " + (u.name || u.email);
+  document.getElementById("who").title = u.username || u.email;
+  document.getElementById("acct").hidden = false;
+  if (u.role === "admin") document.getElementById("admin").hidden = false;
+  document.getElementById("saName").textContent = u.name || u.email;
+  document.getElementById("saEmail").textContent = u.username ? "ชื่อผู้ใช้ " + u.username : u.email;
+  document.getElementById("sideAcct").hidden = false;
+  if (u.role === "admin") document.getElementById("saAdmin").hidden = false;
+}).catch(() => {});
+render();
+fetch("registry.json", {cache:"no-store"})
+  .then(r => r.json())
+  .then(d => { REG = d; render(); })
+  .catch(() => { document.getElementById("content").insertAdjacentHTML("afterbegin", `<div class="empty">โหลดรายการไม่สำเร็จ — ลองรีเฟรชหน้า</div>`); });
+</script>
+</body>
+</html>
