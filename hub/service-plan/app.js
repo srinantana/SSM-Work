@@ -158,7 +158,7 @@
         ? `<span class="spc-src snap">● ข้อมูลสำรอง</span> ณ ${esc(META.updated ? META.updated.toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) : "–")}${META.why ? " · " + esc(META.why) : ""}`
         : `<span class="spc-src snap">● โหลดข้อมูลไม่สำเร็จ</span>`;
     const nq = window.SPRequest ? window.SPRequest.pending() : 0;
-    return `<div class="spc-bar spc-rq"><a class="spc-btn" href="#service-plan/dash">📊 Dashboard</a><b>ขอคน <small>ทดลองใช้</small></b><button type="button" class="spc-btn pri" id="spcNew">+ ขอคน</button><a class="spc-btn" href="#service-plan/req">คำขอคน / Confirm${nq ? ` <i>${nq}</i>` : ""}</a><span>กรอกคำขอ เลือกคนจากแผน Manpower แล้วรอ Confirm (กอล์ฟ · โจ้ สำหรับช่างไฟฟ้า)</span></div>
+    return `<div class="spc-bar spc-rq"><a class="spc-btn" href="#service-plan">‹ Dashboard</a><b>ขอคน <small>ทดลองใช้</small></b><button type="button" class="spc-btn pri" id="spcNew">+ ขอคน</button><a class="spc-btn" href="#service-plan/req">คำขอคน / Confirm${nq ? ` <i>${nq}</i>` : ""}</a><span>กรอกคำขอ เลือกคนจากแผน Manpower แล้วรอ Confirm (กอล์ฟ · โจ้ สำหรับช่างไฟฟ้า)</span></div>
     <div class="spc-bar">
       <div class="spc-nav"><a class="spc-btn" href="${href(S.view, step(-1))}" aria-label="ก่อนหน้า">‹</a><a class="spc-btn" href="${href(S.view, today())}">วันนี้</a><a class="spc-btn" href="${href(S.view, step(1))}" aria-label="ถัดไป">›</a><h2>${esc(title())}</h2></div>
       <div class="spc-views" role="tablist">${VIEWS.map(([v, t]) => `<a role="tab" aria-selected="${v === S.view}" href="${href(v, S.date)}">${t}</a>`).join("")}</div>
@@ -319,7 +319,9 @@
         <span class="spd-mv">${o.days || ""}</span><span class="spd-mb"><i style="height:${Math.round(o.days / mMax * 100)}%"></i></span><span class="spd-ml">${MS[o.m]}</span><span class="spd-mj">${o.jobs ? o.jobs + " งาน" : "–"}</span></a>`).join("")}</div>`;
     const pMax = Math.max(1, ...D.P.map(p => p.md));
     const ppl = D.P.length ? `<div class="spd-tw"><table class="spd-t"><thead><tr><th>ชื่อ</th><th>ตำแหน่งในงาน</th><th class="n">งาน</th><th class="n">Man-day</th><th>% ใช้งาน (จาก ${D.work} วันทำงาน จ.–ส.)</th></tr></thead><tbody>${D.P.map(p => { const u = Math.round(p.md / (D.work || 1) * 100); return `<tr><td><button type="button" class="spc-link" data-q="${esc(p.k)}">${esc(p.k)}</button></td><td>${esc([...p.roles].join(", "))}</td><td class="n">${p.jobs}</td><td class="n">${p.md}</td><td><span class="spd-u"><span class="spd-bt"><i class="${u > 100 ? "over" : u >= 80 ? "hi" : ""}" style="width:${Math.min(100, Math.max(2, u))}%"></i></span><b>${u}%</b></span></td></tr>`; }).join("")}</tbody></table></div>` : `<div class="spd-none">ยังไม่มีชื่อคนในงานของช่วงนี้</div>`;
-    return `<div class="spc-bar"><div class="spc-nav"><a class="spc-btn" href="#service-plan">‹ ปฏิทิน</a><a class="spc-btn" href="${dh(mode, stepD(-1))}" aria-label="ก่อนหน้า">‹</a><a class="spc-btn" href="${dh(mode, today())}">${mode === "year" ? "ปีนี้" : "เดือนนี้"}</a><a class="spc-btn" href="${dh(mode, stepD(1))}" aria-label="ถัดไป">›</a><h2>Dashboard · ${esc(title)}</h2></div>
+    const nq = window.SPRequest ? window.SPRequest.pending() : 0;
+    return `<div class="spc-bar spc-rq"><a class="spc-btn pri" href="#service-plan/${mode === "year" ? "year" : "month"}/${key(d0)}">📅 ปฏิทิน Service Plan</a><button type="button" class="spc-btn" id="spcNew">+ ขอคน</button><a class="spc-btn" href="#service-plan/req">คำขอคน / Confirm${nq ? ` <i>${nq}</i>` : ""}</a><span>ภาพรวมปริมาณงานและการใช้คนของงาน Service</span></div>
+    <div class="spc-bar"><div class="spc-nav"><a class="spc-btn" href="${dh(mode, stepD(-1))}" aria-label="ก่อนหน้า">‹</a><a class="spc-btn" href="${dh(mode, today())}">${mode === "year" ? "ปีนี้" : "เดือนนี้"}</a><a class="spc-btn" href="${dh(mode, stepD(1))}" aria-label="ถัดไป">›</a><h2>Dashboard · ${esc(title)}</h2></div>
       <div class="spc-views" role="tablist"><a role="tab" aria-selected="${mode === "month"}" href="${dh("month", d0)}">เดือน</a><a role="tab" aria-selected="${mode === "year"}" href="${dh("year", d0)}">ปี</a></div></div>
     <div class="spd-kp">${kpi(nf(D.jobs.length), "งานในช่วงนี้", `Complete ${st("Complete")} · Confirm ${st("Confirm")} · รอ ${st("New") + st("Checking")}`)}${kpi(nf(D.days), "วันงาน (Job-day)", "1 งาน × 1 วัน")}${kpi(nf(D.md), "Man-day", D.noPpl ? `${D.noPpl} งานยังไม่ระบุคน` : "คน × วัน")}${kpi(nf(D.P.length), "คนที่ออกงาน", D.P.length ? `เฉลี่ย ${(D.md / D.P.length).toFixed(1)} man-day / คน` : "")}${kpi(nf(D.drafts), "งานรอนัดวัน", D.undated ? `+ ${D.undated} งาน TBC ในใบขอคน` : "ยังไม่ได้วันจากลูกค้า")}</div>
     <div class="spd-g">
@@ -337,7 +339,7 @@
   function draw() {
     if (!ROOT || !document.body.contains(ROOT)) return;
     if (S.page === "req") {
-      ROOT.innerHTML = `<div class="spc-bar"><div class="spc-nav"><a class="spc-btn" href="#service-plan">‹ ปฏิทิน Service Plan</a><h2>คำขอคน <small style="font-weight:500;color:var(--muted);font-size:13px">ทดลองใช้</small></h2></div></div><div id="spcReq"></div>`;
+      ROOT.innerHTML = `<div class="spc-bar"><div class="spc-nav"><a class="spc-btn" href="#service-plan">‹ Dashboard</a><a class="spc-btn" href="#service-plan/cal">ปฏิทิน Service Plan</a><h2>คำขอคน <small style="font-weight:500;color:var(--muted);font-size:13px">ทดลองใช้</small></h2></div></div><div id="spcReq"></div>`;
       if (window.SPRequest) window.SPRequest.page(ROOT.querySelector("#spcReq"), () => { JOBS = null; });
       return;
     }
@@ -373,7 +375,7 @@
     if (!document.getElementById("spcCss")) { const s = document.createElement("style"); s.id = "spcCss"; s.textContent = CSS; document.head.appendChild(s); }
     document.querySelectorAll(".spc-modal").forEach(m => m.remove());
     const [v, d] = (sub || "").split("/");
-    S.page = v === "req" ? "req" : v === "dash" ? "dash" : "cal";
+    S.page = v === "req" ? "req" : v === "cal" || VIEWS.some(x => x[0] === v) ? "cal" : "dash";   // #service-plan opens the dashboard
     if (S.page === "dash") { S.dmode = d === "year" ? "year" : "month"; S.ddate = fromKey((sub || "").split("/")[2]) || today(); }
     if (S.page === "cal") { S.view = VIEWS.some(x => x[0] === v) ? v : "month"; S.date = fromKey(d) || today(); }
     ROOT = el; bind(el);
