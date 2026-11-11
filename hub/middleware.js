@@ -134,7 +134,45 @@ function menuOfPath(path) {
 // Spare Part projects live in Supabase table public.spare_part_projects (database/spare_part_projects.sql).
 // The table has RLS on and no policies, so only this middleware (service key) can read or write it.
 const SP_TABLE = '/rest/v1/spare_part_projects';
+// RAK_Master_Item (item master exported from the ERP). type_code = <group><kind><seq><brand>, e.g. PAE100101 2 05 SF:
+// group PAE100101 = Vertical Pump PP, kind 1 = the equipment itself, kind 2 = spare parts of that group, SF = Serfilco.
+// Standard cost = cost_price, or unitprice when cost_price is empty (Dew, 11 Nov 2026). Cost is sent to admins only.
+let ITEM_CACHE = { at: 0, rows: null };
+const lowerKeys = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k.toLowerCase(), v]));
+async function masterItems(cfg) {
+  if (ITEM_CACHE.rows && Date.now() - ITEM_CACHE.at < 5 * 60 * 1000) return ITEM_CACHE.rows;
+  const raw = await restAll(cfg, '/rest/v1/RAK_Master_Item?select=*');
+  if (!raw) return null;
+  const n = (v) => { const x = Number(v); return Number.isFinite(x) && x > 0 ? x : 0; };
+  const rows = raw.map(lowerKeys).filter((r) => r.type_code).map((r) => {
+    const code = String(r.type_code).trim();
+    const m = code.match(/^([A-Za-z]+\d{6})(\d)(\d{2})([A-Za-z]*)$/);
+    return {
+      code, group: m ? m[1] : '', kind: m ? m[2] : '', brand: m ? m[4] : '',
+      d1: String(r.c_des1 || '').trim(), d2: String(r.c_des2 || '').trim(), maker: String(r.c_des3 || '').trim(),
+      unit: String(r.unitname || '').trim(), sale: n(r.sale_price), cost: n(r.cost_price) || n(r.unitprice),
+      active: String(r.cc_edit || '').toUpperCase() !== 'D',
+    };
+  });
+  ITEM_CACHE = { at: Date.now(), rows };
+  return rows;
+}
+async function itemsApi(cfg, url, prof) {
+  const rows = await masterItems(cfg);
+  if (!rows) return json({ error: 'no_table' }, 503);
+  const admin = prof.role === 'admin';
+  const out = (r) => ({ code: r.code, group: r.group, kind: r.kind, d1: r.d1, d2: r.d2, maker: r.maker, unit: r.unit, sale: r.sale, ...(admin ? { cost: r.cost } : {}) });
+  const group = url.searchParams.get('group');
+  if (group) return json({ items: rows.filter((r) => r.group === group).sort((a, b) => a.code.localeCompare(b.code)).map(out) });
+  const words = String(url.searchParams.get('q') || '').toLowerCase().split(/\s+/).filter(Boolean).slice(0, 6);
+  if (!words.length) return json({ items: [] });
+  const kind = url.searchParams.get('kind');
+  const hit = rows.filter((r) => (!kind || r.kind === kind) && words.every((w) => (r.code + ' ' + r.d1 + ' ' + r.d2 + ' ' + r.maker).toLowerCase().includes(w)));
+  return json({ items: hit.slice(0, 40).map(out), total: hit.length });
+}
+
 async function sparePartApi(cfg, req, url, prof) {
+  if (url.pathname === '/api/spare-part/items' && req.method === 'GET') return itemsApi(cfg, url, prof);
   if (url.pathname !== '/api/spare-part/projects') return json({ error: 'not found' }, 404);
   const rest = (q, opt) => call(cfg, SP_TABLE + q, { admin: true, ...opt });
   if (req.method === 'GET') {

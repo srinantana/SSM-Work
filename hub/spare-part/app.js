@@ -221,11 +221,11 @@
       return `<tr class="sp-zone"><td colspan="${COLS.length + 1}"><div class="sp-zone-in">
           <input class="sp-zname" data-zone="${zi}" value="${esc(z)}" aria-label="ชื่อโซน">
           <span class="sub">${rows.length} รายการ</span><span class="sp-ztot" data-ztot="${zi}"></span>
-          <button class="sp-btn sm" data-addin="${zi}">＋ เพิ่มรายการในโซนนี้</button></div></td></tr>`
+          <button class="sp-btn sm" data-addin="${zi}">＋ เพิ่มรายการในโซนนี้</button><button class="sp-btn sm" data-master="${zi}">🔍 เพิ่มจาก Master</button></div></td></tr>`
         + rows.map(l => { no++; return `<tr data-row="${l.id}">
           <td class="c">${no}</td>
           <td>${inp(l, "equip", "", "Equipment")}${inp(l, "tag", "tag", "Tag")}</td>
-          <td>${inp(l, "part")}</td><td>${inp(l, "partNo")}</td><td>${inp(l, "maker")}</td><td>${inp(l, "spec")}</td>
+          <td>${inp(l, "part")}</td><td><div class="sp-pn">${inp(l, "partNo")}<button class="sp-x sp-find" data-find="${l.id}" title="ค้นหาจาก Master Item แล้วเติมแถวนี้" aria-label="ค้นหาจาก Master Item">🔍</button></div></td><td>${inp(l, "maker")}</td><td>${inp(l, "spec")}</td>
           <td class="c">${inp(l, "installed")}</td><td class="c">${inp(l, "qty")}</td><td class="c">${inp(l, "unit")}</td>
           <td class="c"><select class="sp-cell sp-prio ${prioCls(l.prio)}" data-l="${l.id}" data-k="prio">${PRIOS.map(o => `<option class="${prioCls(o)}" ${l.prio === o ? "selected" : ""}>${o}</option>`).join("")}</select></td>
           <td class="c">${inp(l, "leadWeeks")}</td><td class="r">${inp(l, "unitPrice")}</td><td class="r amt" data-amt="${l.id}">${money(amountOf(l))}</td>
@@ -265,6 +265,10 @@
       const old = zones[+i.dataset.zone], nu = i.value.trim() || old;
       p.lines.forEach(l => { if (l.zone === old) l.zone = nu; }); p.zones = (p.zones || []).map(z => z === old ? nu : z); redraw();
     });
+    ROOT.querySelectorAll("[data-master]").forEach(b => b.onclick = () => { const z = zones[+b.dataset.master];
+      openMaster({ title: "เพิ่มจาก Master Item → " + z, multi: true, onPick: its => { its.forEach(it => p.lines.push(fromItem(it, { ...blank(z), equip: it.kind === "2" ? it.d1 : "" }))); redraw(); ROOT.querySelector("#spSaved").textContent = `เพิ่ม ${its.length} รายการจาก Master · กด บันทึก เพื่อเก็บ`; } }); });
+    ROOT.querySelectorAll("[data-find]").forEach(b => b.onclick = () => { const l = p.lines.find(x => x.id === b.dataset.find);
+      openMaster({ title: "เลือก item ให้แถวนี้", multi: false, onPick: ([it]) => { fromItem(it, l); redraw(); } }); });
     ROOT.querySelectorAll("[data-addin]").forEach(b => b.onclick = () => { p.lines.push(blank(zones[+b.dataset.addin])); redraw(); });
     ROOT.querySelectorAll("[data-move]").forEach(s => s.onchange = () => { if (s.value === "") return; p.lines.find(x => x.id === s.dataset.move).zone = zones[+s.value]; redraw(); });
     const df = ROOT.querySelector("#spDocForm");
@@ -420,6 +424,61 @@
     };
     m.querySelector("[data-f]").focus();
   }
+  /* --- RAK_Master_Item search (via /api/spare-part/items; cost is returned to admins only) --- */
+  const itemPart = it => {
+    const m = it.d2.match(/^(?:part\s*:\s*)?(.*?)\s*mater(?:i)?al\s*:\s*(.+)$/i);
+    if (it.kind === "2") return m ? { part: m[1].trim(), spec: m[2].trim() } : { part: it.d2.replace(/^part\s*:\s*/i, ""), spec: "" };
+    return { part: it.d1, spec: it.d2 };
+  };
+  const fromItem = (it, l) => { const x = itemPart(it); Object.assign(l, { partNo: it.code, part: x.part, spec: x.spec, maker: it.maker, unit: it.unit || l.unit, unitPrice: it.sale || l.unitPrice || "", source: "Master" }); return l; };
+  function openMaster(opt) { // opt: { title, multi, onPick(items) }
+    const m = document.createElement("div"); m.className = "sp-modal"; document.body.appendChild(m);
+    let q = "", kind = "", items = [], total = 0, sel = new Map(), msg = "พิมพ์รหัส ชื่ออุปกรณ์ หรือชื่ออะไหล่ เช่น impeller, PAE1001, serfilco", group = null, timer = 0;
+    const money2 = n => n ? n.toLocaleString("en-US", { maximumFractionDigits: 2 }) : "–";
+    const margin = it => it.cost === undefined ? "" : !it.sale ? `<span class="badge off">ไม่มีราคาขาย</span>`
+      : it.cost && it.sale < it.cost ? `<span class="badge sp-loss">ขาดทุน</span>` : it.cost ? (gp => `<span class="badge ${gp < 15 ? "soon" : "live"}" title="${gp < 15 ? "กำไรต่ำกว่า 15%" : ""}">GP ${gp}%</span>`)(Math.round((1 - it.cost / it.sale) * 100)) : "";
+    async function load() {
+      const u = group ? "/api/spare-part/items?group=" + encodeURIComponent(group) : "/api/spare-part/items?q=" + encodeURIComponent(q) + (kind ? "&kind=" + kind : "");
+      if (!group && !q.trim()) { items = []; return draw(); }
+      msg = "กำลังค้นหา…"; draw();
+      try { const r = await fetch(u); if (r.status === 503) throw new Error("ยังไม่พบตาราง RAK_Master_Item"); if (!r.ok) throw new Error("ค้นหาไม่สำเร็จ (" + r.status + ")");
+        const d = await r.json(); items = d.items || []; if (group) items.sort((x, y) => (y.kind === "2") - (x.kind === "2") || x.code.localeCompare(y.code)); total = d.total || items.length; msg = items.length ? "" : "ไม่พบรายการ"; }
+      catch (e) { items = []; msg = "⚠️ " + (e.message || e); }
+      draw();
+    }
+    function draw() {
+      const isAdm = items.some(it => it.cost !== undefined);
+      m.innerHTML = `<div class="sp-dlg" role="dialog" aria-modal="true" aria-label="ค้นหาจาก Master Item" style="width:min(1000px,100%)">
+        <div class="sp-dlg-h"><b>${esc(opt.title || "ค้นหาจาก Master Item")}</b><span class="sp-steps">${group ? `<i class="on">อะไหล่กลุ่ม ${esc(group)}</i>` : ""}</span><button class="sp-x" data-m="close" aria-label="ปิด">✕</button></div>
+        <div class="sp-dlg-b">
+          ${group ? `<button class="sp-btn sm" data-m="back">← กลับไปผลค้นหา</button>` : `<div class="sp-msearch"><input class="sp-in" id="mq" value="${esc(q)}" placeholder="ค้นหาใน RAK_Master_Item" autocomplete="off">
+            <span class="sp-seg">${[["", "ทั้งหมด"], ["1", "อุปกรณ์"], ["2", "อะไหล่"]].map(([k, t]) => `<button class="${kind === k ? "on" : ""}" data-kind="${k}">${t}</button>`).join("")}</span></div>`}
+          ${msg ? `<p class="sub" style="margin:12px 2px">${esc(msg)}</p>` : ""}
+          ${items.length ? `<div class="tbl" style="margin-top:10px"><table class="sp-mt"><thead><tr><th></th><th>รหัส</th><th>รายการ</th><th>ผู้ผลิต</th><th class="c">หน่วย</th><th class="r">ราคาขาย</th>${isAdm ? `<th class="r">ต้นทุน std.</th><th class="c">GP</th>` : ""}<th></th></tr></thead><tbody>
+            ${items.map((it, i) => `<tr class="${sel.has(it.code) ? "on" : ""}"><td>${opt.multi ? `<input type="checkbox" data-sel="${i}" ${sel.has(it.code) ? "checked" : ""}>` : `<button class="sp-btn sm primary" data-pick="${i}">เลือก</button>`}</td>
+              <td class="mono">${esc(it.code)}${it.kind === "2" ? `<div><span class="badge soon">อะไหล่</span></div>` : ""}</td><td><b>${esc(it.d1)}</b><div class="sub">${esc(it.d2)}</div></td><td>${esc(it.maker)}</td>
+              <td class="c">${esc(it.unit)}</td><td class="r">${money2(it.sale)}</td>${isAdm ? `<td class="r">${money2(it.cost)}</td><td class="c">${margin(it)}</td>` : ""}
+              <td>${it.kind === "1" && it.group && !group ? `<button class="sp-btn sm" data-grp="${esc(it.group)}">อะไหล่ของรุ่นนี้ →</button>` : ""}</td></tr>`).join("")}</tbody></table></div>
+            ${!group && total > items.length ? `<p class="sub">แสดง ${items.length} จาก ${total} รายการ · พิมพ์คำเพิ่มเพื่อให้แคบลง</p>` : ""}` : ""}
+        </div>
+        <div class="sp-dlg-f">${opt.multi ? `<span class="sub" style="margin-right:auto">เลือกแล้ว ${sel.size} รายการ</span><button class="sp-btn" data-m="close">ยกเลิก</button><button class="sp-btn primary" data-m="add" ${sel.size ? "" : "disabled"}>เพิ่ม ${sel.size} รายการ</button>` : `<button class="sp-btn" data-m="close">ปิด</button>`}</div></div>`;
+      const mq = m.querySelector("#mq");
+      if (mq) { mq.focus(); mq.setSelectionRange(q.length, q.length); mq.oninput = () => { q = mq.value; clearTimeout(timer); timer = setTimeout(load, 280); }; }
+      m.querySelectorAll("[data-kind]").forEach(b => b.onclick = () => { kind = b.dataset.kind; load(); });
+      m.querySelectorAll("[data-grp]").forEach(b => b.onclick = () => { group = b.dataset.grp; load(); });
+      m.querySelectorAll("[data-sel]").forEach(c => c.onchange = () => { const it = items[+c.dataset.sel]; c.checked ? sel.set(it.code, it) : sel.delete(it.code); draw(); });
+      m.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => { m.remove(); opt.onPick([items[+b.dataset.pick]]); });
+      m.querySelectorAll("[data-m]").forEach(b => b.onclick = () => {
+        const a = b.dataset.m;
+        if (a === "close") m.remove();
+        if (a === "back") { group = null; load(); }
+        if (a === "add" && sel.size) { m.remove(); opt.onPick([...sel.values()]); }
+      });
+    }
+    m.onclick = e => { if (e.target === m) m.remove(); };
+    draw();
+  }
+
   function exportCsv(p) { // customer copy: no Remarks column, only lines that have a Unit price
     migrate(p);
     const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -458,6 +517,9 @@
 .p-recommended{background:#fff1d6!important;color:#8a5a00!important;border-color:#f1d38a!important}
 .p-consumable{background:#e3f0ff!important;color:#0b5394!important;border-color:#b6d4f5!important}
 option.p-critical,option.p-recommended,option.p-consumable{font-weight:600}
+.sp-pn{display:flex;gap:2px;align-items:flex-start}.sp-find{font-size:12px;padding:5px 4px;opacity:.55}.sp-find:hover{opacity:1}
+.sp-msearch{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.sp-msearch .sp-in{flex:1 1 320px}.sp-seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}.sp-seg button{font:inherit;font-size:13px;border:0;background:#fff;padding:7px 12px;cursor:pointer;color:var(--muted)}.sp-seg button.on{background:var(--blush);color:var(--rak);font-weight:600}
+.sp-mt td{vertical-align:top;padding:8px 8px}.sp-mt .c{text-align:center}.sp-mt .r{text-align:right;font-variant-numeric:tabular-nums}.sp-mt tr.on td{background:var(--blush)}.sp-mt .mono{font-family:"IBM Plex Mono",monospace;font-size:12.5px;white-space:nowrap}.badge.sp-loss{background:#fde2e2;color:#b00000}.sp-mt .badge{white-space:nowrap}
 .sp-note{background:var(--amber-soft,#fff6e0);border:1px solid #f1d38a;border-radius:10px;padding:10px 12px;margin:0 0 14px;font-size:13px}
 .sp-src{color:var(--muted);font-size:12.5px;margin-top:14px}.sp-src a{color:var(--rak)}
 .sp-modal{position:fixed;inset:0;background:rgba(18,18,18,.45);display:grid;place-items:center;z-index:50;padding:16px}
