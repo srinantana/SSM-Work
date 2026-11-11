@@ -579,6 +579,7 @@ async function manpowerMaster(cfg, req, prof, kind) {
     const color = /^#[0-9a-fA-F]{6}$/.test(String(d.color || '')) ? d.color : '#6d7582';
     if (!name || (code && !/^[A-Za-z0-9_-]{1,20}$/.test(code))) return json({ error: 'input' }, 400);
     const row = { name, customer: mpStr(d.customer, 120) || null, job_no: mpStr(d.job_no, 40) || null, status, color, updated_at: now };
+    if (d.short_name !== undefined) row.short_name = mpStr(d.short_name, 40) || null;
     let res, newCode = code;
     if (code) res = await fetch(cfg.url + `/rest/v1/mp_projects?code=eq.${encodeURIComponent(code)}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) });
     else {
@@ -586,7 +587,7 @@ async function manpowerMaster(cfg, req, prof, kind) {
       newCode = 'P' + Date.now().toString(36).toUpperCase();
       res = await fetch(cfg.url + '/rest/v1/mp_projects', { method: 'POST', headers: H, body: JSON.stringify({ code: newCode, sort: (all || []).reduce((m, p) => Math.max(m, p.sort || 0), 0) + 10, ...row }) });
     }
-    if (!res.ok) return json({ error: 'supabase' }, 502);
+    if (!res.ok) return json({ error: row.short_name !== undefined && res.status === 400 ? 'run database/manpower-004.sql' : 'supabase' }, 502);
     await mpLog(cfg, who, code ? 'project-edit' : 'project-add', { code: newCode, ...row });
     return json({ ok: true, code: newCode });
   }
@@ -607,7 +608,7 @@ async function manpowerMasterGet(cfg, prof) {
   if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
   const [workers, projects, holidays] = await Promise.all([
     restAll(cfg, '/rest/v1/mp_workers?select=id,emp_code,name_th,nickname,unit,trade,active,sort&order=sort.asc'),
-    restAll(cfg, '/rest/v1/mp_projects?select=code,name,customer,job_no,status,color,sort&order=sort.asc'),
+    mpProjects(cfg, 'code,name,customer,job_no,status,color,sort'),
     restAll(cfg, '/rest/v1/mp_holidays?select=day,type,name&order=day.asc'),
   ]);
   if (!workers || !projects) return json({ error: 'no_table' }, 503);
@@ -649,6 +650,11 @@ async function manpowerMilestone(cfg, req, prof, del) {
   return json({ ok: true });
 }
 
+// projects incl. short_name (database/manpower-004.sql); still works before that migration is run
+async function mpProjects(cfg, cols) {
+  return (await restAll(cfg, `/rest/v1/mp_projects?select=${cols},short_name&order=sort.asc`)) || restAll(cfg, `/rest/v1/mp_projects?select=${cols}&order=sort.asc`);
+}
+
 async function manpowerApi(cfg, req, url, prof) {
   const writes = { '/api/manpower/confirm': manpowerConfirm, '/api/manpower/assign': manpowerAssign, '/api/manpower/clear': manpowerClear,
     '/api/manpower/leave': manpowerLeave, '/api/manpower/leave-clear': manpowerLeaveClear };
@@ -670,7 +676,7 @@ async function manpowerApi(cfg, req, url, prof) {
   const span = `day=gte.${from}&day=lte.${to}`;
   const [workers, projects, milestones, assignments, absences, holidays] = await Promise.all([
     restAll(cfg, '/rest/v1/mp_workers?select=id,emp_code,name_th,nickname,unit,trade,active,sort&order=sort.asc'),
-    restAll(cfg, '/rest/v1/mp_projects?select=code,name,customer,job_no,status,color,sort,note&order=sort.asc'),
+    mpProjects(cfg, 'code,name,customer,job_no,status,color,sort,note'),
     restAll(cfg, `/rest/v1/mp_milestones?select=id,project_code,day,label&${span}&order=day.asc`),
     restAll(cfg, `/rest/v1/mp_assignments?select=worker_id,day,project_code,kind,work_type,text,tentative,updated_by&${span}&order=day.asc,worker_id.asc`),
     restAll(cfg, `/rest/v1/mp_absences?select=worker_id,day,type,note&${span}&order=day.asc,worker_id.asc`),
