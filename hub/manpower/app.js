@@ -55,8 +55,11 @@
 
   /* ---------- load ---------- */
   const loadErr = st => st === 503 ? "ยังไม่ได้สร้างตารางข้อมูลกำลังคนใน Supabase (database/manpower.sql)" : st === 403 ? "บัญชีนี้ยังไม่มีสิทธิ์เมนูวางแผนกำลังคน" : "โหลดข้อมูลไม่สำเร็จ (" + st + ")";
+  const jobKey = v => String(v == null ? "" : v).replace(/[^0-9A-Za-z]/g, "").toUpperCase();
   function prep(d) {
     d.P = new Map(d.projects.map(p => [p.code, p]));
+    d.master = d.master || [];
+    d.MJ = new Map(d.master.map(m => [jobKey(m.job_no), m]));
     d.A = new Map(d.assignments.map(x => [x.worker_id + "|" + x.day, x]));
     d.X = new Map(d.absences.map(x => [x.worker_id + "|" + x.day, x]));
     d.H = new Map(d.holidays.map(x => [x.day, x]));
@@ -89,9 +92,13 @@
   const typeOf = a => a.work_type && WCOL[a.work_type] ? a.work_type : (a.project_code === "SERVICE" ? "service" : "other");
   const colorOf = a => a.kind === "admin" && typeOf(a) === "other" ? "#adb5bd" : WCOL[typeOf(a)];
   const shortOf = p => p ? (p.short_name || p.name) : "";
+  // master row (RAK_Master_Project_on_hand) for a project, matched by Job no.
+  const masterOf = p => p && p.job_no ? DATA.MJ.get(jobKey(p.job_no)) : null;
   // cell text: "work type | customer | short job name"; jobs without a real customer / project show their own wording
   function cellText(a) {
     const p = a.project_code ? DATA.P.get(a.project_code) : null, t = WSHORT[typeOf(a)];
+    const m = masterOf(p);
+    if (m && (m.customer || m.job_name)) return [t, m.customer, m.job_name].filter(Boolean).join(" | ");
     const cust = p && p.customer && p.code !== "SERVICE" ? p.customer : "";
     let tail = cust ? shortOf(p) : a.text.replace(/^จอง\s*/, "");
     if (t === "Service" && !cust) tail = tail.replace(/^(SO|WR|IS)\s+/i, "");
@@ -105,9 +112,10 @@
   const matchA = a => S.project ? a.project_code === S.project : S.cust ? lc(custOf(a.project_code)) === lc(S.cust) : true;
   const matchSv = list => S.project ? S.project === "SERVICE" || list.some(j => lc(j.job) === lc((DATA.P.get(S.project) || {}).job_no)) : S.cust ? list.some(j => lc(j.customer).includes(lc(S.cust)) || lc(S.cust).includes(lc(j.customer))) || lc(custOf("SERVICE")) === lc(S.cust) : true;
   const matchM = code => S.project ? code === S.project : S.cust ? lc(custOf(code)) === lc(S.cust) : true;
-  function customers() {
+  function customers(withMaster) {
     const set = new Map();
     DATA.projects.forEach(p => { if (p.customer) set.set(lc(p.customer), p.customer); });
+    if (withMaster) (DATA.master || []).forEach(m => { if (m.customer && !set.has(lc(m.customer))) set.set(lc(m.customer), m.customer); });
     return [...set.values()].sort((a, b) => a.localeCompare(b, "th"));
   }
   function visibleWorkers() {
@@ -345,7 +353,7 @@
         ${toField}
         <div class="mp-chks"><label><input type="checkbox" name="skip" checked> ข้ามวันอาทิตย์ / วันหยุด / วันลา</label><label><input type="checkbox" name="tentative" ${a && a.tentative ? "checked" : ""}> จอง (ยังไม่ยืนยัน)</label></div>
         <div class="mp-fbtn"><button type="submit" class="mp-save">บันทึก</button>${a || bulk ? `<button type="button" class="mp-del">${bulk ? "ลบงานทั้งหมดในช่องที่เลือก" : "ลบงานวันนี้"}</button>` : ""}</div>
-        <datalist id="mpCustL">${customers().map(c => `<option value="${esc(c)}">`).join("")}</datalist><datalist id="mpJobL"></datalist>
+        <datalist id="mpCustL">${customers(true).map(c => `<option value="${esc(c)}">`).join("")}</datalist><datalist id="mpJobL"></datalist>
       </form></details>
       <details class="mp-fwrap lv" ${isLv ? "open" : ""}><summary>${isLv ? "แก้ไข / ยกเลิกวันลา" : "ลงวันลา"}</summary><form class="mp-form mp-lform" autocomplete="off">
         <fieldset><legend>ประเภทการลา</legend>${LV.map(([v, l]) => `<label class="mp-wt"><input type="radio" name="type" value="${v}" ${isLv && x.type === v ? "checked" : ""} required>${l}</label>`).join("")}</fieldset>
@@ -377,11 +385,20 @@
     };
     const f = el.querySelector(".mp-wform");
     if (f) {
-      const jobsFor = () => { const c = lc(f.customer.value); el.querySelector("#mpJobL").innerHTML = DATA.projects.filter(p => !c || lc(p.customer) === c).map(p => `<option value="${esc(p.name)}">${esc(p.job_no || "")}</option>`).join(""); };
+      const jobsFor = () => {
+        const c = lc(f.customer.value), seen = new Set();
+        const opts = DATA.projects.filter(p => !c || lc(p.customer) === c).map(p => { seen.add(jobKey(p.job_no)); return `<option value="${esc(p.name)}">${esc(p.job_no || "")}</option>`; });
+        DATA.master.filter(m => (!c || lc(m.customer) === c) && !seen.has(jobKey(m.job_no))).forEach(m => opts.push(`<option value="${esc(m.job_full || m.job_name)}">${esc(m.job_no + " · " + m.job_name)}</option>`));
+        el.querySelector("#mpJobL").innerHTML = opts.join("");
+      };
+      // typing a Job no. that is in the master fills customer + job name
+      f.job_no.addEventListener("change", () => { const m = DATA.MJ.get(jobKey(f.job_no.value)); if (m) { if (!f.customer.value) f.customer.value = m.customer; if (!f.job.value) f.job.value = m.job_full || m.job_name; jobsFor(); } });
       jobsFor();
       f.customer.addEventListener("input", jobsFor);
       f.job.addEventListener("change", () => {
         const hit = DATA.projects.find(p => lc(p.name) === lc(f.job.value) && (!f.customer.value || lc(p.customer) === lc(f.customer.value)));
+        const mh = !hit && DATA.master.find(m => (lc(m.job_full) === lc(f.job.value) || lc(m.job_name) === lc(f.job.value)) && (!f.customer.value || lc(m.customer) === lc(f.customer.value)));
+        if (mh) { if (!f.customer.value) f.customer.value = mh.customer; if (!f.job_no.value) f.job_no.value = mh.job_no; }
         if (hit) { if (!f.customer.value) f.customer.value = hit.customer || ""; if (hit.job_no && !f.job_no.value) f.job_no.value = hit.job_no; if (hit.code === "SERVICE" && !f.querySelector("[name=work_type]:checked")) f.querySelector("[value=service]").checked = true; }
       });
       f.addEventListener("submit", e => { e.preventDefault(); run(f.querySelector(".mp-save"), ids => post("/api/manpower/assign", {
@@ -469,8 +486,9 @@
       <td><select name="unit">${opt(UNITS.map(([u]) => [u, u]), w ? w.unit : "ME")}</select></td><td><input name="trade" value="${esc(w ? w.trade || "" : "")}" placeholder="เช่น ประกอบ" size="10"></td>
       <td><input name="sort" type="number" value="${esc(w ? w.sort : "")}" style="width:70px"></td><td class="c"><input name="active" type="checkbox" ${!w || w.active ? "checked" : ""}></td>
       <td><button type="button" class="mp-rs">${w ? "บันทึก" : "เพิ่มช่าง"}</button></td></tr>`;
+    M.master = M.master || []; const mj = new Map(M.master.map(m => [jobKey(m.job_no), m]));
     const pRow = p => `<tr data-code="${esc(p ? p.code : "")}"><td><input name="customer" value="${esc(p ? p.customer || "" : "")}" placeholder="ลูกค้า"></td>
-      <td><input name="name" value="${esc(p ? p.name : "")}" placeholder="ชื่องานเต็ม" required></td><td><input name="short_name" value="${esc(p ? p.short_name || "" : "")}" placeholder="ชื่อย่อ" size="10" maxlength="40"></td><td><input name="job_no" value="${esc(p ? p.job_no || "" : "")}" placeholder="Job no." size="10"></td>
+      <td><input name="name" value="${esc(p ? p.name : "")}" placeholder="ชื่องานเต็ม" required></td><td><input name="short_name" value="${esc(p ? p.short_name || "" : "")}" placeholder="ชื่อย่อ" size="10" maxlength="40"></td><td><input name="job_no" list="mpMJ" value="${esc(p ? p.job_no || "" : "")}" placeholder="Job no." size="10">${p && p.job_no && !mj.has(jobKey(p.job_no)) && M.master.length ? ` <em class="mp-warn" title="ไม่พบ Job no. นี้ใน RAK_Master_Project_on_hand">?</em>` : ""}</td>
       <td><select name="status">${opt(STATUS, p ? p.status : "active")}</select></td><td><input name="color" type="color" value="${esc(p ? p.color : "#6d7582")}"></td>
       <td><button type="button" class="mp-rs">${p ? "บันทึก" : "เพิ่มงาน"}</button></td></tr>`;
     const years = [...new Set(M.holidays.map(h => h.day.slice(0, 4)))].sort();
@@ -480,7 +498,8 @@
     box.innerHTML = `<div class="mp-dtabs">${[["workers", `ช่าง (${M.workers.length})`], ["projects", `งาน / ลูกค้า (${M.projects.length})`], ["holidays", `วันหยุดบริษัท (${M.holidays.length})`]].map(([k, l]) => `<button type="button" data-t="${k}" class="${tab === k ? "on" : ""}">${l}</button>`).join("")}</div>
       <div class="mp-card">${tab === "workers" ? `<p class="mp-hint">ใส่รหัสพนักงานให้คนที่ยังไม่มี (รหัส X###) แล้วกดบันทึก ข้อมูลงานและวันลาเดิมจะย้ายตามให้ · เอาติ๊ก "ทำงานอยู่" ออกเมื่อลาออก (ประวัติยังอยู่)</p>
         <table class="mp-mt"><thead><tr><th>รหัสพนักงาน</th><th>ชื่อ-นามสกุล</th><th>ชื่อเล่น</th><th>หน่วยงาน</th><th>ตำแหน่ง</th><th>ลำดับ</th><th>ทำงานอยู่</th><th></th></tr></thead><tbody>${wRow(null)}${M.workers.map(wRow).join("")}</tbody></table>`
-      : tab === "projects" ? `<p class="mp-hint">ช่องในตารางแสดง "ประเภทงาน | ลูกค้า | ชื่อย่อ" · ใส่ชื่อย่อสั้นๆ (เช่น 300L, D#3, Relayout) · ถ้าว่างจะใช้ชื่องานเต็ม · สีใช้กับแถว Milestone</p>
+      : tab === "projects" ? `<p class="mp-hint">ช่องในตารางแสดง "ประเภทงาน | Customer_Name | Job_name" จากตาราง RAK_Master_Project_on_hand โดยจับคู่ด้วย <b>Job no.</b> · ใส่ Job no. ให้แต่ละงานแล้วกดบันทึก (พิมพ์เลขหรือชื่องานเพื่อค้นหา) · งานที่ยังไม่มี Job no. จะใช้ ลูกค้า | ชื่อย่อ ด้านล่างแทน · สีใช้กับแถว Milestone${M.masterTable ? ` · พบงานใน master ${M.master.length} งาน` : ` · <b>ยังอ่านตาราง master ไม่ได้</b>`}</p>
+        <datalist id="mpMJ">${M.master.map(m => `<option value="${esc(m.job_no)}">${esc((m.customer ? m.customer + " · " : "") + (m.job_full || m.job_name))}</option>`).join("")}</datalist>
         <table class="mp-mt"><thead><tr><th>ลูกค้า</th><th>ชื่องานเต็ม</th><th>ชื่อย่อ (แสดงในตาราง)</th><th>Job no.</th><th>สถานะ</th><th>สี Milestone</th><th></th></tr></thead><tbody>${pRow(null)}${M.projects.map(pRow).join("")}</tbody></table>`
       : hBody}</div><div class="mp-msg mp-pmsg" role="status"></div>`;
     const msg = box.querySelector(".mp-pmsg");
@@ -881,7 +900,7 @@ button.mp-lg:hover,.mp-lg.on{border-color:var(--rak);color:var(--rak)}.mp-lg b{f
 .mp-mt tbody tr:first-child{background:#fbfcf8}
 .mp-rs{border:1px solid var(--rak);background:#fff;color:var(--rak);border-radius:7px;padding:4px 10px;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}.mp-rs:hover{background:var(--rak);color:#fff}
 .mp-hd{border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;font-size:12px}.mp-hd:hover{color:var(--rak)}
-.mp-hadd{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.mp-hint{font-size:12px;color:var(--muted);margin:6px 0 10px}.mp-card h4{margin:14px 0 4px;font-size:13px}
+.mp-hadd{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.mp-hint{font-size:12px;color:var(--muted);margin:6px 0 10px}.mp-card h4{margin:14px 0 4px;font-size:13px}.mp-warn{color:#c92a2a;font-weight:700;font-style:normal;cursor:help}
 .mp-pmsg{padding:0;font-size:13px}.mp-more{padding-top:10px}
 .mp-madd{margin-left:8px;border:1px solid var(--rak);background:#fff;color:var(--rak);border-radius:6px;padding:1px 8px;font:inherit;font-size:11px;cursor:pointer}.mp-madd:hover{background:var(--rak);color:#fff}
 .mp-ms td[data-m]{cursor:pointer}.mp-ms td[data-m].ed:hover{background:#fff6f6;box-shadow:inset 0 0 0 1px #f0b9b9}

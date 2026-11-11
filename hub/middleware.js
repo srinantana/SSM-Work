@@ -606,13 +606,14 @@ async function manpowerMaster(cfg, req, prof, kind) {
 }
 async function manpowerMasterGet(cfg, prof) {
   if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
-  const [workers, projects, holidays] = await Promise.all([
+  const [workers, projects, holidays, master] = await Promise.all([
     restAll(cfg, '/rest/v1/mp_workers?select=id,emp_code,name_th,nickname,unit,trade,active,sort&order=sort.asc'),
     mpProjects(cfg, 'code,name,customer,job_no,status,color,sort'),
     restAll(cfg, '/rest/v1/mp_holidays?select=day,type,name&order=day.asc'),
+    readMasterProjects(cfg).catch(() => ({ table: null, rows: [] })),
   ]);
   if (!workers || !projects) return json({ error: 'no_table' }, 503);
-  return json({ workers, projects, holidays: holidays || [] });
+  return json({ workers, projects, holidays: holidays || [], master: master.rows, masterTable: master.table });
 }
 async function manpowerLog(cfg, url, prof) {
   if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
@@ -655,6 +656,29 @@ async function mpProjects(cfg, cols) {
   return (await restAll(cfg, `/rest/v1/mp_projects?select=${cols},short_name&order=sort.asc`)) || restAll(cfg, `/rest/v1/mp_projects?select=${cols}&order=sort.asc`);
 }
 
+// Master project list (RAK_Master_Project_on_hand, kept by Dew in the same Supabase). Cell text on the board is
+// "work type | Customer_Name | Job_name", matched to mp_projects by Job no. Name and column spellings are tolerated;
+// if the table is missing the board falls back to mp_projects (customer + short_name).
+const MASTER_PJ_TABLES = ['RAK_Master_Project_on_hand', 'RAK_Master _Project_on_hand', 'RAK_Master_Project_On_Hand', 'rak_master_project_on_hand', 'RAK_Master_Project'];
+const MPJ_COLS = { job_no: ['Job_no', 'Job_No', 'JobNo', 'Job no', 'Job_number', 'Job', 'Project_no', 'Project_No'],
+  customer: ['Customer_Name', 'Customer', 'CustomerName', 'Customer_name'], job_name: ['Job_name', 'Job_Name', 'JobName', 'Short_name'], job_full: ['Job_Full_name', 'Job_Full_Name', 'Job_fullname', 'Project_name'] };
+const jobKey = (v) => String(v == null ? '' : v).replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+async function readMasterProjects(cfg) {
+  for (const t of MASTER_PJ_TABLES) {
+    const raw = await restAll(cfg, `/rest/v1/${encodeURIComponent(t)}?select=*`, 20000);
+    if (!raw) continue;
+    const rows = raw.map((o) => {
+      const by = {};
+      for (const [k, v] of Object.entries(o || {})) by[colKey(k)] = v;
+      const get = (f) => { for (const c of MPJ_COLS[f]) { const v = by[colKey(c)]; if (v != null && String(v).trim() !== '') return String(v).trim(); } return ''; };
+      const full = get('job_full');
+      return { job_no: get('job_no'), customer: get('customer'), job_name: get('job_name') || full, job_full: full };
+    }).filter((r) => jobKey(r.job_no));
+    return { table: t, rows };
+  }
+  return { table: null, rows: [] };
+}
+
 async function manpowerApi(cfg, req, url, prof) {
   const writes = { '/api/manpower/confirm': manpowerConfirm, '/api/manpower/assign': manpowerAssign, '/api/manpower/clear': manpowerClear,
     '/api/manpower/leave': manpowerLeave, '/api/manpower/leave-clear': manpowerLeaveClear };
@@ -691,8 +715,8 @@ async function manpowerApi(cfg, req, url, prof) {
   const sp = await call(cfg, SPL_TABLE + '?select=data,updated_at&id=eq.main', { method: 'GET', admin: true }).catch(() => null);
   const spRow = sp && sp.ok && Array.isArray(sp.data) ? sp.data[0] : null;
   const overlay = serviceOverlay(spRow && spRow.data, workers, from, to);
-  const [rq, canApprove] = await Promise.all([sprBoard(cfg, from, to), sprCanApprove(cfg, prof).catch(() => false)]);
-  return json({ from, to, requests: rq.requests, pendingRequests: rq.pendingRequests, canApprove, canEdit: canEditManpower(prof), canMilestone: canEditMilestone(prof), workers, projects, milestones: milestones || [], assignments: rows || [], absences: absences || [], holidays: holidays || [], needsMigration,
+  const [rq, canApprove, master] = await Promise.all([sprBoard(cfg, from, to), sprCanApprove(cfg, prof).catch(() => false), readMasterProjects(cfg).catch(() => ({ table: null, rows: [] }))]);
+  return json({ from, to, master: master.rows, masterTable: master.table, requests: rq.requests, pendingRequests: rq.pendingRequests, canApprove, canEdit: canEditManpower(prof), canMilestone: canEditMilestone(prof), workers, projects, milestones: milestones || [], assignments: rows || [], absences: absences || [], holidays: holidays || [], needsMigration,
     service: overlay.service, serviceUnmatched: overlay.serviceUnmatched, serviceUpdated: spRow ? (spRow.data && spRow.data.updated) || spRow.updated_at : null });
 }
 
