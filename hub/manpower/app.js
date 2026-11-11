@@ -289,12 +289,12 @@
       const run = runOf(wid, day, a.text), lo = run[0], hi = run[run.length - 1];
       const team = DATA.assignments.filter(y => y.tentative && y.text === a.text && y.day >= lo && y.day <= hi);
       const teamN = new Set(team.map(y => y.worker_id)).size;
-      actions = DATA.canEdit ? `<div class="mp-act"><span>Confirm Manpower</span>
+      actions = DATA.canConfirm ? `<div class="mp-act"><span>Confirm Manpower</span>
         <button type="button" class="mp-ok" data-scope="day">วันนี้</button>
         ${run.length > 1 ? `<button type="button" class="mp-ok" data-scope="run">ทั้งช่วงของคนนี้ (${run.length} วัน)</button>` : ""}
         ${teamN > 1 ? `<button type="button" class="mp-ok" data-scope="team">ทั้งทีม (${teamN} คน · ${team.length} ช่อง)</button>` : ""}
         <small>${esc(fromKey(lo).getDate() + " " + MS[fromKey(lo).getMonth()])} – ${esc(fromKey(hi).getDate() + " " + MS[fromKey(hi).getMonth()])} · คำว่า "จอง" จะถูกตัดออก</small></div>`
-        : `<p class="mp-ro">ยืนยันได้เฉพาะ SC / PC / SSM</p>`;
+        : `<p class="mp-ro">${DATA.canEdit ? "บัญชีนี้ลงงานจองได้ แต่ Confirm Manpower ไม่ได้" : "ยืนยันได้เฉพาะ SC / PC / SSM"}</p>`;
       actions += `<script type="application/json" class="mp-run">${JSON.stringify({ text: a.text, run, team: team.map(y => [y.worker_id, y.day]) }).replace(/</g, "\\u003c")}</script>`;
     }
     if (sv.length) body += `<div class="mp-svd"><h4><b class="mp-sp in">SP</b> Confirm จาก Service Plan</h4>${sv.map(j => `<dl class="mp-dl"><dt>Job no.</dt><dd>${esc(j.job)} · ${esc(j.type)}</dd><dt>ลูกค้า</dt><dd>${esc(j.customer)}</dd><dt>งาน</dt><dd>${esc(j.desc.split("\n")[0])}</dd><dt>สถานะ</dt><dd>${esc(j.status)}</dd></dl>`).join("")}<p class="mp-ro">ข้อมูลมาจากใบขอคนอัตโนมัติ แก้ที่ Service Plan / ใบขอคน${(a && a.project_code !== "SERVICE") ? " · ⚠ วันนี้มีงานอื่นลงไว้แล้ว ตรวจสอบว่าคนนี้ไปงานไหน" : ""}</p></div>`;
@@ -356,7 +356,7 @@
         <fieldset><legend>ประเภทงาน</legend>${WT.map(([v, l]) => `<label class="mp-wt"><input type="radio" name="work_type" value="${v}" ${wt === v ? "checked" : ""} required>${l}</label>`).join("")}</fieldset>
         <label class="wide">รายละเอียด (ไม่บังคับ)<input name="note" value="${esc(note)}" placeholder="เช่น ประกอบถัง T-05, เดินสายตู้ MCC"></label>
         ${toField}
-        <div class="mp-chks"><label><input type="checkbox" name="skip" checked> ข้ามวันอาทิตย์ / วันหยุด / วันลา</label><label><input type="checkbox" name="tentative" ${a && a.tentative ? "checked" : ""}> จอง (ยังไม่ยืนยัน)</label></div>
+        <div class="mp-chks"><label><input type="checkbox" name="skip" checked> ข้ามวันอาทิตย์ / วันหยุด / วันลา</label><label${a && a.tentative && !DATA.canConfirm ? ' title="งานจองนี้ต้องให้ SC / PC / SSM คนอื่น Confirm"' : ""}><input type="checkbox" name="tentative" ${a && a.tentative ? "checked" : ""}${a && a.tentative && !DATA.canConfirm ? " disabled" : ""}> จอง (ยังไม่ยืนยัน)</label></div>
         <div class="mp-fbtn"><button type="submit" class="mp-save">บันทึก</button>${a || bulk ? `<button type="button" class="mp-del">${bulk ? "ลบงานทั้งหมดในช่องที่เลือก" : "ลบงานวันนี้"}</button>` : ""}</div>
         <datalist id="mpCustL">${customers(true).map(c => `<option value="${esc(c)}">`).join("")}</datalist><datalist id="mpJobL"></datalist>
       </form></details>
