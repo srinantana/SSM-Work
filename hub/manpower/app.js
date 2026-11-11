@@ -498,13 +498,21 @@
     const legacy = M.projects.filter(p => !(p.job_no && mj.has(jobKey(p.job_no))));
     const mRow = m => { const p = linked.get(jobKey(m.job_no));
       return `<tr data-code="${esc(p ? p.code : "")}" data-jn="${esc(m.job_no)}" data-q="${esc(lc([m.job_no, m.customer, m.job_full, m.job_name].join(" ")))}"><td>${esc(m.job_no)}</td><td>${esc(m.customer)}</td><td>${esc(m.job_full)}</td><td>${esc(m.job_name !== m.job_full ? m.job_name : "")}</td>
-      <td><select name="status">${opt(STATUS, p ? p.status : "active")}</select></td><td><input name="color" type="color" value="${esc(p ? p.color : "#6d7582")}"></td>
-      <td>${p ? `<span class="mp-on">ใช้ในแผน</span>` : ""}</td><td><button type="button" class="mp-rs mp-ms-save">บันทึก</button></td></tr>`; };
+      <td><select name="status">${opt(STATUS, p ? p.status : "active")}</select></td><td>${p ? `<span class="mp-on">ใช้ในแผน</span>` : ""}</td><td><input name="color" type="color" value="${esc(p ? p.color : "#6d7582")}"></td>
+      <td><button type="button" class="mp-rs mp-ms-save">บันทึก</button></td></tr>`; };
     const lRow = p => `<tr data-code="${esc(p.code)}"><td>${esc(p.customer || "")}</td><td>${esc(p.name)}</td><td><input name="job_no" list="mpMJ" value="${esc(p.job_no || "")}" placeholder="เลือก Job no." size="12">${p.job_no ? ` <em class="mp-warn" title="ไม่พบ Job no. นี้ใน RAK_Master_Project_on_hand">?</em>` : ""}</td>
       <td><select name="status">${opt(STATUS, p.status)}</select></td><td><input name="color" type="color" value="${esc(p.color)}"></td><td><button type="button" class="mp-rs mp-lg-save">บันทึก</button></td></tr>`;
+    // sortable master list: click a header, click again to reverse; blanks always last
+    if (!S.msort) S.msort = { k: "job_no", dir: -1 };
+    const MSK = [["job_no", "Job no."], ["customer", "Customer_Name"], ["job_full", "Job_Full_name"], ["job_name", "Job_name (ชื่อย่อ)"], ["status", "สถานะ"], ["used", "ใช้ในแผน"]];
+    const STL = Object.fromEntries(STATUS);
+    const sv = (m, k) => { const p = linked.get(jobKey(m.job_no)); return k === "status" ? STL[p ? p.status : "active"] || "" : k === "used" ? (p ? "ใช้ในแผน" : "") : k === "job_name" ? (m.job_name !== m.job_full ? m.job_name || "" : "") : String(m[k] || ""); };
+    const sortedMaster = () => M.master.slice().sort((a, b) => { const x = sv(a, S.msort.k), y = sv(b, S.msort.k);
+      if (!x !== !y) return x ? -1 : 1;
+      return S.msort.dir * x.localeCompare(y, "th", { numeric: true }) || String(b.job_no).localeCompare(String(a.job_no)); });
     const projBody = () => !M.masterTable ? `<p class="mp-hint"><b>อ่านตาราง RAK_Master_Project_on_hand ไม่ได้</b> · ตรวจชื่อตารางใน Supabase</p>` : `<p class="mp-hint">ข้อมูลงานมาจากตาราง <b>RAK_Master_Project_on_hand</b> (${M.master.length} งาน) · แก้ชื่องาน / ลูกค้า / ชื่อย่อ ที่ตารางนั้นใน Supabase · ที่นี่ตั้งได้เฉพาะสถานะและสี Milestone · ช่องในตารางแผนแสดง "ประเภทงาน | Customer_Name | Job_name"</p>
         <input class="mp-mq" type="search" placeholder="ค้นหา Job no. / ลูกค้า / ชื่องาน">
-        <table class="mp-mt mp-mlist"><thead><tr><th>Job no.</th><th>Customer_Name</th><th>Job_Full_name</th><th>Job_name (ชื่อย่อ)</th><th>สถานะ</th><th>สี Milestone</th><th></th><th></th></tr></thead><tbody>${M.master.slice().sort((a, b) => String(b.job_no).localeCompare(String(a.job_no))).map(mRow).join("")}</tbody></table>
+        <table class="mp-mt mp-jobs"><thead><tr>${MSK.map(([k, l]) => `<th data-sk="${k}" class="${S.msort.k === k ? "on" : ""}">${l}<span class="ar">${S.msort.k === k ? (S.msort.dir > 0 ? "▲" : "▼") : "↕"}</span></th>`).join("")}<th>สี Milestone</th><th></th></tr></thead><tbody>${sortedMaster().map(mRow).join("")}</tbody></table>
         ${legacy.length ? `<h4>งานเดิมจากชีต ที่ยังไม่ได้ผูก Job no. (${legacy.length})</h4><p class="mp-hint">เลือก Job no. จาก master แล้วกดบันทึก · งานและ Milestone เดิมจะย้ายไปใช้ชื่อจาก master ให้ · งานรวมหลายลูกค้า (เช่น Service) ไม่ต้องผูกก็ได้</p>
         <datalist id="mpMJ">${M.master.map(m => `<option value="${esc(m.job_no)}">${esc((m.customer ? m.customer + " · " : "") + (m.job_full || m.job_name))}</option>`).join("")}</datalist>
         <table class="mp-mt"><thead><tr><th>ลูกค้า (เดิม)</th><th>ชื่องาน (เดิม)</th><th>Job no.</th><th>สถานะ</th><th>สี Milestone</th><th></th></tr></thead><tbody>${legacy.map(lRow).join("")}</tbody></table>` : ""}`;
@@ -528,8 +536,14 @@
       const jn = v("job_no").value.trim();
       if (jn && !mj.has(jobKey(jn))) { msg.textContent = "ไม่พบ Job no. " + jn + " ในตาราง master"; return; }
       done(() => post("/api/manpower/master/project", { code: tr.dataset.code, name: p.name, customer: p.customer, job_no: jn, status: v("status").value, color: v("color").value }), jn ? "ผูก Job no. แล้ว" : "บันทึกงานแล้ว"); }));
+    const jt = box.querySelector(".mp-jobs");
+    if (jt) jt.querySelectorAll("th[data-sk]").forEach(th => th.addEventListener("click", () => {
+      const k = th.dataset.sk; S.msort = { k, dir: S.msort.k === k ? -S.msort.dir : (k === "job_no" ? -1 : 1) };
+      const tb = jt.tBodies[0], rows = new Map([...tb.rows].map(r => [r.dataset.jn, r]));
+      sortedMaster().forEach(m => { const r = rows.get(m.job_no); if (r) tb.appendChild(r); });
+      jt.querySelectorAll("th[data-sk]").forEach(h => { const on = h.dataset.sk === k; h.classList.toggle("on", on); h.querySelector(".ar").textContent = on ? (S.msort.dir > 0 ? "▲" : "▼") : "↕"; }); }));
     const mq = box.querySelector(".mp-mq");
-    if (mq) mq.addEventListener("input", () => { const q = lc(mq.value); box.querySelectorAll(".mp-mlist tbody tr").forEach(tr => { tr.hidden = !!q && !tr.dataset.q.includes(q); }); });
+    if (mq) mq.addEventListener("input", () => { const q = lc(mq.value); box.querySelectorAll(".mp-jobs tbody tr").forEach(tr => { tr.hidden = !!q && !tr.dataset.q.includes(q); }); });
     const hf = box.querySelector(".mp-hadd");
     if (hf) hf.addEventListener("submit", e => { e.preventDefault(); done(() => post("/api/manpower/master/holiday", { day: hf.day.value, name: hf.name.value, type: hf.type.value }), "เพิ่มวันหยุดแล้ว"); });
     box.querySelectorAll(".mp-hd").forEach(b => b.addEventListener("click", () => done(() => post("/api/manpower/master/holiday-delete", { day: b.dataset.day }), "ลบวันหยุดแล้ว")));
@@ -921,7 +935,7 @@ button.mp-lg:hover,.mp-lg.on{border-color:var(--rak);color:var(--rak)}.mp-lg b{f
 .mp-mt tbody tr:first-child{background:#fbfcf8}
 .mp-rs{border:1px solid var(--rak);background:#fff;color:var(--rak);border-radius:7px;padding:4px 10px;font:inherit;font-size:12.5px;cursor:pointer;white-space:nowrap}.mp-rs:hover{background:var(--rak);color:#fff}
 .mp-hd{border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;font-size:12px}.mp-hd:hover{color:var(--rak)}
-.mp-hadd{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.mp-hint{font-size:12px;color:var(--muted);margin:6px 0 10px}.mp-card h4{margin:14px 0 4px;font-size:13px}.mp-warn{color:#c92a2a;font-weight:700;font-style:normal;cursor:help}.mp-on{font-size:11px;color:#2f9e44;white-space:nowrap}.mp-mlist{width:100%}.mp-mq{width:320px;max-width:100%;margin:0 0 8px;padding:6px 10px}
+.mp-hadd{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.mp-hint{font-size:12px;color:var(--muted);margin:6px 0 10px}.mp-card h4{margin:14px 0 4px;font-size:13px}.mp-warn{color:#c92a2a;font-weight:700;font-style:normal;cursor:help}.mp-on{font-size:11px;color:#2f9e44;white-space:nowrap}.mp-jobs td:nth-child(3){min-width:260px}.mp-jobs tbody tr:first-child{background:none}.mp-jobs th[data-sk]{cursor:pointer;user-select:none}.mp-jobs th[data-sk]:hover{color:#222}.mp-jobs th .ar{font-size:10px;margin-left:3px;opacity:.35}.mp-jobs th.on{color:var(--rak)}.mp-jobs th.on .ar{opacity:1}.mp-mq{width:320px;max-width:100%;margin:0 0 8px;padding:6px 10px}
 .mp-pmsg{padding:0;font-size:13px}.mp-more{padding-top:10px}
 .mp-madd{margin-left:8px;border:1px solid var(--rak);background:#fff;color:var(--rak);border-radius:6px;padding:1px 8px;font:inherit;font-size:11px;cursor:pointer}.mp-madd:hover{background:var(--rak);color:#fff}
 .mp-ms td[data-m]{cursor:pointer}.mp-ms td[data-m].ed:hover{background:#fff6f6;box-shadow:inset 0 0 0 1px #f0b9b9}
