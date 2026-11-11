@@ -667,14 +667,14 @@ const SPR_TYPES = ['IS', 'SO', 'IN', 'WR', 'IJ', 'JO'];
 //   Confirm / Reject — ดิว (SSM) and กอล์ฟ: everyone · โจ้ (เจนรบ แก้วกระแสร์): electricians (unit EE) only
 //   ขอคน (create)    — ดิว อิ๋ม ปุ๋ม หนุ่ม สปาย อาร์ต แพรวา ไอซ์ ซี กอล์ฟ โจ้
 // Matched by username, Thai full name, Thai first name (เจนรบ) or — for people whose full name is not known here yet
-// (อิ๋ม ปุ๋ม แพรวา) — the nickname in RAK_Employee (by employee code, else Thai name) / mp_workers.
+// (แพรวา) — the nickname in RAK_Employee (by employee code, else Thai name) / mp_workers.
 // Requests may cover all 7 days: Sundays, company holidays and a person's weekly day off stay selectable; only leave blocks.
 const SPR_APPROVE_ALL = { usernames: ['nantana.s', 'kitisak.s'], namesTh: ['นันทนา ศรีสกุลเตียว', 'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์'] };
 const SPR_APPROVE_EE = { firstTh: ['เจนรบ'] };
 const SPR_REQUEST = {
   usernames: ['nantana.s', 'teedanai.h', 'prakaikaew.p', 'sakkamon.c', 'pichayut.k', 'napat.t', 'kitisak.s'],
-  namesTh: ['นันทนา ศรีสกุลเตียว', 'ธีร์ดนัย ฮุยสูงเนิน', 'ประกายแก้ว ปัญญา', 'ศักดิ์กมล จันทริมา', 'พิชญ์ยุทธ คงดิศ', 'นภัท ทองอำไพ', 'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์'],
-  firstTh: ['เจนรบ'], nicknames: ['อิ๋ม', 'ปุ๋ม', 'แพรวา'],
+  namesTh: ['นันทนา ศรีสกุลเตียว', 'ธีร์ดนัย ฮุยสูงเนิน', 'ประกายแก้ว ปัญญา', 'ศักดิ์กมล จันทริมา', 'พิชญ์ยุทธ คงดิศ', 'นภัท ทองอำไพ', 'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์', 'นิภาพร ฝางคนรัก', 'กรุณา ขุมทรัพย์'],
+  firstTh: ['เจนรบ'], nicknames: ['แพรวา'], // อิ๋ม = นิภาพร ฝางคนรัก · ปุ๋ม = กรุณา ขุมทรัพย์ (Dew, 11 Nov 2026)
 };
 const SPR_DAYOFF = ['H', 'PH', 'EX', 'สลับวันหยุด']; // not leave: still bookable
 const sprFirst = (prof) => thKey(prof.nameTh).split(' ')[0];
