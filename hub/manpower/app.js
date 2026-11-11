@@ -90,7 +90,10 @@
   const WCOL = { fab: "#e8590c", assembly: "#1c7ed6", install: "#2f9e44", service: "#7048e8", other: "#868e96" };
   const WSHORT = { fab: "Fab", assembly: "Assy", install: "Install", service: "Service", other: "" };
   const typeOf = a => a.work_type && WCOL[a.work_type] ? a.work_type : (a.project_code === "SERVICE" ? "service" : "other");
-  const colorOf = a => a.kind === "admin" && typeOf(a) === "other" ? "#adb5bd" : WCOL[typeOf(a)];
+  // old job = a project from the sheet not yet linked to RAK_Master_Project_on_hand by Job no. → light grey; new jobs → work-type colour
+  const OLD_COL = "#c3c8ce";
+  const isOld = a => { const p = a.project_code ? DATA.P.get(a.project_code) : null; return !!p && p.code !== "SERVICE" && !masterOf(p); };
+  const colorOf = a => isOld(a) ? OLD_COL : a.kind === "admin" && typeOf(a) === "other" ? "#adb5bd" : WCOL[typeOf(a)];
   const shortOf = p => p ? (p.short_name || p.name) : "";
   // master row (RAK_Master_Project_on_hand) for a project, matched by Job no.
   const masterOf = p => p && p.job_no ? DATA.MJ.get(jobKey(p.job_no)) : null;
@@ -247,8 +250,10 @@
     const items = DATA.projects.filter(p => n.has(p.code)).sort((a, b) => n.get(b.code) - n.get(a.code))
       .map(p => `<button type="button" class="mp-lg pj ${S.project === p.code ? "on" : ""}" data-p="${esc(p.code)}" title="${esc(p.name)}">${esc(p.customer && p.code !== "SERVICE" ? p.customer + " · " : "")}${esc(shortOf(p))} <b>${n.get(p.code)}</b></button>`)
       .concat(Object.keys(KIND).filter(k => n.has("_" + k)).map(k => `<span class="mp-lg pj">${KIND[k][1]} <b>${n.get("_" + k)}</b></span>`));
-    const tn = {}; DATA.assignments.forEach(a => { const t = typeOf(a); tn[t] = (tn[t] || 0) + 1; }); tn.service = (tn.service || 0) + spOnly;
-    const types = WT.map(([v, l]) => `<span class="mp-lg ty"><i style="background:${WCOL[v]}"></i>${l} <b>${tn[v] || 0}</b></span>`).join("");
+    const tn = {}; DATA.assignments.forEach(a => { if (isOld(a)) return; const t = typeOf(a); tn[t] = (tn[t] || 0) + 1; }); tn.service = (tn.service || 0) + spOnly;
+    const nOld = DATA.assignments.filter(isOld).length;
+    const types = WT.map(([v, l]) => `<span class="mp-lg ty"><i style="background:${WCOL[v]}"></i>${l} <b>${tn[v] || 0}</b></span>`).join("")
+      + (nOld ? `<span class="mp-lg ty" title="งานจากชีตเดิมที่ยังไม่ได้ผูก Job no. กับ RAK_Master_Project_on_hand (ผูกได้ที่ ข้อมูลหลัก → งาน / ลูกค้า)"><i style="background:${OLD_COL}"></i>งานเดิม (ยังไม่ผูก Job no.) <b>${nOld}</b></span>` : "");
     const um = DATA.serviceUnmatched || [];
     const review = um.length && DATA.canEdit ? `<details class="mp-um"><summary>ชื่อใน Service Plan ที่จับคู่กับช่างไม่ได้ ${um.length} งาน</summary><ul>${um.map(j => `<li><b>${esc(j.job || "แถว " + j.row)}</b> ${esc(j.customer)} · ${esc(j.status)} — ${j.names.map(esc).join(", ")}</li>`).join("")}</ul><p>แก้ชื่อในใบขอคนให้ตรงกับชื่อจริงของช่าง (ถ้าชื่อซ้ำให้ใส่ต้นนามสกุล เช่น "สัญญา สม") แล้ว board จะอัปเดตเอง</p></details>` : "";
     return `<div class="mp-legend"><span class="mp-lt">สีตามประเภทงาน</span>${types}<span class="mp-sep"></span><span class="mp-lt">งาน (กดเพื่อกรอง)</span>${items.join("")}<span class="mp-lg"><i class="tent-i"></i>จอง (ยังไม่ยืนยัน)</span><span class="mp-lg"><b class="mp-sp in">SP</b>Confirm จาก Service Plan</span><span class="mp-lg"><b class="mp-sp x in">!</b>ชนกับ Service Plan</span><span class="mp-lg"><b class="mp-rq in">ขอ</b>คำขอคนรอ PC Confirm</span><span class="mp-lg"><i class="lv-i"></i>ลา</span><span class="mp-lg"><i class="off-i"></i>H / PH วันหยุด</span></div>${review}`;
