@@ -100,7 +100,13 @@ code{background:var(--blush);color:var(--rak);border-radius:4px;padding:1px 6px}
 </style></head><body><main class="card">
 <div class="brand"><img src="/assets/rak-logo.svg" alt="RAK Engineering" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><span class="word"><b>RAK</b> ENGINEERING</span><span class="ws">SSM WORK</span></div>
 <div class="in">${body}</div></main></body></html>`;
-  return new Response(html, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...headers } });
+  // headers may be a plain object or a Headers instance (several Set-Cookie lines, e.g. logout). Spreading a Headers
+  // instance copies nothing, which silently dropped the logout cookies (QA-01, 12 Nov 2026) — so copy entry by entry.
+  const h = new Headers({ 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+  if (headers instanceof Headers) headers.forEach((v, k) => { if (k !== 'set-cookie') h.set(k, v); });
+  else for (const [k, v] of Object.entries(headers || {})) h.append(k, v);
+  if (headers instanceof Headers && typeof headers.getSetCookie === 'function') headers.getSetCookie().forEach((c) => h.append('set-cookie', c));
+  return new Response(html, { status, headers: h });
 }
 
 const LOCK = `<span class="ic"><svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.6" fill="#ffd9d9"/><rect x="5" y="10.5" width="14" height="10" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10.3" cy="14.6" r=".9" fill="currentColor"/><circle cx="13.7" cy="14.6" r=".9" fill="currentColor"/><path d="M10.4 17a2.2 2.2 0 0 0 3.2 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>`;
