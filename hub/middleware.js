@@ -710,13 +710,15 @@ async function manpowerApi(cfg, req, url, prof) {
   if (!ISO_DAY.test(from) || !ISO_DAY.test(to) || to < from) return json({ error: 'range' }, 400);
   if ((Date.parse(to) - Date.parse(from)) / 864e5 > 400) return json({ error: 'range too long' }, 400);
   const span = `day=gte.${from}&day=lte.${to}`;
-  const [workers, projects, milestones, assignments, absences, holidays] = await Promise.all([
+  const [workers, projects, milestones, assignments, absences, holidays, msAll] = await Promise.all([
     restAll(cfg, '/rest/v1/mp_workers?select=id,emp_code,name_th,nickname,unit,trade,active,sort&order=sort.asc'),
     mpProjects(cfg, 'code,name,customer,job_no,status,color,sort,note'),
     restAll(cfg, `/rest/v1/mp_milestones?select=id,project_code,day,label&${span}&order=day.asc`),
     restAll(cfg, `/rest/v1/mp_assignments?select=worker_id,day,project_code,kind,work_type,text,tentative,updated_by&${span}&order=day.asc,worker_id.asc`),
     restAll(cfg, `/rest/v1/mp_absences?select=worker_id,day,type,note&${span}&order=day.asc,worker_id.asc`),
     restAll(cfg, `/rest/v1/mp_holidays?select=day,type,name&${span}&order=day.asc`),
+    // every milestone (small table): an INST → SAT bar may start or end outside the range on screen
+    restAll(cfg, '/rest/v1/mp_milestones?select=id,project_code,day,label&order=day.asc'),
   ]);
   if (!workers || !projects) return json({ error: 'no_table' }, 503);
   let rows = assignments, needsMigration = false;
@@ -728,7 +730,7 @@ async function manpowerApi(cfg, req, url, prof) {
   const spRow = sp && sp.ok && Array.isArray(sp.data) ? sp.data[0] : null;
   const overlay = serviceOverlay(spRow && spRow.data, workers, from, to);
   const [rq, canApprove, master] = await Promise.all([sprBoard(cfg, from, to), sprCanApprove(cfg, prof).catch(() => false), readMasterProjects(cfg).catch(() => ({ table: null, rows: [] }))]);
-  return json({ from, to, master: master.rows, masterTable: master.table, requests: rq.requests, pendingRequests: rq.pendingRequests, canApprove, canEdit: canEditManpower(prof), canConfirm: canConfirmManpower(prof), canMilestone: canEditMilestone(prof), workers, projects, milestones: milestones || [], assignments: rows || [], absences: absences || [], holidays: holidays || [], needsMigration,
+  return json({ from, to, milestonesAll: msAll || [], master: master.rows, masterTable: master.table, requests: rq.requests, pendingRequests: rq.pendingRequests, canApprove, canEdit: canEditManpower(prof), canConfirm: canConfirmManpower(prof), canMilestone: canEditMilestone(prof), workers, projects, milestones: milestones || [], assignments: rows || [], absences: absences || [], holidays: holidays || [], needsMigration,
     service: overlay.service, serviceUnmatched: overlay.serviceUnmatched, serviceUpdated: spRow ? (spRow.data && spRow.data.updated) || spRow.updated_at : null });
 }
 

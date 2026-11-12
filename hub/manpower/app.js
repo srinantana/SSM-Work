@@ -172,13 +172,17 @@
     let miles = "";
     const cm = !!DATA.canMilestone;
     if (S.miles && (DATA.milestones.length || cm)) {
-      const byP = new Map();
+      const byP = new Map(), allP = new Map();
       DATA.milestones.forEach(m => { if (matchM(m.project_code)) { if (!byP.has(m.project_code)) byP.set(m.project_code, new Map()); const x = byP.get(m.project_code); if (!x.has(m.day)) x.set(m.day, []); x.get(m.day).push(m.label); } });
-      // FAT = own point · INST = bar running up to the next SAT · SAT = end of that bar; other labels use the project colour
+      // INST → SAT bars from all milestones, so a bar crossing the edge of the screen still shows
+      (DATA.milestonesAll || DATA.milestones).forEach(m => { if (!matchM(m.project_code)) return; if (!allP.has(m.project_code)) allP.set(m.project_code, []); allP.get(m.project_code).push(m); });
+      const barsOf = code => { const L = allP.get(code) || [], sats = L.filter(m => msKind(m.label) === "SAT").map(m => m.day).sort();
+        return L.filter(m => msKind(m.label) === "INST").map(m => [m.day, sats.find(k => k >= m.day) || m.day]); };
+      const vf = key(ds[0]), vt = key(ds[ds.length - 1]);
+      DATA.projects.forEach(p => { if (!byP.has(p.code) && barsOf(p.code).some(([a, b]) => a <= vt && b >= vf)) byP.set(p.code, new Map()); });
       const rows = DATA.projects.filter(p => byP.has(p.code)).map(p => {
         const M = byP.get(p.code), all = [...M.keys()].sort();
-        const sats = all.filter(k => M.get(k).some(l => msKind(l) === "SAT"));
-        const bars = all.filter(k => M.get(k).some(l => msKind(l) === "INST")).map(st => [st, sats.find(k => k >= st) || st]);
+        const bars = barsOf(p.code);
         const inBar = k => bars.some(([a, b]) => k > a && k < b);
         const mm = masterOf(p), jn = (mm && mm.job_no) || p.job_no || "", sn = (mm && mm.job_name) || p.short_name || p.name;
         const full = [jn, (mm && mm.customer) || p.customer, (mm && mm.job_full) || p.name].filter(Boolean).join(" · ");
@@ -596,7 +600,7 @@
   /* ---------- project detail (click a milestone row name) ---------- */
   function projectDialog(code) {
     const p = DATA.P.get(code); if (!p) return;
-    const m = masterOf(p) || {}, ms = DATA.milestones.filter(x => x.project_code === code).sort((a, b) => a.day < b.day ? -1 : 1);
+    const m = masterOf(p) || {}, ms = (DATA.milestonesAll || DATA.milestones).filter(x => x.project_code === code).sort((a, b) => a.day < b.day ? -1 : 1);
     const asg = DATA.assignments.filter(a => a.project_code === code), ppl = new Set(asg.map(a => a.worker_id));
     const STL = { active: "Active", hold: "Hold", postponed: "เลื่อน", cancelled: "ยกเลิก", done: "เสร็จแล้ว" };
     const row = (k, v) => v ? `<tr><th>${k}</th><td>${esc(v)}</td></tr>` : "";
@@ -605,7 +609,7 @@
       <table class="mp-pjd">${row("Job no.", m.job_no || p.job_no)}${row("ชื่องานเต็ม", m.job_full || p.name)}${row("ชื่อย่อ", m.job_name || p.short_name)}${row("ลูกค้า", m.customer || p.customer)}${row("ชื่อลูกค้าเต็ม", m.customer_full)}${row("สถานะ", STL[p.status] || p.status)}
         ${row("ในช่วงที่แสดง", asg.length ? `${asg.length} man-day · ${ppl.size} คน` : "ยังไม่มีคนลงงาน")}</table>
       ${!m.job_no ? `<p class="mp-hint">งานนี้ยังไม่ได้ผูก Job no. กับ RAK_Master_Project_on_hand — ผูกได้ที่ ข้อมูลหลัก → งาน / ลูกค้า</p>` : ""}
-      <h4>Milestone</h4>${ms.length ? `<ul class="mp-pjms">${ms.map(x => `<li><i style="background:${msKind(x.label) ? MSC[msKind(x.label)] : esc(p.color)}"></i><b>${esc(x.label)}</b> ${esc(fmtD(x.day))}</li>`).join("")}</ul>` : `<p class="mp-hint">ไม่มี Milestone ในช่วงที่แสดง</p>`}</div>`;
+      <h4>Milestone</h4>${ms.length ? `<ul class="mp-pjms">${ms.map(x => `<li><i style="background:${msKind(x.label) ? MSC[msKind(x.label)] : esc(p.color)}"></i><b>${esc(x.label)}</b> ${esc(fmtD(x.day))}</li>`).join("")}</ul>` : `<p class="mp-hint">ยังไม่มี Milestone</p>`}</div>`;
     const close = () => { el.remove(); document.removeEventListener("keydown", onKey); };
     const onKey = e => { if (e.key === "Escape") close(); };
     el.addEventListener("click", e => { if (e.target === el || e.target.closest(".mp-x")) close(); });
