@@ -64,7 +64,7 @@
     el.addEventListener("mousedown", e => { if (e.target === el) close(); });
     el.addEventListener("click", e => { if (e.target.closest(".spr-x")) close(); });
     document.addEventListener("keydown", onKey);
-    document.body.appendChild(el);
+    (document.fullscreenElement || document.body).appendChild(el);   // stay visible over Manpower full screen
     return { el, close };
   }
 
