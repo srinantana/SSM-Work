@@ -854,6 +854,19 @@
   function mount(el, sub) {
     if (!document.getElementById("mpCss")) { const s = document.createElement("style"); s.id = "mpCss"; s.textContent = CSS; document.head.appendChild(s); }
     ROOT = el;
+    // In full screen, links inside the menu (month ‹ ›, zoom, page tabs, "เปิด") must not change location.hash:
+    // the hub re-renders the page on hashchange, which drops full screen. Update the URL quietly and redraw in place.
+    el.addEventListener("click", e => {
+      const a = e.target.closest("a[href^='#manpower']");
+      if (!a || !isFull() || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      e.preventDefault();
+      const href = a.getAttribute("href");
+      try { history.pushState(null, "", href); } catch (err) {}
+      route(href.replace(/^#manpower\/?/, ""));
+    });
+    route(sub);
+  }
+  function route(sub) {
     const [z, k] = String(sub || "").split("/");
     if (ZOOMS.some(x => x[0] === z)) S.zoom = z;
     S.page = z === "data" || z === "log" ? z : !sub ? "dash" : "board";
