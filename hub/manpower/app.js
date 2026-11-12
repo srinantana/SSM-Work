@@ -547,9 +547,14 @@
       : tab === "projects" ? projBody()
       : hBody}</div><div class="mp-msg mp-pmsg" role="status"></div>`;
     const msg = box.querySelector(".mp-pmsg");
-    const done = async (fn, okText) => { msg.textContent = "กำลังบันทึก…"; try { await fn(); msg.textContent = okText; if (DATA) DATA.want = ""; DCACHE.clear(); ensure(); dataPage(box).then(() => { box.querySelector(".mp-pmsg").textContent = okText; }); } catch (err) { msg.textContent = "บันทึกไม่สำเร็จ (" + err.message + ")"; } };
+    const done = async (fn, okText) => { msg.textContent = "กำลังบันทึก…"; try { await fn(); msg.textContent = okText; if (DATA) DATA.want = ""; DCACHE.clear(); ensure(); dataPage(box).then(() => { box.querySelector(".mp-pmsg").textContent = okText; }); } catch (err) { msg.textContent = "บันทึกไม่สำเร็จ — " + (err.message === "input" ? "ข้อมูลไม่ครบหรือรูปแบบไม่ถูกต้อง ตรวจช่องที่ต้องกรอกอีกครั้ง" : err.message); } };
     box.querySelectorAll("[data-t]").forEach(b => b.addEventListener("click", () => { S.dtab = b.dataset.t; dataPage(box); }));
     box.querySelectorAll("tr[data-id] .mp-rs").forEach(b => b.addEventListener("click", () => { const tr = b.closest("tr"), v = n => tr.querySelector(`[name=${n}]`);
+      // QA-06: say which field is missing or wrong before sending, and put the cursor there
+      tr.querySelectorAll("[aria-invalid]").forEach(x => x.removeAttribute("aria-invalid"));
+      const code = v("emp_code").value.trim().toUpperCase(), bad = (el, t) => { el.setAttribute("aria-invalid", "true"); el.focus(); msg.textContent = t; };
+      if (!v("name_th").value.trim()) return bad(v("name_th"), "กรอกชื่อ-นามสกุลของช่างก่อน");
+      if (code && !/^R\d{4,8}$/.test(code)) return bad(v("emp_code"), "รหัสพนักงานต้องขึ้นต้นด้วย R ตามด้วยตัวเลข 4–8 หลัก เช่น R69010 (เว้นว่างได้ถ้ายังไม่มี)");
       done(() => post("/api/manpower/master/worker", { id: tr.dataset.id, emp_code: v("emp_code").value.trim(), name_th: v("name_th").value, nickname: v("nickname").value, unit: v("unit").value, trade: v("trade").value, sort: v("sort").value, active: v("active").checked }), tr.dataset.id ? "บันทึกข้อมูลช่างแล้ว" : "เพิ่มช่างแล้ว"); }));
     box.querySelectorAll(".mp-ms-save").forEach(b => b.addEventListener("click", () => { const tr = b.closest("tr"), v = n => tr.querySelector(`[name=${n}]`);
       done(() => post("/api/manpower/master/project", { code: tr.dataset.code, job_no: tr.dataset.jn, status: v("status").value, color: v("color").value }), "บันทึกงานแล้ว"); }));
@@ -569,7 +574,7 @@
     if (hf) hf.addEventListener("submit", e => { e.preventDefault(); done(() => post("/api/manpower/master/holiday", { day: hf.day.value, name: hf.name.value, type: hf.type.value }), "เพิ่มวันหยุดแล้ว"); });
     box.querySelectorAll(".mp-hd").forEach(b => b.addEventListener("click", () => done(() => post("/api/manpower/master/holiday-delete", { day: b.dataset.day }), "ลบวันหยุดแล้ว")));
   }
-  const ACT = { assign: "ลงงาน", clear: "ลบงาน", confirm: "Confirm งานจอง", leave: "ลงวันลา", "leave-clear": "ยกเลิกวันลา", "worker-add": "เพิ่มช่าง", "worker-edit": "แก้ข้อมูลช่าง", "project-add": "เพิ่มงาน", "project-edit": "แก้ข้อมูลงาน", holiday: "เพิ่มวันหยุด", "holiday-delete": "ลบวันหยุด", "milestone-add": "เพิ่ม Milestone", "milestone-edit": "แก้ Milestone", "milestone-delete": "ลบ Milestone" };
+  const ACT = { assign: "ลงงาน", clear: "ลบงาน", confirm: "Confirm งานจอง", leave: "ลงวันลา", "leave-clear": "ยกเลิกวันลา", "worker-add": "เพิ่มช่าง", "worker-edit": "แก้ข้อมูลช่าง", "project-add": "เพิ่มงาน", "project-edit": "แก้ข้อมูลงาน", holiday: "เพิ่มวันหยุด", "holiday-delete": "ลบวันหยุด", "milestone-add": "เพิ่ม Milestone", "milestone-edit": "แก้ Milestone", "milestone-delete": "ลบ Milestone", "sp-request": "ขอคน (Service Plan)", "sp-draft": "บันทึกงานรอนัดวัน", "sp-draft-edit": "แก้งานรอนัดวัน", "sp-cancel": "ยกเลิกคำขอคน", "sp-confirm": "Confirm คำขอคน", "sp-reject": "ปฏิเสธคำขอคน" };
   function logSummary(r) {
     const d = r.detail || {}, nm = id => { const w = DATA.workers.find(x => x.id === id); return w ? w.nickname || w.name_th : id; };
     const span = list => { const s2 = [...new Set(list)].sort(); return s2.length ? (s2.length === 1 ? fmtD(s2[0]) : `${fmtD(s2[0])} – ${fmtD(s2[s2.length - 1])} (${s2.length} วัน)`) : ""; };
@@ -582,6 +587,14 @@
     if (r.action.startsWith("worker")) return `${d.name_th || ""}${d.newId && d.newId !== d.old_id ? " · รหัส " + (d.old_id ? d.old_id + " → " : "") + d.newId : ""}${d.active === false ? " · ไม่ได้ทำงานแล้ว" : ""}`;
     if (r.action.startsWith("project")) return [d.customer, d.name, d.job_no, d.status].filter(Boolean).join(" / ");
     if (r.action.startsWith("holiday")) return `${fmtD(d.day)} ${d.name || ""}`;
+    if (r.action.startsWith("sp-")) { // Service Plan ขอคน — older cancel entries only kept the request id
+      const job = [d.type, d.customer, d.job].filter(Boolean).join(" · ");
+      const when = d.from ? (d.to && d.to !== d.from ? `${fmtD(d.from)} – ${fmtD(d.to)}` : fmtD(d.from)) : d.expect ? `คาดว่า ${fmtD(d.expect)}` : "";
+      const names = (d.people || []).map(p => nm(p.worker_id)).filter(Boolean);
+      const head = d.req_no || (d.id ? `คำขอ #${d.id}` : "");
+      if (r.action === "sp-confirm" || r.action === "sp-reject") return [names.join(", "), d.cells ? `${d.cells} ช่อง` : "", (d.replaced || []).length ? `แทนงานเดิม ${d.replaced.length} ช่อง` : "", d.note || ""].filter(Boolean).join(" · ");
+      return [head, job, when, names.length ? names.join(", ") : ""].filter(Boolean).join(" · ") || "—";
+    }
     if (r.action.startsWith("milestone")) { const m = r.action === "milestone-delete" ? (d.removed || [])[0] || {} : d; const pj = DATA.P.get(m.project_code); return m.day ? `${pj ? pj.name : m.project_code || ""} · ${fmtD(m.day)} · ${m.label || ""}` : ""; }
     return "";
   }
@@ -589,7 +602,7 @@
     let rows;
     try { const r = await fetch("/api/manpower/log" + (before ? "?before=" + before : ""), { cache: "no-store" }); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); rows = j.rows; }
     catch (err) { box.innerHTML = `<div class="mp-empty">โหลดประวัติไม่สำเร็จ (${esc(err.message)})</div>`; return; }
-    const html = rows.map(r => `<tr><td class="nw">${esc(new Date(r.at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }))}</td><td>${esc(r.by_user)}</td><td><b class="mp-act-${esc(r.action)}">${esc(ACT[r.action] || r.action)}</b></td><td>${esc(logSummary(r))}</td></tr>`).join("");
+    const html = rows.map(r => `<tr><td class="nw">${esc(new Date(r.at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }))}</td><td>${esc(r.by_user)}</td><td><b class="mp-act-${esc(r.action)}">${esc(ACT[r.action] || "อื่น ๆ")}</b>${ACT[r.action] ? "" : `<div class="mp-hint">${esc(r.action)}</div>`}</td><td>${esc(logSummary(r))}</td></tr>`).join("");
     if (!before) box.innerHTML = `<div class="mp-card"><p class="mp-hint">บันทึกทุกการลงงาน แก้ไข ลบ ลงวันลา Confirm และแก้ข้อมูลหลัก ล่าสุดอยู่บนสุด</p><table class="mp-mt mp-log"><thead><tr><th>เวลา</th><th>ผู้ทำ</th><th>รายการ</th><th>รายละเอียด</th></tr></thead><tbody>${html || `<tr><td colspan="4" class="mp-hint">ยังไม่มีการแก้ไข</td></tr>`}</tbody></table><div class="mp-more"></div></div>`;
     else box.querySelector(".mp-log tbody").insertAdjacentHTML("beforeend", html);
     const more = box.querySelector(".mp-more");
@@ -989,7 +1002,7 @@ button.mp-lg:hover,.mp-lg.on{border-color:var(--rak);color:var(--rak)}.mp-lg b{f
 .mp-btn.off{opacity:.35;pointer-events:none}
 .mp-page{display:grid;gap:12px}.mp-dtabs{display:flex;gap:6px;flex-wrap:wrap}.mp-dtabs button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 14px;font:inherit;font-size:13px;cursor:pointer}.mp-dtabs button.on{border-color:var(--rak);color:var(--rak);background:#fff1f1;font-weight:600}
 .mp-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;overflow:auto}
-.mp-mt{border-collapse:collapse;font-size:12.5px;width:100%}.mp-mt th{text-align:left;color:var(--muted);font-weight:500;padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
+.mp-mt{border-collapse:collapse;font-size:12.5px;width:100%}.mp-mt [aria-invalid="true"]{outline:2px solid #c70404;outline-offset:1px;background:#fff0f0}.mp-mt th{text-align:left;color:var(--muted);font-weight:500;padding:6px;border-bottom:1px solid var(--line);white-space:nowrap}
 .mp-mt td{padding:4px 6px;border-bottom:1px solid #f0f1f4;vertical-align:middle}.mp-mt td.c{text-align:center}.mp-mt td.nw{white-space:nowrap}
 .mp-mt input,.mp-mt select,.mp-hadd input,.mp-hadd select{font:inherit;font-size:12.5px;border:1px solid #dce1e8;border-radius:6px;padding:4px 6px;max-width:100%}
 .mp-mt input[name=name_th],.mp-mt input[name=name]{min-width:180px}.mp-mt input[type=color]{padding:0;width:40px;height:26px}

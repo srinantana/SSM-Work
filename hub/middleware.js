@@ -1124,7 +1124,7 @@ async function sprCancel(cfg, req, prof) {
   const a = await fetch(cfg.url + `/rest/v1/sp_requests?id=eq.${id}`, { method: 'PATCH', headers: H, body: JSON.stringify({ cancelled: true, updated_at: now }) });
   if (!a.ok) return json({ error: 'supabase' }, 502);
   await fetch(cfg.url + `/rest/v1/sp_request_people?request_id=eq.${id}&status=eq.pending`, { method: 'PATCH', headers: H, body: JSON.stringify({ status: 'cancelled', decided_by: who, decided_at: now }) });
-  await mpLog(cfg, who, 'sp-cancel', { id });
+  await mpLog(cfg, who, 'sp-cancel', { id, req_no: sprNo(row), type: row.type, customer: row.customer, job: row.job_name, from: row.date_from, to: row.date_to });
   return json({ ok: true });
 }
 async function sprApi(cfg, req, url, prof) {
@@ -1594,7 +1594,8 @@ function draw(){
       +'<button class="btn" data-a="role" data-id="'+u.id+'" data-v="'+(u.role==="admin"?"user":"admin")+'"'+dis+'>'+(u.role==="admin"?"ถอดผู้ดูแล":"ตั้งเป็นผู้ดูแล")+'</button>'
       +'<button class="btn" data-a="ban" data-id="'+u.id+'" data-v="'+(u.banned?"0":"1")+'"'+dis+'>'+(u.banned?"เปิดใช้งาน":"ปิดใช้งาน")+'</button>'
       +'<button class="btn" data-a="delete" data-id="'+u.id+'"'+dis+'>ลบ</button></div></td></tr>';
-  }).join("")||'<tr><td colspan="7" class="muted">ยังไม่มีผู้ใช้ นำเข้าจาก Excel ด้านบนได้เลย</td></tr>';
+  }).join("")||(USERS.length?'<tr><td colspan="7" class="muted">ไม่พบผู้ใช้ที่ตรงกับ “'+esc(document.getElementById("q").value.trim())+'” <button class="btn" type="button" id="qClear">ล้างคำค้น</button></td></tr>':'<tr><td colspan="7" class="muted">ยังไม่มีผู้ใช้ นำเข้าจาก Excel ด้านบนได้เลย</td></tr>');
+  const qc=document.getElementById("qClear"); if(qc) qc.addEventListener("click",()=>{document.getElementById("q").value="";draw();document.getElementById("q").focus();});
 }
 document.getElementById("q").addEventListener("input",draw);
 document.getElementById("rows").addEventListener("change",async e=>{
