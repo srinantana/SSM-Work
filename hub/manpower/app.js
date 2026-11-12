@@ -98,12 +98,15 @@
   const msKind = l => { const u = String(l || "").trim().toUpperCase(); return /^FAT\b/.test(u) ? "FAT" : /^(INST|INSTALL|ติดตั้ง)/.test(u) || u === "ติดตั้ง" ? "INST" : /^SAT\b|COMMISSION/.test(u) ? "SAT" : ""; };
   const shortOf = p => p ? (p.short_name || p.name) : "";
   // master row (RAK_Master_Project_on_hand) for a project, matched by Job no.
+  // a plan project linked to a master row whose customer is clearly different → the Job no. was probably typed on the wrong job
+  const custKey = v => String(v || "").toLowerCase().replace(/[^a-z0-9ก-๙]/g, "");
+  const linkOdd = (p, m) => { const a = custKey(p && p.customer), b = custKey(m && m.customer); return !!(a && b && p.code !== "SERVICE" && !a.startsWith(b) && !b.startsWith(a)); };
   const masterOf = p => p && p.job_no ? DATA.MJ.get(jobKey(p.job_no)) : null;
   // cell text: "work type | customer | short job name"; jobs without a real customer / project show their own wording
   function cellText(a) {
     const p = a.project_code ? DATA.P.get(a.project_code) : null, t = WSHORT[typeOf(a)];
     const m = masterOf(p);
-    if (m && (m.customer || m.job_name)) return [t, m.customer, m.job_name].filter(Boolean).join(" | ");
+    if (m && (m.customer || m.job_name) && !linkOdd(p, m)) return [t, m.customer, m.job_name].filter(Boolean).join(" | ");
     const cust = p && p.customer && p.code !== "SERVICE" ? p.customer : "";
     let tail = cust ? shortOf(p) : a.text.replace(/^จอง\s*/, "");
     if (t === "SO" && !cust) tail = tail.replace(/^(SO|WR|IS)\s+/i, "");
@@ -297,10 +300,15 @@
   function detail(k) {
     const [wid, day] = k.split("|"), w = DATA.workers.find(x => x.id === wid), a = DATA.A.get(k), x = DATA.X.get(k), sv = DATA.SV.get(k) || [], d = fromKey(day);
     const pj0 = a && a.project_code ? DATA.P.get(a.project_code) : null;
+    const mm = masterOf(pj0), odd = mm && linkOdd(pj0, mm);
     let body = a ? `<dl class="mp-dl"><dt>ประเภทงาน</dt><dd><i class="mp-dot" style="background:${esc(colorOf(a))}"></i>${esc(WTL[typeOf(a)] || "—")}</dd>
-      ${pj0 && pj0.customer ? `<dt>ลูกค้า</dt><dd>${esc(pj0.customer)}</dd>` : ""}
+      ${mm ? `<dt>Job no.</dt><dd>${esc(mm.job_no)}</dd>
+      <dt>ลูกค้า</dt><dd>${esc(mm.customer || "—")}${mm.customer_full ? ` <span class="mp-m">${esc(mm.customer_full)}</span>` : ""}</dd>
+      <dt>ชื่องาน</dt><dd>${esc(mm.job_full || mm.job_name)}${mm.job_name && mm.job_name !== mm.job_full ? ` <span class="mp-m">(${esc(mm.job_name)})</span>` : ""}</dd>
+      ${odd ? `<dt>⚠ ตรวจสอบ</dt><dd class="mp-odd">งานในแผนคือ <b>${esc(pj0.customer)} · ${esc(pj0.name)}</b> แต่ผูกกับ Job no. ${esc(mm.job_no)} ของ ${esc(mm.customer)} — Job no. น่าจะผิด แก้ได้ที่ ข้อมูลหลัก → งาน / ลูกค้า</dd>` : ""}`
+      : `${pj0 && pj0.customer ? `<dt>ลูกค้า</dt><dd>${esc(pj0.customer)}</dd>` : ""}
       <dt>ชื่องาน</dt><dd>${esc(pj0 ? pj0.name : projName(a))}${pj0 && pj0.short_name ? ` <span class="mp-m">(${esc(pj0.short_name)})</span>` : ""}</dd>
-      <dt>Job no.</dt><dd>${esc(pj0 && pj0.job_no ? pj0.job_no : "—")}</dd>
+      <dt>Job no.</dt><dd>${esc(pj0 && pj0.job_no ? pj0.job_no + " (ไม่พบใน master)" : "— ยังไม่ผูก Job no.")}</dd>`}
       <dt>รายละเอียด</dt><dd>${esc(a.text)}</dd>
       <dt>สถานะ</dt><dd>${a.tentative ? "จอง (ยังไม่ยืนยัน)" : "ยืนยันแล้ว"}${a.updated_by ? ` <span class="mp-m">· ลงโดย ${esc(a.updated_by)}</span>` : ""}</dd></dl>`
       : x ? `<dl class="mp-dl"><dt>ประเภท</dt><dd>${esc((ABS[x.type] || [0, 0, x.type])[2])}</dd>${x.note ? `<dt>หมายเหตุ</dt><dd>${esc(x.note)}</dd>` : ""}</dl>` : "";
@@ -519,7 +527,7 @@
     const legacy = M.projects.filter(p => !(p.job_no && mj.has(jobKey(p.job_no))));
     const mRow = m => { const p = linked.get(jobKey(m.job_no));
       return `<tr data-code="${esc(p ? p.code : "")}" data-jn="${esc(m.job_no)}" data-q="${esc(lc([m.job_no, m.customer, m.job_full, m.job_name].join(" ")))}"><td>${esc(m.job_no)}</td><td>${esc(m.customer)}</td><td>${esc(m.job_full)}</td><td>${esc(m.job_name !== m.job_full ? m.job_name : "")}</td>
-      <td><select name="status">${opt(STATUS, p ? p.status : "active")}</select></td><td>${p ? `<span class="mp-on">ใช้ในแผน</span>` : ""}</td><td><input name="color" type="color" value="${esc(p ? p.color : "#6d7582")}"></td>
+      <td><select name="status">${opt(STATUS, p ? p.status : "active")}</select></td><td>${p ? (linkOdd(p, m) ? `<span class="mp-odd" title="ผูกกับงานในแผน: ${esc(p.customer + " · " + p.name)} — ลูกค้าไม่ตรง">⚠ ผูกกับ ${esc(p.customer)} · ${esc(p.name)}</span> <button type="button" class="mp-hd mp-unlink" data-code="${esc(p.code)}">ยกเลิกการผูก</button>` : `<span class="mp-on">ใช้ในแผน</span>`) : ""}</td><td><input name="color" type="color" value="${esc(p ? p.color : "#6d7582")}"></td>
       <td><button type="button" class="mp-rs mp-ms-save">บันทึก</button></td></tr>`; };
     const lRow = p => `<tr data-code="${esc(p.code)}"><td>${esc(p.customer || "")}</td><td>${esc(p.name)}</td><td><input name="job_no" list="mpMJ" value="${esc(p.job_no || "")}" placeholder="เลือก Job no." size="12">${p.job_no ? ` <em class="mp-warn" title="ไม่พบ Job no. นี้ใน RAK_Master_Project_on_hand">?</em>` : ""}</td>
       <td><select name="status">${opt(STATUS, p.status)}</select></td><td><input name="color" type="color" value="${esc(p.color)}"></td><td><button type="button" class="mp-rs mp-lg-save">บันทึก</button></td></tr>`;
@@ -557,6 +565,8 @@
       if (code && !/^R\d{4,8}$/.test(code)) return bad(v("emp_code"), "รหัสพนักงานต้องขึ้นต้นด้วย R ตามด้วยตัวเลข 4–8 หลัก เช่น R69010 (เว้นว่างได้ถ้ายังไม่มี)");
       done(() => post("/api/manpower/master/worker", { id: tr.dataset.id, emp_code: v("emp_code").value.trim(), name_th: v("name_th").value, nickname: v("nickname").value, unit: v("unit").value, trade: v("trade").value, sort: v("sort").value, active: v("active").checked }), tr.dataset.id ? "บันทึกข้อมูลช่างแล้ว" : "เพิ่มช่างแล้ว"); }));
     box.querySelectorAll(".mp-ms-save").forEach(b => b.addEventListener("click", () => { const tr = b.closest("tr"), v = n => tr.querySelector(`[name=${n}]`);
+      const lp = M.projects.find(x => x.code === tr.dataset.code), lm = mj.get(jobKey(tr.dataset.jn));
+      if (lp && lm && linkOdd(lp, lm)) { msg.textContent = "งานนี้ผูก Job no. ไม่ตรงลูกค้า — กด ยกเลิกการผูก ก่อน แล้วผูก Job no. ที่ถูกต้องในรายการงานเดิม"; return; }
       done(() => post("/api/manpower/master/project", { code: tr.dataset.code, job_no: tr.dataset.jn, status: v("status").value, color: v("color").value }), "บันทึกงานแล้ว"); }));
     box.querySelectorAll(".mp-lg-save").forEach(b => b.addEventListener("click", () => { const tr = b.closest("tr"), v = n => tr.querySelector(`[name=${n}]`), p = M.projects.find(x => x.code === tr.dataset.code) || {};
       const jn = v("job_no").value.trim();
@@ -568,6 +578,8 @@
       const tb = jt.tBodies[0], rows = new Map([...tb.rows].map(r => [r.dataset.jn, r]));
       sortedMaster().forEach(m => { const r = rows.get(m.job_no); if (r) tb.appendChild(r); });
       jt.querySelectorAll("th[data-sk]").forEach(h => { const on = h.dataset.sk === k; h.classList.toggle("on", on); h.querySelector(".ar").textContent = on ? (S.msort.dir > 0 ? "▲" : "▼") : "↕"; }); }));
+    box.querySelectorAll(".mp-unlink").forEach(b => b.addEventListener("click", () => { const p = M.projects.find(x => x.code === b.dataset.code); if (!p) return;
+      done(() => post("/api/manpower/master/project", { code: p.code, name: p.name, customer: p.customer, job_no: "", status: p.status, color: p.color }), "ยกเลิกการผูกแล้ว · งานกลับไปอยู่ในรายการงานเดิมด้านล่าง"); }));
     const mq = box.querySelector(".mp-mq");
     if (mq) mq.addEventListener("input", () => { const q = lc(mq.value); box.querySelectorAll(".mp-jobs tbody tr").forEach(tr => { tr.hidden = !!q && !tr.dataset.q.includes(q); }); });
     const hf = box.querySelector(".mp-hadd");
@@ -939,6 +951,7 @@ button.mp-lg:hover,.mp-lg.on{border-color:var(--rak);color:var(--rak)}.mp-lg b{f
 .mp-c.ab.ph{background:#fde3e3}.mp-c.ab.ph span{color:var(--rak)}
 .mp-c.ab.lv{background:#fff1cc}.mp-c.ab.lv span{color:var(--amber)}
 .mp-c.ms{background:color-mix(in srgb,var(--c) 12%,#fff)}.mp-c.ms span{font-weight:600;color:var(--c);font-size:10px}.mp-c.ms-bar,.mp-c.ms-inst,.mp-c.ms-sat{background:color-mix(in srgb,var(--c) 45%,#fff)}.mp-c.ms-inst span,.mp-c.ms-sat span{color:#fff;text-shadow:0 0 2px rgba(0,0,0,.35)}.mp-c.ms-sat{background:var(--c)}.mp-c.ms-inst{background:color-mix(in srgb,var(--c) 75%,#fff)}.mp-c.ms-fat{background:var(--c)}.mp-c.ms-fat span{color:#fff}.mp-c.ms-also-fat{box-shadow:inset 4px 0 0 ${MSC.FAT}}
+.mp-odd{color:#c92a2a}.mp-oddr td{background:#fff5f5}
 .mp-mtog{border:0;background:none;font:inherit;font-weight:700;color:inherit;cursor:pointer;padding:0}.mp-mtog small{font-weight:400;color:var(--muted)}
 .mp-pj{cursor:pointer}.mp-pj:hover .mp-sn{text-decoration:underline}.mp-ms .mp-name .mp-jn{font-weight:600;font-variant-numeric:tabular-nums;color:#495057;flex:none}.mp-ms .mp-name .mp-sn{overflow:hidden;text-overflow:ellipsis}
 .mp-pjd{border-collapse:collapse;width:calc(100% - 32px);font-size:13px;margin:8px 16px 10px}.mp-dlg>h4,.mp-pjms,.mp-dlg>.mp-hint{margin-left:16px;margin-right:16px}.mp-pjms{margin-bottom:16px}.mp-pjd th{background:none;text-align:left;font-weight:500;color:var(--muted);padding:4px 10px 4px 0;white-space:nowrap;vertical-align:top;width:110px}.mp-pjd td{padding:4px 0}
