@@ -20,7 +20,7 @@
   const KIND = { admin: ["#6d7582", "ประชุม / อบรม / ธุรการ"], internal: ["#9a7b4f", "งานภายใน"], other: ["#b3b8c2", "อื่นๆ (ตรวจสอบ)"] };
 
   let ROOT = null, DATA = null, LOADING = null, ERR = "", CUR = { W: [] };
-  const S = { page: "board", zoom: "month", date: new Date(), units: new Set(UNITS.map(u => u[0])), cust: "", project: "", person: "", q: "", left: false, miles: true };
+  const S = { page: "board", zoom: "month", date: new Date(), units: new Set(UNITS.map(u => u[0])), cust: "", project: "", person: "", q: "", left: false, miles: true, msOpen: (() => { try { return localStorage.getItem("mp.msOpen") !== "0"; } catch (e) { return true; } })() };
   const WT = [["fab", "Fab"], ["assembly", "Assembly"], ["install", "Install"], ["service", "Service"], ["other", "Other"]];
   const WTL = Object.fromEntries(WT);
   const LV = [["ลาป่วย", "ลาป่วย"], ["พักร้อน", "ลาพักร้อน"], ["ลากิจ", "ลากิจ"]];
@@ -180,7 +180,9 @@
         const sats = all.filter(k => M.get(k).some(l => msKind(l) === "SAT"));
         const bars = all.filter(k => M.get(k).some(l => msKind(l) === "INST")).map(st => [st, sats.find(k => k >= st) || st]);
         const inBar = k => bars.some(([a, b]) => k > a && k < b);
-        return `<tr class="mp-ms"><th class="mp-name"><i style="background:${esc(p.color)}"></i>${esc(p.name)}${p.status !== "active" ? ` <em>${esc(p.status)}</em>` : ""}</th>${ds.map(d => {
+        const mm = masterOf(p), jn = (mm && mm.job_no) || p.job_no || "", sn = (mm && mm.job_name) || p.short_name || p.name;
+        const full = [jn, (mm && mm.customer) || p.customer, (mm && mm.job_full) || p.name].filter(Boolean).join(" · ");
+        return `<tr class="mp-ms"><th class="mp-name mp-pj" data-pj="${esc(p.code)}" title="${esc(full)} — กดเพื่อดูรายละเอียด"><i style="background:${esc(p.color)}"></i>${jn ? `<b class="mp-jn">${esc(jn)}</b>` : ""}<span class="mp-sn">${esc(sn)}</span>${p.status !== "active" ? ` <em>${esc(p.status)}</em>` : ""}</th>${ds.map(d => {
           const k = key(d), t = M.get(k), dm = cm ? ` data-m="${esc(p.code + "|" + k)}"` : "";
           if (t) {
             const kinds = t.map(msKind), kd = kinds.includes("SAT") ? "SAT" : kinds.includes("INST") ? "INST" : kinds.includes("FAT") ? "FAT" : "";
@@ -190,7 +192,8 @@
           if (inBar(k)) return `<td class="mp-c ms ms-bar" style="--c:${MSC.INST}" title="ติดตั้ง (INST → SAT)"${dm}></td>`;
           return `<td class="mp-c ${dayOff(k, d) ? "we" : ""}${cm ? " ed" : ""}"${dm}></td>`;
         }).join("")}</tr>`; }).join("");
-      if (rows || cm) miles = `<tr class="mp-grp"><th class="mp-name">◆ Milestone${cm ? ` <button type="button" class="mp-madd" title="เพิ่ม Milestone">+ เพิ่ม</button>` : ""}<span class="mp-mslg"><i style="background:${MSC.FAT}"></i>FAT<i class="bar" style="background:${MSC.INST}"></i>INST<i style="background:${MSC.SAT}"></i>SAT</span></th><td colspan="${ds.length}"></td></tr>` + rows;
+      const nP = DATA.projects.filter(p => byP.has(p.code)).length;
+      if (rows || cm) miles = `<tr class="mp-grp"><th class="mp-name"><button type="button" class="mp-mtog" aria-expanded="${S.msOpen}" title="${S.msOpen ? "ย่อ" : "ขยาย"} Milestone">${S.msOpen ? "▾" : "▸"} ◆ Milestone <small>(${nP})</small></button>${cm ? ` <button type="button" class="mp-madd" title="เพิ่ม Milestone">+ เพิ่ม</button>` : ""}<span class="mp-mslg"><i style="background:${MSC.FAT}"></i>FAT<i class="bar" style="background:${MSC.INST}"></i>INST<i style="background:${MSC.SAT}"></i>SAT</span></th><td colspan="${ds.length}"></td></tr>` + (S.msOpen ? rows : "");
     }
     // people grouped by unit (CUR.W = on-screen order, used by drag-select)
     CUR.W = UNITS.flatMap(([u]) => W.filter(w => w.unit === u).map(w => w.id));
@@ -590,6 +593,26 @@
     const b = more.querySelector("button"); if (b) b.addEventListener("click", () => logPage(box, rows[rows.length - 1].id));
   }
 
+  /* ---------- project detail (click a milestone row name) ---------- */
+  function projectDialog(code) {
+    const p = DATA.P.get(code); if (!p) return;
+    const m = masterOf(p) || {}, ms = DATA.milestones.filter(x => x.project_code === code).sort((a, b) => a.day < b.day ? -1 : 1);
+    const asg = DATA.assignments.filter(a => a.project_code === code), ppl = new Set(asg.map(a => a.worker_id));
+    const STL = { active: "Active", hold: "Hold", postponed: "เลื่อน", cancelled: "ยกเลิก", done: "เสร็จแล้ว" };
+    const row = (k, v) => v ? `<tr><th>${k}</th><td>${esc(v)}</td></tr>` : "";
+    const el = document.createElement("div"); el.className = "mp-modal";
+    el.innerHTML = `<div class="mp-dlg" role="dialog" aria-modal="true" aria-label="รายละเอียดงาน"><header><div><b>${esc(m.job_no || p.job_no || "")} ${esc(m.job_name || p.short_name || p.name)}</b><div class="mp-when">${esc(m.customer || p.customer || "")}</div></div><button type="button" class="mp-x" aria-label="ปิด">✕</button></header>
+      <table class="mp-pjd">${row("Job no.", m.job_no || p.job_no)}${row("ชื่องานเต็ม", m.job_full || p.name)}${row("ชื่อย่อ", m.job_name || p.short_name)}${row("ลูกค้า", m.customer || p.customer)}${row("ชื่อลูกค้าเต็ม", m.customer_full)}${row("สถานะ", STL[p.status] || p.status)}
+        ${row("ในช่วงที่แสดง", asg.length ? `${asg.length} man-day · ${ppl.size} คน` : "ยังไม่มีคนลงงาน")}</table>
+      ${!m.job_no ? `<p class="mp-hint">งานนี้ยังไม่ได้ผูก Job no. กับ RAK_Master_Project_on_hand — ผูกได้ที่ ข้อมูลหลัก → งาน / ลูกค้า</p>` : ""}
+      <h4>Milestone</h4>${ms.length ? `<ul class="mp-pjms">${ms.map(x => `<li><i style="background:${msKind(x.label) ? MSC[msKind(x.label)] : esc(p.color)}"></i><b>${esc(x.label)}</b> ${esc(fmtD(x.day))}</li>`).join("")}</ul>` : `<p class="mp-hint">ไม่มี Milestone ในช่วงที่แสดง</p>`}</div>`;
+    const close = () => { el.remove(); document.removeEventListener("keydown", onKey); };
+    const onKey = e => { if (e.key === "Escape") close(); };
+    el.addEventListener("click", e => { if (e.target === el || e.target.closest(".mp-x")) close(); });
+    document.addEventListener("keydown", onKey);
+    (document.fullscreenElement || document.body).appendChild(el);
+  }
+
   /* ---------- Milestone (ดิว / กอล์ฟ) ---------- */
   function milestoneDialog(code, day) {
     const list = code && day ? DATA.milestones.filter(m => m.project_code === code && m.day === day) : [];
@@ -816,6 +839,8 @@
     const g = ROOT.querySelector(".mp-grid");
     if (g && DATA && DATA.canMilestone) g.addEventListener("click", e => {
       if (e.target.closest(".mp-madd")) return milestoneDialog(null, null);
+      if (e.target.closest(".mp-mtog")) { S.msOpen = !S.msOpen; try { localStorage.setItem("mp.msOpen", S.msOpen ? "1" : "0"); } catch (err) {} return draw(); }
+      const pj = e.target.closest("th[data-pj]"); if (pj) return projectDialog(pj.dataset.pj);
       const td = e.target.closest("td[data-m]"); if (td) { const [c, d] = td.dataset.m.split("|"); milestoneDialog(c, d); }
     });
     if (g && DATA && DATA.canEdit) bindDrag(g);
@@ -884,6 +909,10 @@ button.mp-lg:hover,.mp-lg.on{border-color:var(--rak);color:var(--rak)}.mp-lg b{f
 .mp-c.ab.ph{background:#fde3e3}.mp-c.ab.ph span{color:var(--rak)}
 .mp-c.ab.lv{background:#fff1cc}.mp-c.ab.lv span{color:var(--amber)}
 .mp-c.ms{background:color-mix(in srgb,var(--c) 12%,#fff)}.mp-c.ms span{font-weight:600;color:var(--c);font-size:10px}.mp-c.ms-bar,.mp-c.ms-inst,.mp-c.ms-sat{background:color-mix(in srgb,var(--c) 45%,#fff)}.mp-c.ms-inst span,.mp-c.ms-sat span{color:#fff;text-shadow:0 0 2px rgba(0,0,0,.35)}.mp-c.ms-sat{background:var(--c)}.mp-c.ms-inst{background:color-mix(in srgb,var(--c) 75%,#fff)}.mp-c.ms-fat{background:var(--c)}.mp-c.ms-fat span{color:#fff}.mp-c.ms-also-fat{box-shadow:inset 4px 0 0 ${MSC.FAT}}
+.mp-mtog{border:0;background:none;font:inherit;font-weight:700;color:inherit;cursor:pointer;padding:0}.mp-mtog small{font-weight:400;color:var(--muted)}
+.mp-pj{cursor:pointer}.mp-pj:hover .mp-sn{text-decoration:underline}.mp-ms .mp-name .mp-jn{font-weight:600;font-variant-numeric:tabular-nums;color:#495057;flex:none}.mp-ms .mp-name .mp-sn{overflow:hidden;text-overflow:ellipsis}
+.mp-pjd{border-collapse:collapse;width:calc(100% - 32px);font-size:13px;margin:8px 16px 10px}.mp-dlg>h4,.mp-pjms,.mp-dlg>.mp-hint{margin-left:16px;margin-right:16px}.mp-pjms{margin-bottom:16px}.mp-pjd th{background:none;text-align:left;font-weight:500;color:var(--muted);padding:4px 10px 4px 0;white-space:nowrap;vertical-align:top;width:110px}.mp-pjd td{padding:4px 0}
+.mp-pjms{list-style:none;padding:0;margin:4px 0;display:grid;gap:4px;font-size:13px}.mp-pjms i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
 .mp-mslg{margin-left:8px;font-size:10px;font-weight:400;color:var(--muted);display:inline-flex;gap:3px;align-items:center}.mp-mslg i{width:9px;height:9px;border-radius:50%;display:inline-block;margin-left:5px}.mp-mslg i.bar{width:16px;border-radius:2px}
 .mp-z-week .mp-c,.mp-z-week .mp-d{min-width:104px;max-width:104px}.mp-z-week .mp-c{height:44px}.mp-z-week .mp-c span{-webkit-line-clamp:3}
 .mp-z-month .mp-c,.mp-z-month .mp-d{min-width:58px;max-width:58px}.mp-z-month .mp-c span{font-size:9.5px}

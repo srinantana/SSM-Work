@@ -673,7 +673,7 @@ async function mpProjects(cfg, cols) {
 // if the table is missing the board falls back to mp_projects (customer + short_name).
 const MASTER_PJ_TABLES = ['RAK_Master_Project_on_hand', 'RAK_Master _Project_on_hand', 'RAK_Master_Project_On_Hand', 'rak_master_project_on_hand', 'RAK_Master_Project'];
 const MPJ_COLS = { job_no: ['Job_no', 'Job_No', 'JobNo', 'Job no', 'Job_number', 'Job', 'Project_no', 'Project_No'],
-  customer: ['Customer_Name', 'Customer', 'CustomerName', 'Customer_name'], job_name: ['Job_name', 'Job_Name', 'JobName', 'Short_name'], job_full: ['Job_Full_name', 'Job_Full_Name', 'Job_fullname', 'Project_name'] };
+  customer: ['Customer_Name', 'Customer', 'CustomerName', 'Customer_name'], customer_full: ['Customer_Full_Name', 'Customer_Full_name', 'Customer_fullname'], job_name: ['Job_name', 'Job_Name', 'JobName', 'Short_name'], job_full: ['Job_Full_name', 'Job_Full_Name', 'Job_fullname', 'Project_name'] };
 const jobKey = (v) => String(v == null ? '' : v).replace(/[^0-9A-Za-z]/g, '').toUpperCase();
 async function readMasterProjects(cfg) {
   for (const t of MASTER_PJ_TABLES) {
@@ -684,7 +684,7 @@ async function readMasterProjects(cfg) {
       for (const [k, v] of Object.entries(o || {})) by[colKey(k)] = v;
       const get = (f) => { for (const c of MPJ_COLS[f]) { const v = by[colKey(c)]; if (v != null && String(v).trim() !== '') return String(v).trim(); } return ''; };
       const full = get('job_full');
-      return { job_no: get('job_no'), customer: get('customer'), job_name: get('job_name') || full, job_full: full };
+      return { job_no: get('job_no'), customer: get('customer'), customer_full: get('customer_full'), job_name: get('job_name') || full, job_full: full };
     }).filter((r) => jobKey(r.job_no));
     return { table: t, rows };
   }
