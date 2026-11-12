@@ -349,7 +349,7 @@ function pageModule(m){
   if (!list.length){
     return hero(m)
       + `<div class="soon-card"><span class="big">${icon(m.icon)}</span><div><span class="badge soon">กำลังพัฒนา</span><h3 style="margin-top:8px">เมนูนี้กำลังจะมาเร็วๆ นี้</h3><p>ขอบเขตที่วางไว้สำหรับเมนู ${esc(m.name)}</p>${planList}
-         <p class="note" style="margin-top:14px">เมื่อมีเครื่องมือแล้ว ใส่ <code>"module": "${esc(m.id)}"</code> ให้รายการใน <code>registry.json</code> จะขึ้นในหน้านี้เอง</p></div></div>`;
+         <p class="note" style="margin-top:14px">เมื่อเมนูนี้เปิดใช้งาน จะแจ้งในหน้านี้และในคู่มือการใช้งาน · มีข้อเสนอแนะ ติดต่อทีม SSM</p></div></div>`;
   }
   const table = `<div class="tbl"><table><thead><tr><th>ลูกค้า</th><th>JO</th><th>โปรเจค</th><th>รายการ</th><th></th></tr></thead><tbody>${
     list.map(r => `<tr><td>${esc(r.c.name)}<div class="sub">${esc(r.c.site||"")}</div></td><td><span class="jo">${esc(r.p.jo)}</span></td><td>${esc(r.p.name)}${r.p.status?`<div class="sub">${esc(r.p.status)}</div>`:""}</td><td><b style="font-weight:600">${esc(r.t.name)}</b><div class="sub">${esc(r.t.desc||"")}</div></td><td><a class="open" href="${esc(r.t.path)}">เปิด →</a></td></tr>`).join("")
