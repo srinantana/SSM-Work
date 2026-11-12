@@ -73,7 +73,7 @@ def main(path):
             "create temp table g_map on commit drop as",
             "select distinct on (g.job_no) g.job_no, p.code from g_jobs g",
             "join public.mp_projects p on regexp_replace(coalesce(p.job_no, ''), '[^0-9A-Za-z]', '', 'g') = regexp_replace(g.job_no, '[^0-9A-Za-z]', '', 'g') or p.code = g.job_no",
-            "order by g.job_no, (p.code = g.job_no) desc, p.code;",
+            "order by g.job_no, (p.code = g.job_no) asc, p.code;   -- prefer the plan's own project over one this script created",
             "",
             "-- 2. replace FAT / INST / SAT of these projects",
             "delete from public.mp_milestones where label in ('FAT', 'INST', 'SAT') and project_code in (select code from g_map);",
