@@ -100,7 +100,13 @@ code{background:var(--blush);color:var(--rak);border-radius:4px;padding:1px 6px}
 </style></head><body><main class="card">
 <div class="brand"><img src="/assets/rak-logo.svg" alt="RAK Engineering" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><span class="word"><b>RAK</b> ENGINEERING</span><span class="ws">SSM WORK</span></div>
 <div class="in">${body}</div></main></body></html>`;
-  return new Response(html, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', ...headers } });
+  // headers may be a plain object or a Headers instance (several Set-Cookie lines, e.g. logout). Spreading a Headers
+  // instance copies nothing, which silently dropped the logout cookies (QA-01, 12 Nov 2026) — so copy entry by entry.
+  const h = new Headers({ 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+  if (headers instanceof Headers) headers.forEach((v, k) => { if (k !== 'set-cookie') h.set(k, v); });
+  else for (const [k, v] of Object.entries(headers || {})) h.append(k, v);
+  if (headers instanceof Headers && typeof headers.getSetCookie === 'function') headers.getSetCookie().forEach((c) => h.append('set-cookie', c));
+  return new Response(html, { status, headers: h });
 }
 
 const LOCK = `<span class="ic"><svg width="32" height="32" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.6" fill="#ffd9d9"/><rect x="5" y="10.5" width="14" height="10" rx="2.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="10.3" cy="14.6" r=".9" fill="currentColor"/><circle cx="13.7" cy="14.6" r=".9" fill="currentColor"/><path d="M10.4 17a2.2 2.2 0 0 0 3.2 0" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>`;
@@ -387,6 +393,10 @@ const thKey = (s) => String(s || '').replace(/\s+/g, ' ').trim();
 const MILESTONE_EDIT = { usernames: ['nantana.s', 'kitisak.s'], namesTh: ['นันทนา ศรีสกุลเตียว', 'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์', 'อรอิศรา พงศ์ผาติโรจน์'] };
 const canEditManpower = (prof) => MANPOWER_EDIT.usernames.includes(String(prof.username || '').toLowerCase())
   || MANPOWER_EDIT.namesTh.includes(thKey(prof.nameTh));
+// Edit the plan but may NOT Confirm Manpower (turn จอง into confirmed work): สปาย prakaikaew.p (set by Dew, 11 Nov 2026)
+const MANPOWER_NO_CONFIRM = { usernames: ['prakaikaew.p'], namesTh: ['ประกายแก้ว ปัญญา'] };
+const canConfirmManpower = (prof) => canEditManpower(prof)
+  && !MANPOWER_NO_CONFIRM.usernames.includes(String(prof.username || '').toLowerCase()) && !MANPOWER_NO_CONFIRM.namesTh.includes(thKey(prof.nameTh));
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const canEditMilestone = (prof) => MILESTONE_EDIT.usernames.includes(String(prof.username || '').toLowerCase()) || MILESTONE_EDIT.namesTh.includes(thKey(prof.nameTh));
 // PostgREST returns at most 1000 rows per request; page through with limit/offset.
@@ -488,7 +498,7 @@ function serviceOverlay(snapshot, workers, from, to) {
 // POST /api/manpower/confirm {text, items:[{worker_id, days:[...]}]} — turns "จอง …" bookings into confirmed work
 // (tentative → false, leading "จอง" removed). SC / PC / SSM only; every confirm is written to mp_change_log.
 async function manpowerConfirm(cfg, req, prof) {
-  if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
+  if (!canConfirmManpower(prof)) return json({ error: 'forbidden' }, 403);
   const raw = await req.text().catch(() => '');
   if (raw.length > 100000) return json({ error: 'too large' }, 413);
   let d;
@@ -580,7 +590,8 @@ async function manpowerAssign(cfg, req, prof) {
     const all = await restAll(cfg, '/rest/v1/mp_projects?select=code,name,customer,job_no,sort');
     if (!all) return json({ error: 'no_table' }, 503);
     const low = (x) => String(x || '').toLowerCase();
-    const hit = all.find((p) => low(p.name) === low(job) && low(p.customer) === low(customer))
+    const hit = (jobNo && all.find((p) => p.job_no && jobKey(p.job_no) === jobKey(jobNo)))
+      || all.find((p) => low(p.name) === low(job) && low(p.customer) === low(customer))
       || (!customer ? all.find((p) => low(p.name) === low(job)) : null);
     if (hit) {
       code = hit.code;
@@ -597,6 +608,11 @@ async function manpowerAssign(cfg, req, prof) {
   const text = note || job, rows = [];
   for (const [wid, days] of per) for (const day of days) rows.push({ worker_id: wid, day, project_code: code, kind: code ? 'work' : 'other', work_type: type, text, tentative: d.tentative === true, source: 'app', updated_by: who, updated_at: now });
   if (!rows.length) return json({ error: 'no working day in range' }, 400);
+  if (d.tentative !== true && !canConfirmManpower(prof)) {
+    const booked = await restAll(cfg, `/rest/v1/mp_assignments?select=worker_id,day&tentative=is.true&worker_id=in.(${ids.map(encodeURIComponent).join(',')})&day=gte.${from}&day=lte.${to}`);
+    const keep = new Set((booked || []).map((b) => b.worker_id + '|' + b.day));
+    rows.forEach((r) => { if (keep.has(r.worker_id + '|' + r.day)) r.tentative = true; });
+  }
   const res = await fetch(cfg.url + '/rest/v1/mp_assignments?on_conflict=worker_id,day', { method: 'POST',
     headers: { ...authHeaders(cfg.service), prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows) });
   if (!res.ok) return json({ error: res.status === 400 ? 'run database/manpower-002.sql' : 'supabase' }, 502);
@@ -699,12 +715,14 @@ async function manpowerMaster(cfg, req, prof, kind) {
     return json({ ok: true, id: newId });
   }
   if (kind === 'project') {
-    const code = mpStr(d.code, 20), name = mpStr(d.name, 160);
+    const code = mpStr(d.code, 20), jn = mpStr(d.job_no, 40);
+    const mh = jn ? (await readMasterProjects(cfg).catch(() => ({ rows: [] }))).rows.find((m) => jobKey(m.job_no) === jobKey(jn)) : null;
+    const name = mh ? mpStr(mh.job_full || mh.job_name, 160) : mpStr(d.name, 160);
     const status = ['active', 'hold', 'postponed', 'cancelled', 'done'].includes(d.status) ? d.status : 'active';
     const color = /^#[0-9a-fA-F]{6}$/.test(String(d.color || '')) ? d.color : '#6d7582';
     if (!name || (code && !/^[A-Za-z0-9_-]{1,20}$/.test(code))) return json({ error: 'input' }, 400);
-    const row = { name, customer: mpStr(d.customer, 120) || null, job_no: mpStr(d.job_no, 40) || null, status, color, updated_at: now };
-    if (d.short_name !== undefined) row.short_name = mpStr(d.short_name, 40) || null;
+    const row = { name, customer: (mh ? mpStr(mh.customer, 120) : mpStr(d.customer, 120)) || null, job_no: (mh ? mh.job_no : jn) || null, status, color, updated_at: now };
+    if (d.short_name !== undefined && !mh) row.short_name = mpStr(d.short_name, 40) || null;
     let res, newCode = code;
     if (code) res = await fetch(cfg.url + `/rest/v1/mp_projects?code=eq.${encodeURIComponent(code)}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) });
     else {
@@ -731,13 +749,14 @@ async function manpowerMaster(cfg, req, prof, kind) {
 }
 async function manpowerMasterGet(cfg, prof) {
   if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
-  const [workers, projects, holidays] = await Promise.all([
+  const [workers, projects, holidays, master] = await Promise.all([
     restAll(cfg, '/rest/v1/mp_workers?select=id,emp_code,name_th,nickname,unit,trade,active,sort&order=sort.asc'),
     mpProjects(cfg, 'code,name,customer,job_no,status,color,sort'),
     restAll(cfg, '/rest/v1/mp_holidays?select=day,type,name&order=day.asc'),
+    readMasterProjects(cfg).catch(() => ({ table: null, rows: [] })),
   ]);
   if (!workers || !projects) return json({ error: 'no_table' }, 503);
-  return json({ workers, projects, holidays: holidays || [] });
+  return json({ workers, projects, holidays: holidays || [], master: master.rows, masterTable: master.table });
 }
 async function manpowerLog(cfg, url, prof) {
   if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
@@ -780,6 +799,29 @@ async function mpProjects(cfg, cols) {
   return (await restAll(cfg, `/rest/v1/mp_projects?select=${cols},short_name&order=sort.asc`)) || restAll(cfg, `/rest/v1/mp_projects?select=${cols}&order=sort.asc`);
 }
 
+// Master project list (RAK_Master_Project_on_hand, kept by Dew in the same Supabase). Cell text on the board is
+// "work type | Customer_Name | Job_name", matched to mp_projects by Job no. Name and column spellings are tolerated;
+// if the table is missing the board falls back to mp_projects (customer + short_name).
+const MASTER_PJ_TABLES = ['RAK_Master_Project_on_hand', 'RAK_Master _Project_on_hand', 'RAK_Master_Project_On_Hand', 'rak_master_project_on_hand', 'RAK_Master_Project'];
+const MPJ_COLS = { job_no: ['Job_no', 'Job_No', 'JobNo', 'Job no', 'Job_number', 'Job', 'Project_no', 'Project_No'],
+  customer: ['Customer_Name', 'Customer', 'CustomerName', 'Customer_name'], customer_full: ['Customer_Full_Name', 'Customer_Full_name', 'Customer_fullname'], job_name: ['Job_name', 'Job_Name', 'JobName', 'Short_name'], job_full: ['Job_Full_name', 'Job_Full_Name', 'Job_fullname', 'Project_name'] };
+const jobKey = (v) => String(v == null ? '' : v).replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+async function readMasterProjects(cfg) {
+  for (const t of MASTER_PJ_TABLES) {
+    const raw = await restAll(cfg, `/rest/v1/${encodeURIComponent(t)}?select=*`, 20000);
+    if (!raw) continue;
+    const rows = raw.map((o) => {
+      const by = {};
+      for (const [k, v] of Object.entries(o || {})) by[colKey(k)] = v;
+      const get = (f) => { for (const c of MPJ_COLS[f]) { const v = by[colKey(c)]; if (v != null && String(v).trim() !== '') return String(v).trim(); } return ''; };
+      const full = get('job_full');
+      return { job_no: get('job_no'), customer: get('customer'), customer_full: get('customer_full'), job_name: get('job_name') || full, job_full: full };
+    }).filter((r) => jobKey(r.job_no));
+    return { table: t, rows };
+  }
+  return { table: null, rows: [] };
+}
+
 async function manpowerApi(cfg, req, url, prof) {
   const writes = { '/api/manpower/confirm': manpowerConfirm, '/api/manpower/assign': manpowerAssign, '/api/manpower/clear': manpowerClear,
     '/api/manpower/leave': manpowerLeave, '/api/manpower/leave-clear': manpowerLeaveClear };
@@ -799,13 +841,15 @@ async function manpowerApi(cfg, req, url, prof) {
   if (!ISO_DAY.test(from) || !ISO_DAY.test(to) || to < from) return json({ error: 'range' }, 400);
   if ((Date.parse(to) - Date.parse(from)) / 864e5 > 400) return json({ error: 'range too long' }, 400);
   const span = `day=gte.${from}&day=lte.${to}`;
-  const [workers, projects, milestones, assignments, absences, holidays] = await Promise.all([
+  const [workers, projects, milestones, assignments, absences, holidays, msAll] = await Promise.all([
     restAll(cfg, '/rest/v1/mp_workers?select=id,emp_code,name_th,nickname,unit,trade,active,sort&order=sort.asc'),
     mpProjects(cfg, 'code,name,customer,job_no,status,color,sort,note'),
     restAll(cfg, `/rest/v1/mp_milestones?select=id,project_code,day,label&${span}&order=day.asc`),
     restAll(cfg, `/rest/v1/mp_assignments?select=worker_id,day,project_code,kind,work_type,text,tentative,updated_by&${span}&order=day.asc,worker_id.asc`),
     restAll(cfg, `/rest/v1/mp_absences?select=worker_id,day,type,note&${span}&order=day.asc,worker_id.asc`),
     restAll(cfg, `/rest/v1/mp_holidays?select=day,type,name&${span}&order=day.asc`),
+    // every milestone (small table): an INST → SAT bar may start or end outside the range on screen
+    restAll(cfg, '/rest/v1/mp_milestones?select=id,project_code,day,label&order=day.asc'),
   ]);
   if (!workers || !projects) return json({ error: 'no_table' }, 503);
   let rows = assignments, needsMigration = false;
@@ -816,8 +860,8 @@ async function manpowerApi(cfg, req, url, prof) {
   const sp = await call(cfg, SPL_TABLE + '?select=data,updated_at&id=eq.main', { method: 'GET', admin: true }).catch(() => null);
   const spRow = sp && sp.ok && Array.isArray(sp.data) ? sp.data[0] : null;
   const overlay = serviceOverlay(canonSnapshot(spRow && spRow.data, await customerCanon(cfg).catch(() => (x) => x)), workers, from, to);
-  const [rq, canApprove] = await Promise.all([sprBoard(cfg, from, to), sprCanApprove(cfg, prof).catch(() => false)]);
-  return json({ from, to, requests: rq.requests, pendingRequests: rq.pendingRequests, canApprove, canEdit: canEditManpower(prof), canMilestone: canEditMilestone(prof), workers, projects, milestones: milestones || [], assignments: rows || [], absences: absences || [], holidays: holidays || [], needsMigration,
+  const [rq, canApprove, master] = await Promise.all([sprBoard(cfg, from, to), sprCanApprove(cfg, prof).catch(() => false), readMasterProjects(cfg).catch(() => ({ table: null, rows: [] }))]);
+  return json({ from, to, milestonesAll: msAll || [], master: master.rows, masterTable: master.table, requests: rq.requests, pendingRequests: rq.pendingRequests, canApprove, canEdit: canEditManpower(prof), canConfirm: canConfirmManpower(prof), canMilestone: canEditMilestone(prof), workers, projects, milestones: milestones || [], assignments: rows || [], absences: absences || [], holidays: holidays || [], needsMigration,
     service: overlay.service, serviceUnmatched: overlay.serviceUnmatched, serviceUpdated: spRow ? (spRow.data && spRow.data.updated) || spRow.updated_at : null });
 }
 
@@ -1080,7 +1124,7 @@ async function sprCancel(cfg, req, prof) {
   const a = await fetch(cfg.url + `/rest/v1/sp_requests?id=eq.${id}`, { method: 'PATCH', headers: H, body: JSON.stringify({ cancelled: true, updated_at: now }) });
   if (!a.ok) return json({ error: 'supabase' }, 502);
   await fetch(cfg.url + `/rest/v1/sp_request_people?request_id=eq.${id}&status=eq.pending`, { method: 'PATCH', headers: H, body: JSON.stringify({ status: 'cancelled', decided_by: who, decided_at: now }) });
-  await mpLog(cfg, who, 'sp-cancel', { id });
+  await mpLog(cfg, who, 'sp-cancel', { id, req_no: sprNo(row), type: row.type, customer: row.customer, job: row.job_name, from: row.date_from, to: row.date_to });
   return json({ ok: true });
 }
 async function sprApi(cfg, req, url, prof) {
@@ -1550,7 +1594,8 @@ function draw(){
       +'<button class="btn" data-a="role" data-id="'+u.id+'" data-v="'+(u.role==="admin"?"user":"admin")+'"'+dis+'>'+(u.role==="admin"?"ถอดผู้ดูแล":"ตั้งเป็นผู้ดูแล")+'</button>'
       +'<button class="btn" data-a="ban" data-id="'+u.id+'" data-v="'+(u.banned?"0":"1")+'"'+dis+'>'+(u.banned?"เปิดใช้งาน":"ปิดใช้งาน")+'</button>'
       +'<button class="btn" data-a="delete" data-id="'+u.id+'"'+dis+'>ลบ</button></div></td></tr>';
-  }).join("")||'<tr><td colspan="7" class="muted">ยังไม่มีผู้ใช้ นำเข้าจาก Excel ด้านบนได้เลย</td></tr>';
+  }).join("")||(USERS.length?'<tr><td colspan="7" class="muted">ไม่พบผู้ใช้ที่ตรงกับ “'+esc(document.getElementById("q").value.trim())+'” <button class="btn" type="button" id="qClear">ล้างคำค้น</button></td></tr>':'<tr><td colspan="7" class="muted">ยังไม่มีผู้ใช้ นำเข้าจาก Excel ด้านบนได้เลย</td></tr>');
+  const qc=document.getElementById("qClear"); if(qc) qc.addEventListener("click",()=>{document.getElementById("q").value="";draw();document.getElementById("q").focus();});
 }
 document.getElementById("q").addEventListener("input",draw);
 document.getElementById("rows").addEventListener("change",async e=>{

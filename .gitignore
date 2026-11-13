@@ -7,3 +7,4 @@ node_modules/
 # Manpower import output (staff names / leave records) — never commit
 manpower-seed*
 *.sql.local
+gantt-milestones*.sql
