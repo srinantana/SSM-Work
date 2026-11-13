@@ -308,7 +308,7 @@
         <label class="pl-chk"><input type="checkbox" data-f="late" ${F.late ? "checked" : ""}> เลยกำหนด</label>
         ${F.q || F.status || F.process || F.sev || F.who || F.late ? `<button class="pl-btn sm ghost" data-a="clear">ล้างตัวกรอง</button>` : ""}
         <span class="sub" style="margin-left:auto">แสดง ${list.length} / ${ITEMS.length}</span></div>
-      <div class="tbl pl-tbl"><table><thead><tr><th class="c">Item</th><th>รายละเอียด</th><th>ที่มา</th><th>ผู้รับผิดชอบ</th><th class="c">Due date</th><th class="c">Status</th><th class="c">Finished</th><th>รูป ก่อน / หลัง</th></tr></thead>
+      <div class="tbl pl-tbl"><table><thead><tr><th class="c">Item</th><th>รายละเอียด</th><th title="ภายใน — ไม่ส่งลูกค้า">ที่มา 🔒</th><th title="ภายใน — ไม่ส่งลูกค้า">ผู้รับผิดชอบ 🔒</th><th class="c">Due date</th><th class="c">Status</th><th class="c">Finished</th><th>รูป ก่อน / หลัง</th></tr></thead>
         <tbody>${list.map(rowHtml).join("") || `<tr><td colspan="8" class="sub" style="padding:18px;text-align:center">${ITEMS.length ? "ไม่มีรายการตรงกับตัวกรอง" : "ยังไม่มีรายการ · พิมพ์รายการแรกในช่องด้านล่าง แล้วกด Enter"}</td></tr>`}</tbody>
         <tfoot><tr class="pl-qa"><td class="c sub">${(Math.max(0, ...ITEMS.map(i => i.no)) || 0) + 1}</td>
           <td><input class="pl-in" id="qaD" placeholder="＋ พิมพ์รายการใหม่ แล้วกด Enter (เพิ่มได้ทีละบรรทัด)"></td>
@@ -393,7 +393,7 @@
         <label class="wide">ผู้รับผิดชอบ (Assign) 🔒 ภายใน<input class="pl-in" name="assignee" list="plPeople" value="${esc(it.assignee)}" placeholder="ชื่อคน หรือทีม เช่น Quality Assurance RAK"></label>
         <label>ระดับความสำคัญ${sel("severity", SEV.map(s => [s.id, s.th]), it.severity, "— ไม่ระบุ —")}</label>
         <label>หมวดงาน${sel("discipline", DISC.map(d => [d, d]), it.discipline, "— ไม่ระบุ —")}</label>
-        <fieldset class="wide4 pl-fs"><legend>ที่มาของปัญหา → ติดตาม NCR</legend><div class="pl-form">
+        <fieldset class="wide4 pl-fs"><legend>🔒 ที่มาของปัญหา → ติดตาม NCR (ภายใน ไม่ส่งลูกค้า)</legend><div class="pl-form">
           <label class="wide">มาจากกระบวนการ${sel("process", PROCESS.map(x => [x.id, x.th + " · " + x.en]), it.process, "— ไม่ระบุ —")}</label>
           <label class="pl-chk wide" style="align-self:end"><input type="checkbox" name="ncr" ${it.ncr ? "checked" : ""}> ต้องออก NCR</label>
           <label>NCR no.<input class="pl-in" name="ncr_no" value="${esc(it.ncr_no)}" placeholder="ถ้ามี"></label>
