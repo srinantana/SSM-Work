@@ -1,7 +1,7 @@
 /* SSM Work · Spare Part module.
    Routes (inside the hub): #spare-part          → project list + "Create new project" button + search bar
                             #spare-part/sp-<JO> → one spare part project in the "Suggested spares" format (import / export .xlsx)
-   Data:  /spare-part/data/sources.json  – jobs (Job Order header + scope, P&ID refs, aux equipment from Project Pipeline)
+   Data:  /api/spare-part/jobs – job list from RAK_Master_Project_on_hand; /spare-part/data/sources.json – Job Order / P&ID / aux snapshot added by Job No.
           /api/spare-part/projects       – saved spare part projects (Supabase via middleware);
                                            falls back to this browser's storage if the table is not set up yet. */
 (function () {
@@ -15,8 +15,23 @@
   /* ---------- storage ---------- */
   const lsRead = () => { try { return JSON.parse(localStorage.getItem(LS) || "[]"); } catch { return []; } };
   const lsWrite = list => { try { localStorage.setItem(LS, JSON.stringify(list)); } catch {} };
+  /* Jobs: RAK_Master_Project_on_hand (via /api/spare-part/jobs) is the job list; Job Order header, P&ID and aux equipment
+     from sources.json (snapshot of Drive + Project Pipeline) are added when the same Job No. is there. */
+  const jobKey = v => String(v ?? "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+  async function loadJobs() {
+    const snap = await fetch("/spare-part/data/sources.json", { cache: "no-store" }).then(r => r.ok ? r.json() : { jobs: [] }).catch(() => ({ jobs: [] }));
+    const master = await fetch("/api/spare-part/jobs", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
+    if (!master || !Array.isArray(master.jobs)) return { ...snap, from: "snapshot" };
+    const byJo = new Map((snap.jobs || []).map(j => [jobKey(j.jo), j]));
+    const jobs = master.jobs.map(m => {
+      const d = byJo.get(jobKey(m.job_no)) || {};
+      return { scope: [], aux: [], pid: [], pidTags: [], layout: [], ...d, jo: m.job_no, customerShort: m.customer || d.customerShort || "",
+        customer: m.customer_full || d.customer || m.customer || "", name: m.job_full || m.job_name || d.name || "", shortName: m.job_name || "", detail: !!d.jo };
+    }).sort((a, b) => String(b.jo).localeCompare(String(a.jo), "en", { numeric: true }));
+    return { ...snap, jobs, from: master.table };
+  }
   async function loadAll() {
-    if (!SRC) SRC = await fetch("/spare-part/data/sources.json", { cache: "no-store" }).then(r => r.ok ? r.json() : { jobs: [] }).catch(() => ({ jobs: [] }));
+    if (!SRC) SRC = await loadJobs();
     if (PROJECTS) return;
     try {
       const r = await fetch("/api/spare-part/projects", { cache: "no-store" });
@@ -102,19 +117,19 @@
     const used = new Set(PROJECTS.map(p => p.jo));
     let body = "", foot = "";
     if (WIZ.step === 1) {
-      const jobs = SRC.jobs.filter(j => has([j.jo, j.customer, j.customerShort, j.name, j.pmName].join(" "), WIZ.q));
-      body = `<p class="sp-sub">เลือก Job ที่จะทำรายการอะไหล่ (Job Order ตั้งแต่ ต.ค. 2026)</p>
+      const jobs = SRC.jobs.filter(j => has([j.jo, j.customer, j.customerShort, j.name, j.shortName, j.pmName].join(" "), WIZ.q));
+      body = `<p class="sp-sub">เลือก Job ที่จะทำรายการอะไหล่ · ${SRC.from === "snapshot" ? "จากข้อมูล Job Order ตั้งแต่ ต.ค. 2026" : "จาก RAK_Master_Project_on_hand (" + SRC.jobs.length + " งาน)"}</p>
         <input class="sp-in" id="wq" placeholder="ค้นหา Job No. / ลูกค้า / ชื่องาน" value="${esc(WIZ.q)}">
         <div class="sp-jobs">${jobs.map(j => `<button class="sp-job" data-jo="${esc(j.jo)}" ${used.has(j.jo) ? "disabled" : ""}>
           <span class="jo">${esc(j.jo)}</span><b>${esc(j.name)}</b><span class="sub">${esc(j.customerShort)} · ${esc(j.customer)}</span>
-          <span class="sp-tags"><i>${j.aux.length} equipment</i><i>${j.pid.length ? j.pid.length + " P&ID" : "ไม่มี P&ID"}</i>${used.has(j.jo) ? "<i>มีโปรเจคแล้ว</i>" : ""}</span></button>`).join("") || `<div class="empty">ไม่พบ job</div>`}</div>`;
+          <span class="sp-tags">${j.aux.length ? `<i>${j.aux.length} equipment</i>` : ""}${j.pid.length ? `<i>${j.pid.length} P&ID</i>` : ""}${used.has(j.jo) ? "<i>มีโปรเจคแล้ว</i>" : ""}</span></button>`).join("") || `<div class="empty">ไม่พบ job</div>`}</div>`;
     } else if (WIZ.step === 2) {
       const h = WIZ.head, j = WIZ.job;
       const f = (k, label, wide) => `<label class="${wide ? "wide" : ""}"><span>${label}</span><input data-h="${k}" value="${esc(h[k])}"></label>`;
-      body = `<p class="sp-sub">ข้อมูลเบื้องต้นจาก <a href="${esc(j.joFile)}" target="_blank" rel="noopener">Job Order ${esc(j.jo)}</a> แก้ไขได้</p>
+      body = `<p class="sp-sub">ข้อมูลเบื้องต้นจาก RAK_Master_Project_on_hand${j.joFile ? ` และ <a href="${esc(j.joFile)}" target="_blank" rel="noopener">Job Order ${esc(j.jo)}</a>` : ""} แก้ไขได้</p>
         <div class="sp-form">${f("jo", "Job No.")}${f("customerShort", "Customer (ย่อ)")}${f("customer", "Customer", 1)}${f("name", "Project name", 1)}
         ${f("site", "สถานที่")}${f("contact", "ผู้ติดต่อลูกค้า")}${f("tel", "โทร")}${f("qo", "QO No.")}${f("po", "PO No.")}${f("delivery", "กำหนดส่งมอบ")}${f("pm", "หัวหน้าโครงการ")}${f("coordinator", "ผู้ประสานงาน")}${f("systems", "Systems (จำนวนชุด)")}${f("rate", "Maximum rate (%)")}</div>
-        <h4 class="sp-h">ขอบเขตงานตาม Job Order</h4><ul class="sp-scope">${j.scope.map(s => `<li>${esc(s)}</li>`).join("")}</ul>`;
+        ${j.scope.length ? `<h4 class="sp-h">ขอบเขตงานตาม Job Order</h4><ul class="sp-scope">${j.scope.map(s => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}`;
     } else {
       const j = WIZ.job;
       body = `<p class="sp-sub">Aux / Equipment list จาก Project Pipeline (JO ${esc(j.jo)}) · เลือกอุปกรณ์ที่จะเป็นรายการตั้งต้น (หรือไม่เลือกเลย แล้ว Import ไฟล์ Suggested spares ในหน้าโปรเจค)</p>
@@ -125,7 +140,7 @@
           : `<p class="sub">ยังไม่พบ P&ID ในโฟลเดอร์ job${(j.layout || []).length ? ` · มี <a href="${esc(j.layout[0].url)}" target="_blank" rel="noopener">${esc(j.layout[0].title)}</a>` : ""}</p>`}`;
     }
     if (WIZ.step > 1) foot += `<button class="sp-btn" data-w="back">← ย้อนกลับ</button>`;
-    if (WIZ.step === 2) foot += `<button class="sp-btn primary" data-w="next">ถัดไป: Equipment →</button>`;
+    if (WIZ.step === 2) foot += WIZ.job.aux.length || WIZ.job.pid.length ? `<button class="sp-btn primary" data-w="next">ถัดไป: Equipment →</button>` : `<button class="sp-btn primary" data-w="create">สร้าง Draft</button>`;
     if (WIZ.step === 3) foot += `<button class="sp-btn primary" data-w="create">สร้าง Draft</button>`;
     m.innerHTML = `<div class="sp-dlg" role="dialog" aria-modal="true" aria-label="Create new project">
       <div class="sp-dlg-h"><b>Create new project</b><span class="sp-steps">${["เลือก Job", "ข้อมูลโปรเจค", "Equipment & P&ID"].map((s, i) => `<i class="${WIZ.step === i + 1 ? "on" : ""}">${i + 1}. ${s}</i>`).join("")}</span><button class="sp-x" data-w="close" aria-label="ปิด">✕</button></div>

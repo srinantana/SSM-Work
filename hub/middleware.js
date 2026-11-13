@@ -303,6 +303,12 @@ async function itemsApi(cfg, url, prof) {
 
 async function sparePartApi(cfg, req, url, prof) {
   if (url.pathname === '/api/spare-part/items' && req.method === 'GET') return itemsApi(cfg, url, prof);
+  // Jobs for "Create new project" come from RAK_Master_Project_on_hand (Dew, 13 Nov 2026), same reader as Manpower.
+  if (url.pathname === '/api/spare-part/jobs' && req.method === 'GET') {
+    const m = await readMasterProjects(cfg).catch(() => ({ table: null, rows: [] }));
+    if (!m.table) return json({ error: 'no_table', jobs: [] }, 503);
+    return json({ table: m.table, jobs: m.rows });
+  }
   if (url.pathname !== '/api/spare-part/projects') return json({ error: 'not found' }, 404);
   const rest = (q, opt) => call(cfg, SP_TABLE + q, { admin: true, ...opt });
   if (req.method === 'GET') {
