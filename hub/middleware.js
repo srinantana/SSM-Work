@@ -131,6 +131,7 @@ const MENU_IDS = MENUS.map((m) => m.id);
 function menuOfPath(path) {
   if (path.startsWith('/spare-part/') || path.startsWith('/api/spare-part/')) return 'spare-part';
   if (path.startsWith('/site-expense/')) return 'site-expense';
+  if (path.startsWith('/punch-list/') || path.startsWith('/api/punch-list/')) return 'punch-list';
   if (path.startsWith('/service-plan/') || path.startsWith('/api/service-plan/')) return 'service-plan';
   if (path.startsWith('/manpower/') || path.startsWith('/api/manpower/')) return 'manpower';
   const m = path.match(/^\/customers\/[^/]+\/[^/]+\/([^/]+)/);
@@ -344,6 +345,161 @@ async function sparePartApi(cfg, req, url, prof) {
   const row = { id: p.id, jo: String(p.jo || ''), customer: String(p.customer || ''), name: String(p.name || ''), status: String(p.status || 'draft'), data: p, updated_by: prof.email, updated_at: now };
   const res = await fetch(cfg.url + SP_TABLE + '?on_conflict=id', { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(row) });
   return res.ok ? json(p) : json({ error: res.status === 404 ? 'no_table' : 'supabase' }, res.status === 404 ? 503 : 502);
+}
+
+// ---------- Punch List (trial — open to Dew only, 13 Nov 2026) ----------
+// hub/punch-list/app.js. One punch list per project (Job no. from RAK_Master_Project_on_hand), items added line by line:
+// details, assignee, due date, status open / wip / check / done, finished date, note, where the problem came from (process —
+// design / purchase / fab / assembly / install / commission / customer / other, for NCR follow-up), discipline, severity A/B/C,
+// NCR flag + NCR no. + root cause, and several photos before / after. Tables + Storage bucket: database/punch_list.sql.
+// Photos are uploaded through POST /api/punch-list/photo (already shrunk to JPEG in the browser) and read back through
+// GET /api/punch-list/photo?p=<path>; the bucket is private, only this middleware (service key) touches it.
+// To open the menu to the team, add usernames to PUNCH_OPEN (they also need the Punch List tick in /admin).
+const PUNCH_OPEN = ['nantana.s'];
+const punchOpen = (prof) => PUNCH_OPEN.includes(String(prof.username || '').toLowerCase());
+const PL_P = '/rest/v1/punch_list_projects', PL_I = '/rest/v1/punch_list_items', PL_BUCKET = 'punch-photos';
+const PL_STATUS = ['open', 'wip', 'check', 'done'];
+const PL_PROCESS = ['design', 'purchase', 'fab', 'assembly', 'install', 'commission', 'customer', 'other', ''];
+const PL_PHOTO = /^pl-[A-Za-z0-9-]{1,40}\/[A-Za-z0-9_-]{6,60}\.jpg$/;
+const PL_ID = /^pl-[A-Za-z0-9-]{1,40}$/;
+const plText = (v, n) => String(v == null ? '' : v).slice(0, n);
+const plDay = (v) => (ISO_DAY.test(String(v || '')) ? String(v) : null);
+const plPhotos = (a, by) => (Array.isArray(a) ? a : []).filter((x) => x && PL_PHOTO.test(String(x.p || ''))).slice(0, 30)
+  .map((x) => ({ p: String(x.p), at: plText(x.at, 40) || new Date().toISOString(), by: plText(x.by, 80) || by }));
+async function plRemovePhotos(cfg, paths) {
+  if (!paths.length) return;
+  await fetch(`${cfg.url}/storage/v1/object/${PL_BUCKET}`, { method: 'DELETE', headers: authHeaders(cfg.service), body: JSON.stringify({ prefixes: paths }) }).catch(() => null);
+}
+async function plWrite(cfg, path, method, body) {
+  const res = await fetch(cfg.url + path, { method, headers: { ...authHeaders(cfg.service), prefer: 'return=representation' }, body: JSON.stringify(body) });
+  let data = null; try { data = await res.json(); } catch {}
+  return { ok: res.ok, status: res.status, data };
+}
+async function punchPeople(cfg) {
+  const t = await readEmployeeTable(cfg).catch(() => null);
+  if (!t) return json({ people: [] });
+  const people = t.rows.filter((r) => !leftCompany(r.status) && (r.first || r.th))
+    .map((r) => ({ name: [r.first, r.last].filter(Boolean).join(' ').replace(/\b([a-z])/g, (m) => m.toUpperCase()) || r.th, th: r.th, nick: r.nick }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return json({ people });
+}
+async function punchApi(cfg, req, url, prof) {
+  const p = url.pathname.slice('/api/punch-list/'.length);
+  const by = prof.username || prof.email;
+  const rest = (q, opt) => call(cfg, q, { admin: true, ...opt });
+  if (req.method === 'GET') {
+    if (p === 'jobs') {
+      const m = await readMasterProjects(cfg).catch(() => ({ table: null, rows: [] }));
+      return m.table ? json({ table: m.table, jobs: m.rows }) : json({ error: 'no_table', jobs: [] }, 503);
+    }
+    if (p === 'people') return punchPeople(cfg);
+    if (p === 'projects') {
+      const [ps, st] = await Promise.all([restAll(cfg, `${PL_P}?select=*&order=updated_at.desc`), restAll(cfg, `${PL_I}?select=project_id,status,due_date,severity,ncr`)]);
+      if (!ps) return json({ error: 'no_table' }, 503);
+      return json({ projects: ps, stats: st || [] });
+    }
+    if (p === 'items') {
+      const pid = url.searchParams.get('project') || '';
+      if (!PL_ID.test(pid)) return json({ error: 'project' }, 400);
+      const rows = await restAll(cfg, `${PL_I}?select=*&project_id=eq.${encodeURIComponent(pid)}&order=no.asc,id.asc`);
+      return rows ? json({ items: rows }) : json({ error: 'no_table' }, 503);
+    }
+    if (p === 'photo') {
+      const path = url.searchParams.get('p') || '';
+      if (!PL_PHOTO.test(path)) return json({ error: 'path' }, 400);
+      const r = await fetch(`${cfg.url}/storage/v1/object/${PL_BUCKET}/${path}`, { headers: { apikey: cfg.service, ...(String(cfg.service).startsWith('eyJ') ? { authorization: 'Bearer ' + cfg.service } : {}) } });
+      if (!r.ok) return json({ error: 'not found' }, 404);
+      return new Response(r.body, { headers: { 'content-type': r.headers.get('content-type') || 'image/jpeg', 'cache-control': 'private, max-age=604800, immutable' } });
+    }
+    return json({ error: 'not found' }, 404);
+  }
+  if (req.method !== 'POST') return json({ error: 'method' }, 405);
+  if (p === 'photo') {
+    const pid = url.searchParams.get('project') || '';
+    if (!PL_ID.test(pid)) return json({ error: 'project' }, 400);
+    if (!/^image\/(jpeg|png|webp)$/.test(req.headers.get('content-type') || '')) return json({ error: 'type' }, 415);
+    const buf = await req.arrayBuffer();
+    if (!buf.byteLength || buf.byteLength > 4 * 1024 * 1024) return json({ error: 'too large' }, 413);
+    const path = `${pid}/${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}.jpg`;
+    const h = authHeaders(cfg.service); h['content-type'] = 'image/jpeg'; h['x-upsert'] = 'false';
+    const r = await fetch(`${cfg.url}/storage/v1/object/${PL_BUCKET}/${path}`, { method: 'POST', headers: h, body: buf });
+    if (!r.ok) return json({ error: r.status === 404 || r.status === 400 ? 'no_bucket' : 'storage' }, 502);
+    return json({ path });
+  }
+  let b;
+  try { b = await req.json(); } catch { return json({ error: 'json' }, 400); }
+  if (!b || typeof b !== 'object') return json({ error: 'json' }, 400);
+  const now = new Date().toISOString();
+  if (p === 'projects') {
+    const jk = jobKey(b.job_no);
+    const id = PL_ID.test(String(b.id || '')) ? String(b.id) : 'pl-' + (jk ? jk.slice(0, 40) : Date.now().toString(36));
+    const row = { id, job_no: plText(b.job_no, 40).trim(), customer: plText(b.customer, 160).trim(), name: plText(b.name, 300).trim(), site: plText(b.site, 200).trim(),
+      status: b.status === 'closed' ? 'closed' : 'active', note: plText(b.note, 500), updated_by: by, updated_at: now };
+    const old = await rest(`${PL_P}?select=id,job_no,created_by&id=eq.${encodeURIComponent(id)}`, { method: 'GET' });
+    if (!old.ok) return json({ error: 'no_table' }, 503);
+    if (old.data[0]) row.job_no = old.data[0].job_no; // Job no. never changes after creation
+    else row.created_by = by;
+    const res = await fetch(`${cfg.url}${PL_P}?on_conflict=id`, { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'resolution=merge-duplicates,return=representation' }, body: JSON.stringify(row) });
+    const d = await res.json().catch(() => null);
+    return res.ok && Array.isArray(d) ? json(d[0]) : json({ error: res.status === 409 ? 'job exists' : 'supabase' }, res.status === 409 ? 409 : 502);
+  }
+  if (p === 'project-delete') {
+    if (prof.role !== 'admin') return json({ error: 'admin only' }, 403);
+    const id = String(b.id || '');
+    if (!PL_ID.test(id)) return json({ error: 'id' }, 400);
+    const items = (await restAll(cfg, `${PL_I}?select=photos_before,photos_after&project_id=eq.${encodeURIComponent(id)}`)) || [];
+    const r = await rest(`${PL_P}?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' }); // items go with it (on delete cascade)
+    if (!r.ok) return json({ error: 'supabase' }, 502);
+    await plRemovePhotos(cfg, items.flatMap((i) => [...(i.photos_before || []), ...(i.photos_after || [])].map((x) => x.p)).filter((x) => PL_PHOTO.test(x)));
+    return json({ ok: true });
+  }
+  if (p === 'items') {
+    const pid = String(b.project_id || '');
+    if (!PL_ID.test(pid)) return json({ error: 'project' }, 400);
+    const row = { project_id: pid, no: Math.max(1, Math.min(99999, parseInt(b.no, 10) || 1)), details: plText(b.details, 2000).trim(),
+      process: PL_PROCESS.includes(b.process) ? b.process : '', discipline: plText(b.discipline, 60), severity: ['A', 'B', 'C'].includes(b.severity) ? b.severity : '',
+      assignee: plText(b.assignee, 120).trim(), due_date: plDay(b.due_date), status: PL_STATUS.includes(b.status) ? b.status : 'open', finished_date: plDay(b.finished_date),
+      note: plText(b.note, 2000), ncr: b.ncr === true, ncr_no: plText(b.ncr_no, 60).trim(), cause: plText(b.cause, 1000),
+      photos_before: plPhotos(b.photos_before, by), photos_after: plPhotos(b.photos_after, by), updated_by: by, updated_at: now };
+    if (!row.details) return json({ error: 'details' }, 400);
+    if (row.status === 'done' && !row.finished_date) row.finished_date = now.slice(0, 10);
+    const id = parseInt(b.id, 10);
+    let r, removed = [];
+    if (id > 0) {
+      const old = await rest(`${PL_I}?select=project_id,photos_before,photos_after&id=eq.${id}`, { method: 'GET' });
+      if (!old.ok || !old.data[0] || old.data[0].project_id !== pid) return json({ error: 'not found' }, 404);
+      const keep = new Set([...row.photos_before, ...row.photos_after].map((x) => x.p));
+      removed = [...(old.data[0].photos_before || []), ...(old.data[0].photos_after || [])].map((x) => x.p).filter((x) => !keep.has(x) && PL_PHOTO.test(x));
+      r = await plWrite(cfg, `${PL_I}?id=eq.${id}`, 'PATCH', row);
+    } else {
+      row.created_by = by;
+      r = await plWrite(cfg, PL_I, 'POST', row);
+    }
+    if (!r.ok) return json({ error: r.status === 404 ? 'no_table' : 'supabase' }, r.status === 404 ? 503 : 502);
+    let saved = Array.isArray(r.data) ? r.data[0] : null;
+    if (!saved) { // PostgREST returned no body: read the row back
+      const q = id > 0 ? `id=eq.${id}` : `project_id=eq.${encodeURIComponent(pid)}&order=id.desc&limit=1`;
+      const g = await rest(`${PL_I}?select=*&${q}`, { method: 'GET' });
+      saved = g.ok ? g.data[0] : null;
+    }
+    await rest(`${PL_P}?id=eq.${encodeURIComponent(pid)}`, { method: 'PATCH', body: { updated_at: now, updated_by: by } });
+    await plRemovePhotos(cfg, removed);
+    return saved ? json({ item: saved }) : json({ error: 'supabase' }, 502);
+  }
+  if (p === 'items-delete') {
+    const id = parseInt(b.id, 10);
+    if (!(id > 0)) return json({ error: 'id' }, 400);
+    const old = await rest(`${PL_I}?select=project_id,photos_before,photos_after&id=eq.${id}`, { method: 'GET' });
+    const r = await rest(`${PL_I}?id=eq.${id}`, { method: 'DELETE' });
+    if (!r.ok) return json({ error: 'supabase' }, 502);
+    const o = old.ok && old.data[0];
+    if (o) {
+      await plRemovePhotos(cfg, [...(o.photos_before || []), ...(o.photos_after || [])].map((x) => x.p).filter((x) => PL_PHOTO.test(x)));
+      await rest(`${PL_P}?id=eq.${encodeURIComponent(o.project_id)}`, { method: 'PATCH', body: { updated_at: now, updated_by: by } });
+    }
+    return json({ ok: true });
+  }
+  return json({ error: 'not found' }, 404);
 }
 
 // Service Plan: a Google Apps Script (scripts/service-plan-push.gs, "On change" trigger) watches tab "ใบขอคน 2026"
@@ -1183,7 +1339,10 @@ const effectiveMenus = (prof) => {
   if (sitePerms(prof).includes('view')) out.push('site-expense');
   return MENU_IDS.filter((id) => out.includes(id));
 };
-const canOpen = (prof, menu) => menu === null || (menu === 'site-expense' ? siteExpenseOpen(prof) && effectiveMenus(prof).includes(menu) : prof.role === 'admin' || (menu !== '__admin' && effectiveMenus(prof).includes(menu)));
+// Punch List (trial): only PUNCH_OPEN may open it, even admins; everyone else who has the menu sees "เร็วๆ นี้".
+const canOpen = (prof, menu) => menu === null || (menu === 'site-expense' ? siteExpenseOpen(prof) && effectiveMenus(prof).includes(menu)
+  : menu === 'punch-list' ? punchOpen(prof) && effectiveMenus(prof).includes(menu)
+  : prof.role === 'admin' || (menu !== '__admin' && effectiveMenus(prof).includes(menu)));
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
 function signInPage(cfg, next, { status = 401, heading = 'เข้าสู่ระบบ SSM Work', msg, error, notice, email = '', headers } = {}) {
@@ -1821,7 +1980,7 @@ export default async function middleware(req) {
     if (!signedIn) return json({}, 401);
     const live = await liveProfile(cfg, user);
     if (!live) return json({}, 401);
-    return json({ email: live.email, username: live.username, name: live.name, role: live.role, modules: effectiveMenus(live), soon: siteExpenseOpen(live) ? [] : ['site-expense'], siteExpense: siteExpenseOpen(live) ? sitePerms(live) : [], manpowerEdit: canEditManpower(live) });
+    return json({ email: live.email, username: live.username, name: live.name, role: live.role, modules: effectiveMenus(live), soon: [siteExpenseOpen(live) ? '' : 'site-expense', punchOpen(live) ? '' : 'punch-list'].filter(Boolean), siteExpense: siteExpenseOpen(live) ? sitePerms(live) : [], manpowerEdit: canEditManpower(live) });
   }
 
   if (path === '/admin' || path.startsWith('/admin/')) {
@@ -1848,6 +2007,14 @@ export default async function middleware(req) {
     if (!live) return json({ error: 'login required' }, 401);
     if (!canOpen(live, 'spare-part')) return json({ error: 'no access' }, 403);
     try { return await sparePartApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
+  }
+
+  if (path.startsWith('/api/punch-list/')) {
+    if (!signedIn) return json({ error: 'login required' }, 401);
+    const live = await liveProfile(cfg, user);
+    if (!live) return json({ error: 'login required' }, 401);
+    if (!canOpen(live, 'punch-list')) return json({ error: 'no access' }, 403);
+    try { return await punchApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
   }
 
   if (path.startsWith('/api/manpower/')) {
