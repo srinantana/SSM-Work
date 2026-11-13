@@ -354,9 +354,7 @@ async function sparePartApi(cfg, req, url, prof) {
 // NCR flag + NCR no. + root cause, and several photos before / after. Tables + Storage bucket: database/punch_list.sql.
 // Photos are uploaded through POST /api/punch-list/photo (already shrunk to JPEG in the browser) and read back through
 // GET /api/punch-list/photo?p=<path>; the bucket is private, only this middleware (service key) touches it.
-// To open the menu to the team, add usernames to PUNCH_OPEN (they also need the Punch List tick in /admin).
-const PUNCH_OPEN = ['nantana.s'];
-const punchOpen = (prof) => PUNCH_OPEN.includes(String(prof.username || '').toLowerCase());
+// Open to everyone an admin has ticked Punch List for in /admin (Dew, 13 Nov 2026 — trial was Dew only).
 const PL_P = '/rest/v1/punch_list_projects', PL_I = '/rest/v1/punch_list_items', PL_BUCKET = 'punch-photos';
 const PL_STATUS = ['open', 'wip', 'check', 'done'];
 const PL_PROCESS = ['design', 'purchase', 'fab', 'assembly', 'install', 'commission', 'customer', 'other', ''];
@@ -1345,9 +1343,7 @@ const effectiveMenus = (prof) => {
   if (sitePerms(prof).includes('view')) out.push('site-expense');
   return MENU_IDS.filter((id) => out.includes(id));
 };
-// Punch List (trial): only PUNCH_OPEN may open it, even admins; everyone else who has the menu sees "เร็วๆ นี้".
 const canOpen = (prof, menu) => menu === null || (menu === 'site-expense' ? siteExpenseOpen(prof) && effectiveMenus(prof).includes(menu)
-  : menu === 'punch-list' ? punchOpen(prof) && effectiveMenus(prof).includes(menu)
   : prof.role === 'admin' || (menu !== '__admin' && effectiveMenus(prof).includes(menu)));
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
@@ -1986,7 +1982,7 @@ export default async function middleware(req) {
     if (!signedIn) return json({}, 401);
     const live = await liveProfile(cfg, user);
     if (!live) return json({}, 401);
-    return json({ email: live.email, username: live.username, name: live.name, role: live.role, modules: effectiveMenus(live), soon: [siteExpenseOpen(live) ? '' : 'site-expense', punchOpen(live) ? '' : 'punch-list'].filter(Boolean), siteExpense: siteExpenseOpen(live) ? sitePerms(live) : [], manpowerEdit: canEditManpower(live) });
+    return json({ email: live.email, username: live.username, name: live.name, role: live.role, modules: effectiveMenus(live), soon: siteExpenseOpen(live) ? [] : ['site-expense'], siteExpense: siteExpenseOpen(live) ? sitePerms(live) : [], manpowerEdit: canEditManpower(live) });
   }
 
   if (path === '/admin' || path.startsWith('/admin/')) {
