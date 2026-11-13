@@ -54,7 +54,7 @@
     if (/tygon|tubing/.test(n)) return [R(eq.name, 1, eq.unit || "roll", "Consumable")];
     if (/grundfos|cm 3|crne/.test(n)) return [R("Shaft seal kit", .5, "set", "Critical"), R("O-ring / gasket kit", .5, "set", "Recommended")];
     if (c.includes("pump")) return [R("Impeller", .5, "pc", "Recommended"), R("Bushing / bearing set", .5, "set", "Critical"), R("O-ring / seal kit (Viton)", 1, "set", "Consumable")];
-    if (c.includes("filtration")) return [R("Filter cartridge 20\" (ไมครอนตามกระบวนการ)", 6, "pc", "Consumable", "เผื่อเปลี่ยน ~6 ครั้ง/ปี/ชุด ปรับตามหน้างาน"), R("Chamber lid O-ring (Viton)", 1, "pc", "Consumable")];
+    if (c.includes("filtration")) return [R("Filter cartridge 20\" (ไมครอนตามกระบวนการ)", 1, "pc", "Consumable", "แนะนำสำรอง 1 ชุดเปลี่ยนเต็ม (เกินเกณฑ์ 25%)"), R("Chamber lid O-ring (Viton)", 1, "pc", "Consumable")];
     if (c.includes("heater")) return [R("Spare heater (same model)", .5, "pc", "Critical"), R("Over-temperature (OTP) sensor", .5, "pc", "Recommended")];
     if (c.includes("heating & cooling")) return [R("Connection gasket / fitting set", 1, "set", "Recommended")];
     if (c.includes("rectifier")) return [R("Cooling fan", 1, "pc", "Recommended"), R("Fuse / control board set (ตามคำแนะนำผู้ผลิต)", 1, "set", "Critical", "ขอรายการจาก PE ตาม serial no.")];
@@ -70,6 +70,9 @@
   ];
   // Specification / Material without the model text already shown under Manufacturer / Model
   const specOf = eq => (eq.spec || "").split(" · ").filter(seg => { const k = norm(seg).slice(0, 6); return !(k && norm(eq.model).includes(k)) && !/^(series|power station|ptfe immersion coil$)/i.test(seg); }).join(" · ");
+  // Recommended spare qty = 25% of installed qty, rounded up, minimum 1 (Dew, 13 Nov 2026)
+  const SPARE_RATIO = 0.25;
+  const spareQty = installed => Math.max(1, Math.ceil((Number(installed) || 1) * SPARE_RATIO));
   function suggest(job, eqs) {
     const lines = [];
     const weeks = d => d ? Math.ceil(d / 7) : "";
@@ -78,7 +81,7 @@
       lines.push({
         id: uid(), zone: eq.zone || eq.location || eq.system || "Zone A", equip: eq.name, tag: eq.tag || "", part: r.part, partNo: same ? (eq.model || "") : "",
         maker: [eq.maker, eq.model].filter(Boolean).join(" / "), spec: specOf(eq), installed: eq.qty || "",
-        qty: Math.max(1, Math.ceil((eq.qty || 1) * r.per)), unit: r.unit, prio: r.prio, leadWeeks: weeks(eq.leadDays), unitPrice: "", source: "Aux list", remark: r.remark,
+        qty: spareQty(eq.qty), unit: r.unit, prio: r.prio, leadWeeks: weeks(eq.leadDays), unitPrice: "", source: "Aux list", remark: r.remark,
       });
     }));
     if ((job.pid || []).length) PID_COMMON.forEach(r => lines.push({ id: uid(), zone: "Instrument & Valve (ตาม P&ID)", equip: "Instrument / valve", tag: "", part: r.part, partNo: "", maker: "", spec: "", installed: "",
