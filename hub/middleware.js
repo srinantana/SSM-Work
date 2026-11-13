@@ -1171,6 +1171,10 @@ const SITE_EXPENSE = {
   actual:  ['teedanai.h', 'prakaikaew.p', 'sakkamon.c', 'nantana.s'],   // record site expenses
   check:   ['nantana.s'],                                               // check recorded actuals
 };
+// Opened only to these usernames for now (Dew, 13 Nov 2026). Everyone else on the view list sees the menu as "เร็วๆ นี้" and cannot open it.
+// To open Site Expense to the team, add their usernames here (or replace the check with SITE_EXPENSE.view).
+const SITE_EXPENSE_OPEN = ['nantana.s'];
+const siteExpenseOpen = (prof) => SITE_EXPENSE_OPEN.includes(String(prof.username || '').toLowerCase());
 const sitePerms = (prof) => Object.keys(SITE_EXPENSE).filter((k) => SITE_EXPENSE[k].includes(String(prof.username || '').toLowerCase()));
 // Non-admins see only the menus an admin has ticked for them; a new account starts with none. Site Expense: list above only.
 const effectiveMenus = (prof) => {
@@ -1179,7 +1183,7 @@ const effectiveMenus = (prof) => {
   if (sitePerms(prof).includes('view')) out.push('site-expense');
   return MENU_IDS.filter((id) => out.includes(id));
 };
-const canOpen = (prof, menu) => menu === null || (menu === 'site-expense' ? effectiveMenus(prof).includes(menu) : prof.role === 'admin' || (menu !== '__admin' && effectiveMenus(prof).includes(menu)));
+const canOpen = (prof, menu) => menu === null || (menu === 'site-expense' ? siteExpenseOpen(prof) && effectiveMenus(prof).includes(menu) : prof.role === 'admin' || (menu !== '__admin' && effectiveMenus(prof).includes(menu)));
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
 function signInPage(cfg, next, { status = 401, heading = 'เข้าสู่ระบบ SSM Work', msg, error, notice, email = '', headers } = {}) {
@@ -1817,7 +1821,7 @@ export default async function middleware(req) {
     if (!signedIn) return json({}, 401);
     const live = await liveProfile(cfg, user);
     if (!live) return json({}, 401);
-    return json({ email: live.email, username: live.username, name: live.name, role: live.role, modules: effectiveMenus(live), siteExpense: sitePerms(live), manpowerEdit: canEditManpower(live) });
+    return json({ email: live.email, username: live.username, name: live.name, role: live.role, modules: effectiveMenus(live), soon: siteExpenseOpen(live) ? [] : ['site-expense'], siteExpense: siteExpenseOpen(live) ? sitePerms(live) : [], manpowerEdit: canEditManpower(live) });
   }
 
   if (path === '/admin' || path.startsWith('/admin/')) {

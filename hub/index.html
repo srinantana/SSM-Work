@@ -267,6 +267,7 @@ const MODULES = [
 let REG = {customers:[]};
 let ME = null; // from /auth/me: {email, name, role, modules:[...]} — the server enforces the same rules
 const allowed = id => id === "home" || (id === "manual" && ME !== null) || !!(ME && (ME.modules || []).includes(id));
+const isSoon = id => !!(ME && (ME.soon || []).includes(id)); // menu shown but not opened yet for this account
 const visibleModules = () => MODULES.filter(m => allowed(m.id)).sort((a, b) => (a.id === "manual") - (b.id === "manual")); // manual always last
 
 function rows(){
@@ -283,7 +284,7 @@ function renderNav(){
   const cur = route();
   document.getElementById("nav").innerHTML = visibleModules().map(m => {
     const n = toolsOf(m.id).length;
-    const tail = m.beta ? `<span class="soon beta">ทดลอง</span>` : m.id === "home" || m.live ? "" : (n ? `<span class="cnt">${n}</span>` : `<span class="soon">เร็วๆ นี้</span>`);
+    const tail = isSoon(m.id) ? `<span class="soon">เร็วๆ นี้</span>` : m.beta ? `<span class="soon beta">ทดลอง</span>` : m.id === "home" || m.live ? "" : (n ? `<span class="cnt">${n}</span>` : `<span class="soon">เร็วๆ นี้</span>`);
     return `<li><a href="#${m.id}" title="${esc(m.name)}" ${m.id===cur?'aria-current="page"':""}><span class="tile">${icon(m.icon)}</span>${esc(m.name)}${tail}</a></li>`;
   }).join("");
   document.getElementById("sideFoot").textContent = REG.updated ? "อัปเดตรายการ " + REG.updated : "พร้อมใช้งาน";
@@ -330,7 +331,7 @@ function pageHome(){
     <blockquote>“มุ่งมั่นผลิตสินค้าที่มีคุณภาพ ส่งมอบตรงเวลา และมีประสิทธิภาพในการบริการ เพื่อสร้างความพึงพอใจให้กับลูกค้า”</blockquote></figure>`;
   const mods = mine.map(m => {
     const n = toolsOf(m.id).length;
-    return `<a class="mod" href="#${m.id}"><span class="tile">${icon(m.icon)}</span><span class="m-name">${esc(m.name)}</span><span class="m-desc">${esc(m.th)}</span><span class="badge ${m.beta?"beta":n||m.live?"live":"soon"}">${m.beta ? "ทดลองใช้งาน" : n ? "ใช้งานได้ · " + n + " รายการ" : m.live ? "ใช้งานได้" : "กำลังพัฒนา"}</span></a>`;
+    return `<a class="mod" href="#${m.id}"><span class="tile">${icon(m.icon)}</span><span class="m-name">${esc(m.name)}</span><span class="m-desc">${esc(m.th)}</span><span class="badge ${isSoon(m.id)?"soon":m.beta?"beta":n||m.live?"live":"soon"}">${isSoon(m.id) ? "กำลังพัฒนา" : m.beta ? "ทดลองใช้งาน" : n ? "ใช้งานได้ · " + n + " รายการ" : m.live ? "ใช้งานได้" : "กำลังพัฒนา"}</span></a>`;
   }).join("");
   const menus = ME === null ? `<div class="empty">กำลังโหลดเมนู…</div>`
     : mods ? `<div class="modules">${mods}</div>`
@@ -363,7 +364,7 @@ function render(){
   const id = route(), m = modOf(id);
   document.title = (id === "home" ? "SSM Work" : m.name + " · SSM Work") + " · RAK Engineering";
   const sp = id === "spare-part" && ME !== null && allowed(id) && window.SparePart;
-  const se = id === "site-expense" && ME !== null && allowed(id) && window.SiteExpense;
+  const se = id === "site-expense" && ME !== null && allowed(id) && !isSoon(id) && window.SiteExpense;
   const pl = id === "service-plan" && ME !== null && allowed(id) && window.ServicePlan;
   const mp = id === "manpower" && ME !== null && allowed(id) && window.Manpower;
   const mn = id === "manual" && ME !== null && window.Manual;
