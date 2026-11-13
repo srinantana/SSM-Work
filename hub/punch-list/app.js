@@ -1,4 +1,4 @@
-/* SSM Work · Punch List module — trial, open to Dew only for now (13 Nov 2026).
+/* SSM Work · Punch List module — live for everyone with the Punch List menu right (13 Nov 2026).
    Routes (inside the hub): #punch-list          → overview of every punch list (search Job no. / customer / project) + "สร้าง Punch list"
                             #punch-list/<id>     → one project's punch list: summary, filters, line-by-line items, photos, export
    Data:  /api/punch-list/jobs      – projects from RAK_Master_Project_on_hand (same reader as Manpower / Spare Part)
