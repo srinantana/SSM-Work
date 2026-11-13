@@ -251,7 +251,7 @@
     const q = norm(F.q);
     return ITEMS.filter(i => (!F.status || (F.status === "notdone" ? i.status !== "done" : i.status === F.status))
       && (!F.process || i.process === F.process) && (!F.sev || i.severity === F.sev) && (!F.who || i.assignee === F.who)
-      && (!F.late || isLate(i)) && (!q || norm([i.no, i.details, i.note, i.assignee, i.discipline, i.ncr_no, i.cause].join(" ")).includes(q)));
+      && (!F.late || isLate(i)) && (!q || norm([i.no, i.details, i.remark, i.note, i.assignee, i.discipline, i.ncr_no, i.cause].join(" ")).includes(q)));
   }
   function breakdown() {
     const rows = PROCESS.map(p => { const l = ITEMS.filter(i => i.process === p.id); return { p, n: l.length, left: l.filter(i => i.status !== "done").length, ncr: l.filter(i => i.ncr).length }; }).filter(r => r.n);
@@ -269,7 +269,8 @@
       <td class="c n">${i.no}</td>
       <td class="d"><div class="pl-det">${esc(i.details) || `<span class="sub">(ยังไม่ใส่รายละเอียด)</span>`}</div>
         <div class="pl-meta">${sevBadge(i.severity)}${i.discipline ? `<span class="pl-disc">${esc(i.discipline)}</span>` : ""}${i.ncr ? `<span class="pl-ncr" title="ต้องออก NCR">NCR${i.ncr_no ? " " + esc(i.ncr_no) : ""}</span>` : ""}</div>
-        ${i.note ? `<div class="pl-notep">📝 ${esc(i.note)}</div>` : ""}</td>
+        ${i.remark ? `<div class="pl-remark" title="Remark — แสดงในรายงานลูกค้า">💬 ${esc(i.remark)}</div>` : ""}
+        ${i.note ? `<div class="pl-notep" title="Note ภายใน — ไม่ส่งลูกค้า">🔒 ${esc(i.note)}</div>` : ""}</td>
       <td>${prChip(i.process)}</td>
       <td>${esc(i.assignee) || `<span class="sub">—</span>`}</td>
       <td class="c nowrap ${isLate(i) ? "late" : ""}">${esc(fmt(i.due_date)) || `<span class="sub">—</span>`}${isLate(i) ? `<div class="pl-latec">เลยกำหนด</div>` : ""}</td>
@@ -289,7 +290,7 @@
         <h2>${esc(p.name || "—")}</h2><div class="sub">ลูกค้า <b>${esc(p.customer || "—")}</b>${p.site ? " · " + esc(p.site) : ""}${p.note ? " · " + esc(p.note) : ""}</div></div>
         <div class="pl-actions">
           <button class="pl-btn" data-a="report" title="รายงานพร้อมรูปก่อน / หลัง สำหรับส่งลูกค้า → บันทึกเป็น PDF">🖨 รายงานลูกค้า (PDF)</button>
-          <button class="pl-btn" data-a="xc" title="Excel สำหรับส่งลูกค้า — ไม่มีข้อมูลภายใน (ที่มา / NCR / สาเหตุ)">⬇ Excel ลูกค้า</button>
+          <button class="pl-btn" data-a="xc" title="Excel สำหรับส่งลูกค้า — มี Remark ไม่มีข้อมูลภายใน (ผู้รับผิดชอบ / Note / ที่มา / NCR)">⬇ Excel ลูกค้า</button>
           <button class="pl-btn" data-a="xi" title="Excel ภายใน — มีที่มา หมวดงาน ระดับ NCR และสรุปตามกระบวนการ">⬇ Excel ภายใน + NCR</button>
           <button class="pl-btn" data-a="imp" title="นำเข้ารายการจากไฟล์ Punch list เดิม (.xlsx)">⬆ Import</button>
           <button class="pl-btn" data-a="edit">✎ โปรเจค</button>${isAdm ? `<button class="pl-btn ghost" data-a="del">ลบ</button>` : ""}
@@ -358,7 +359,7 @@
   }
   function blank(x) {
     return { project_id: CUR.id, no: (Math.max(0, ...ITEMS.map(i => i.no)) || 0) + 1, details: "", process: "install", discipline: "", severity: "B", assignee: "", due_date: null,
-      status: "open", finished_date: null, note: "", ncr: false, ncr_no: "", cause: "", photos_before: [], photos_after: [], ...x };
+      status: "open", finished_date: null, remark: "", note: "", ncr: false, ncr_no: "", cause: "", photos_before: [], photos_after: [], ...x };
   }
   function setStatus(it, st) {
     it.status = st;
@@ -389,7 +390,7 @@
         <label>Status${sel("status", STATUS.map(s => [s.id, s.label + " · " + s.th]), it.status)}</label>
         <label>Due date<input class="pl-in" name="due_date" type="date" value="${esc(it.due_date || "")}"></label>
         <label>Finished date<input class="pl-in" name="finished_date" type="date" value="${esc(it.finished_date || "")}"></label>
-        <label class="wide">ผู้รับผิดชอบ (Assign)<input class="pl-in" name="assignee" list="plPeople" value="${esc(it.assignee)}" placeholder="ชื่อคน หรือทีม เช่น Quality Assurance RAK"></label>
+        <label class="wide">ผู้รับผิดชอบ (Assign) 🔒 ภายใน<input class="pl-in" name="assignee" list="plPeople" value="${esc(it.assignee)}" placeholder="ชื่อคน หรือทีม เช่น Quality Assurance RAK"></label>
         <label>ระดับความสำคัญ${sel("severity", SEV.map(s => [s.id, s.th]), it.severity, "— ไม่ระบุ —")}</label>
         <label>หมวดงาน${sel("discipline", DISC.map(d => [d, d]), it.discipline, "— ไม่ระบุ —")}</label>
         <fieldset class="wide4 pl-fs"><legend>ที่มาของปัญหา → ติดตาม NCR</legend><div class="pl-form">
@@ -398,7 +399,8 @@
           <label>NCR no.<input class="pl-in" name="ncr_no" value="${esc(it.ncr_no)}" placeholder="ถ้ามี"></label>
           <label class="wide3">สาเหตุ / Root cause (ภายใน ไม่แสดงในรายงานลูกค้า)<input class="pl-in" name="cause" value="${esc(it.cause)}" placeholder="เช่น แบบไม่ระบุ cover, ใช้ข้อต่อผิดสเปก"></label>
           <div class="wide4 sub" id="ncrHint"></div></div></fieldset>
-        <label class="wide4">หมายเหตุ (Note)<textarea class="pl-in" name="note" rows="2" placeholder="รายละเอียดเพิ่มเติม / สิ่งที่แก้ไขแล้ว — แสดงในรายงานลูกค้า">${esc(it.note)}</textarea></label>
+        <label class="wide4 pl-rmk">💬 Remark — ข้อความสำคัญถึงลูกค้า (แสดงในรายงาน / Excel ลูกค้า)<textarea class="pl-in" name="remark" rows="2" placeholder="เช่น แก้ไขแล้ว รอลูกค้าตรวจรับ / ต้องหยุดไลน์ 2 ชม. วันที่ …">${esc(it.remark || "")}</textarea></label>
+        <label class="wide4">🔒 Note ภายใน (ไม่ส่งลูกค้า)<textarea class="pl-in" name="note" rows="2" placeholder="รายละเอียดการแก้ไข / ข้อมูลสำหรับทีม">${esc(it.note)}</textarea></label>
         <div class="wide2 pl-phbox" data-k="photos_before"></div><div class="wide2 pl-phbox" data-k="photos_after"></div>
       </div></div>
       <div class="pl-dlg-f">${isNew ? "" : `<button class="pl-btn ghost" data-a="rm" style="margin-right:auto">ลบรายการ</button><span class="sub">${it.updated_by ? "แก้ล่าสุด " + esc(it.updated_by) + " · " + esc(fmt(it.updated_at)) : ""}</span>`}
@@ -431,7 +433,7 @@
     drawPh();
     el.querySelector('[data-a="save"]').onclick = async () => {
       if (busy) return toast("รออัปโหลดรูปให้เสร็จก่อน", 1);
-      ["details", "assignee", "severity", "discipline", "process", "ncr_no", "cause", "note", "status"].forEach(n => { it[n] = f(n).value.trim(); });
+      ["details", "assignee", "severity", "discipline", "process", "ncr_no", "cause", "remark", "note", "status"].forEach(n => { it[n] = f(n).value.trim(); });
       it.no = Math.max(1, parseInt(f("no").value, 10) || it.no);
       it.due_date = f("due_date").value || null; it.finished_date = f("finished_date").value || null; it.ncr = f("ncr").checked;
       if (!it.details) return toast("ใส่รายละเอียดรายการ", 1);
@@ -482,12 +484,12 @@
     let X; try { X = await loadXLSX(); } catch (e) { return toast(e.message, 1); }
     const c = count(ITEMS), p = CUR;
     const head = customer
-      ? ["Item", "Details", "Assign", "Due date", "Status", "Finished date", "Note", "Photo before", "Photo after"]
-      : ["Item", "Details", "Assign", "Due date", "Status", "Finished date", "Note", "Process (ที่มา)", "Discipline", "Severity", "NCR", "NCR no.", "Root cause", "Photo before", "Photo after", "Updated by", "Updated"];
+      ? ["Item", "Details", "Due date", "Status", "Finished date", "Remark", "Photo before", "Photo after"]
+      : ["Item", "Details", "Assign", "Due date", "Status", "Finished date", "Remark (customer)", "Note (internal)", "Process (ที่มา)", "Discipline", "Severity", "NCR", "NCR no.", "Root cause", "Photo before", "Photo after", "Updated by", "Updated"];
     const row = i => {
-      const base = [i.no, i.details, i.assignee, fmt(i.due_date), stOf(i.status).label, fmt(i.finished_date), i.note];
       const ph = [(i.photos_before || []).length || "", (i.photos_after || []).length || ""];
-      return customer ? [...base, ...ph] : [...base, (prOf(i.process) || {}).en || "", i.discipline, i.severity, i.ncr ? "Yes" : "", i.ncr_no, i.cause, ...ph, i.updated_by || "", fmt(i.updated_at)];
+      if (customer) return [i.no, i.details, fmt(i.due_date), stOf(i.status).label, fmt(i.finished_date), i.remark || "", ...ph];
+      return [i.no, i.details, i.assignee, fmt(i.due_date), stOf(i.status).label, fmt(i.finished_date), i.remark || "", i.note, (prOf(i.process) || {}).en || "", i.discipline, i.severity, i.ncr ? "Yes" : "", i.ncr_no, i.cause, ...ph, i.updated_by || "", fmt(i.updated_at)];
     };
     const aoa = [
       ["RAK ENGINEERING"], ["ELECTROPLATING PLANT, AIR POLLUTION, CONTROL SYSTEM, WATER AND WASTEWATER TREATMENT PLANT"], ["PUNCH LIST REPORT"], [],
@@ -497,7 +499,7 @@
     ];
     const ws = X.utils.aoa_to_sheet(aoa);
     ws["!merges"] = [0, 1, 2].map(r => ({ s: { r, c: 0 }, e: { r, c: head.length - 1 } })).concat([{ s: { r: 4, c: 1 }, e: { r: 4, c: 4 } }, { s: { r: 5, c: 1 }, e: { r: 5, c: 4 } }]);
-    ws["!cols"] = head.map(h => ({ wch: { Item: 6, Details: 52, Assign: 24, Note: 40, "Root cause": 30, "Process (ที่มา)": 22 }[h] || 13 }));
+    ws["!cols"] = head.map(h => ({ wch: { Item: 6, Details: 52, Assign: 24, Remark: 44, "Remark (customer)": 40, "Note (internal)": 36, "Root cause": 30, "Process (ที่มา)": 22 }[h] || 13 }));
     const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, "Punch list");
     if (!customer) {
       const by = [["Process (ที่มา)", "ที่มา", "Items", "Not done", "NCR"], ...PROCESS.map(x => { const l = ITEMS.filter(i => i.process === x.id); return [x.en, x.th, l.length, l.filter(i => i.status !== "done").length, l.filter(i => i.ncr).length]; }).filter(r => r[2])];
@@ -514,7 +516,7 @@
       <div class="pl-dlg-b"><div class="pl-form">
         <label class="wide4">รายการที่แสดง<select class="pl-in" name="scope"><option value="all">ทุกรายการ (${ITEMS.length})</option><option value="notdone">เฉพาะที่ยังไม่ปิด (${ITEMS.filter(i => i.status !== "done").length})</option><option value="filter">ตามตัวกรองบนหน้าจอ (${filtered().length})</option></select></label>
         <label class="pl-chk wide4"><input type="checkbox" name="photos" checked> แสดงรูปก่อน / หลังแก้</label>
-        <p class="sub wide4">รายงานไม่มีข้อมูลภายใน (ที่มาของปัญหา, NCR, สาเหตุ) · ในหน้าพิมพ์ เลือกปลายทาง “บันทึกเป็น PDF / Save as PDF” แล้วส่งให้ลูกค้า</p></div></div>
+        <p class="sub wide4">รายงานแสดงเฉพาะ Remark — ไม่มีข้อมูลภายใน (ผู้รับผิดชอบ, Note, ที่มาของปัญหา, NCR, สาเหตุ) · ในหน้าพิมพ์ เลือกปลายทาง “บันทึกเป็น PDF / Save as PDF” แล้วส่งให้ลูกค้า</p></div></div>
       <div class="pl-dlg-f"><button class="pl-btn" data-close>ยกเลิก</button><button class="pl-btn primary" data-a="go">🖨 เปิดหน้าพิมพ์</button></div>`, 620);
     dlg.el.querySelector('[data-a="go"]').onclick = () => {
       const v = n => dlg.el.querySelector(`[name="${n}"]`);
@@ -528,8 +530,8 @@
     const html = `<div class="rp-h"><div><div class="rp-co">RAK ENGINEERING</div><div class="rp-sub">ELECTROPLATING PLANT, AIR POLLUTION, CONTROL SYSTEM, WATER AND WASTEWATER TREATMENT PLANT</div></div><div class="rp-t">PUNCH LIST REPORT</div></div>
       <table class="rp-info"><tr><th>Project Name</th><td>${esc(p.name)}</td><th>JOB No.</th><td>${esc(p.job_no)}</td></tr><tr><th>Customer</th><td>${esc(p.customer)}${p.site ? " · " + esc(p.site) : ""}</td><th>Report date</th><td>${esc(fmt(todayIso()))}</td></tr></table>
       <div class="rp-sum"><span>Item <b>${c.total}</b></span><span>Open <b>${c.open}</b></span><span>WIP <b>${c.wip}</b></span><span>Check <b>${c.check}</b></span><span>Done <b>${c.done}</b></span><span>Closed <b>${c.pct}%</b></span></div>
-      <table class="rp-tbl"><thead><tr><th>Item</th><th>Details</th><th>Assign</th><th>Due date</th><th>Status</th><th>Finished</th>${photos ? "<th>Before</th><th>After</th>" : ""}</tr></thead><tbody>
-      ${list.map(i => `<tr><td class="c">${i.no}</td><td>${esc(i.details)}${i.note ? `<div class="rp-note">${esc(i.note)}</div>` : ""}</td><td>${esc(i.assignee)}</td><td class="c">${esc(fmt(i.due_date))}</td><td class="c"><b class="st-${esc(i.status)}">${stOf(i.status).label}</b></td><td class="c">${esc(fmt(i.finished_date))}</td>${photos ? `<td class="ph">${imgs(i.photos_before)}</td><td class="ph">${imgs(i.photos_after)}</td>` : ""}</tr>`).join("")}</tbody></table>
+      <table class="rp-tbl"><thead><tr><th>Item</th><th>Details</th><th>Due date</th><th>Status</th><th>Finished</th><th>Remark</th>${photos ? "<th>Before</th><th>After</th>" : ""}</tr></thead><tbody>
+      ${list.map(i => `<tr><td class="c">${i.no}</td><td>${esc(i.details)}</td><td class="c">${esc(fmt(i.due_date))}</td><td class="c"><b class="st-${esc(i.status)}">${stOf(i.status).label}</b></td><td class="c">${esc(fmt(i.finished_date))}</td><td class="rp-rmk">${esc(i.remark || "")}</td>${photos ? `<td class="ph">${imgs(i.photos_before)}</td><td class="ph">${imgs(i.photos_after)}</td>` : ""}</tr>`).join("")}</tbody></table>
       <div class="rp-sign"><div>Prepared by (RAK)<i></i></div><div>Checked by (Customer)<i></i></div></div>`;
     let box = document.getElementById("plPrint");
     if (!box) { box = document.createElement("div"); box.id = "plPrint"; document.body.appendChild(box); }
@@ -561,7 +563,7 @@
     const H = aoa[h].map(low), col = re => H.findIndex(v => re.test(v));
     const cItem = col(/^item$/), cDet = col(/^details?$|รายละเอียด/);
     let cWho = col(/assign|ผู้รับผิดชอบ|responsible|owner/); if (cWho < 0 && !H[cDet + 1]) cWho = cDet + 1;
-    const cDue = col(/due/), cSt = col(/^status/), cFin = col(/finish|เสร็จ/), cNote = col(/^note|remark|หมายเหตุ/), cPr = col(/process|ที่มา/), cSev = col(/severity|ระดับ/), cDisc = col(/discipline|หมวด/);
+    const cDue = col(/due/), cSt = col(/^status/), cFin = col(/finish|เสร็จ/), cNote = col(/^note|หมายเหตุ/), cRmk = col(/^remark/), cPr = col(/process|ที่มา/), cSev = col(/severity|ระดับ/), cDisc = col(/discipline|หมวด/);
     const cNcrNo = col(/ncr no/), cCause = col(/root cause|สาเหตุ/);
     const out = [];
     for (const r of aoa.slice(h + 1)) {
@@ -573,7 +575,8 @@
       if (cNote < 0) for (let k = Math.max(cFin, cSt, cDue) + 2; k < r.length; k++) { const t = String(r[k] ?? "").trim(); if (t && isNaN(+t)) { note = t; break; } }
       const st = low(r[cSt]); const status = /done|close|ปิด|เสร็จ/.test(st) ? "done" : /wip|progress|กำลัง/.test(st) ? "wip" : /check|ตรวจ/.test(st) ? "check" : "open";
       const prTxt = cPr >= 0 ? low(r[cPr]) : "", pr = PROCESS.find(x => prTxt && (x.en.toLowerCase() === prTxt || x.th === prTxt || x.id === prTxt));
-      out.push(blank({ no, details: det, assignee: cWho >= 0 ? String(r[cWho] ?? "").trim() : "", due_date: cDue >= 0 ? parseDate(r[cDue], X) : null, status,
+      const remark = cRmk >= 0 ? String(r[cRmk] ?? "").trim() : "";
+      out.push(blank({ no, details: det, remark, assignee: cWho >= 0 ? String(r[cWho] ?? "").trim() : "", due_date: cDue >= 0 ? parseDate(r[cDue], X) : null, status,
         finished_date: cFin >= 0 ? parseDate(r[cFin], X) : null, note, process: pr ? pr.id : "", severity: cSev >= 0 && /^[ABC]$/i.test(String(r[cSev] ?? "").trim()) ? String(r[cSev]).trim().toUpperCase() : "",
         discipline: cDisc >= 0 ? String(r[cDisc] ?? "").trim() : "", ncr_no: cNcrNo >= 0 ? String(r[cNcrNo] ?? "").trim() : "", cause: cCause >= 0 ? String(r[cCause] ?? "").trim() : "" }));
       const last = out[out.length - 1]; last.ncr = !!last.ncr_no;
@@ -651,7 +654,7 @@ textarea.pl-in{resize:vertical;line-height:1.5}
 .pl-tbl td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top;font-size:13.5px}.pl-tbl .c{text-align:center}.pl-tbl td.n{font-weight:700;color:var(--muted)}.nowrap{white-space:nowrap}
 .pl-tbl tbody tr{cursor:pointer}.pl-tbl tbody tr:hover td{background:#fff8f8}.pl-tbl tr.is-done td{color:#7b828d}.pl-tbl tr.is-done .pl-det{text-decoration:line-through;text-decoration-color:#b9c0c9}
 .pl-tbl td.late{color:#c70404;font-weight:600}.pl-latec{font-size:10.5px;font-weight:600}
-.pl-det{line-height:1.45;white-space:pre-wrap}.pl-meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}.pl-notep{font-size:12px;color:var(--muted);margin-top:4px;white-space:pre-wrap;line-height:1.4}
+.pl-det{line-height:1.45;white-space:pre-wrap}.pl-meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}.pl-remark{font-size:12px;color:#1d5fa8;background:#eef5ff;border-radius:6px;padding:3px 7px;margin-top:4px;white-space:pre-wrap;line-height:1.4}.pl-rmk textarea{border-color:#b6d4f5;background:#f7fbff}.pl-notep{font-size:12px;color:var(--muted);margin-top:4px;white-space:pre-wrap;line-height:1.4}
 .pl-sev{font-size:11px;font-weight:700;border-radius:5px;padding:0 6px}.sev-A{background:#c70404;color:#fff}.sev-B{background:#fff1d6;color:#8a5a00}.sev-C{background:#eef1f5;color:#5a6472}
 .pl-disc{font-size:11px;background:var(--bg);color:var(--muted);border-radius:5px;padding:0 6px}.pl-ncr{font-size:11px;font-weight:700;background:#2b2f36;color:#fff;border-radius:5px;padding:0 6px}
 .pl-pr{font-size:12px;background:#f1f3f7;border-radius:6px;padding:1px 7px;white-space:nowrap}
@@ -683,7 +686,7 @@ textarea.pl-in{resize:vertical;line-height:1.5}
   .rp-info{width:100%;border-collapse:collapse;margin-bottom:6px}.rp-info th{text-align:left;width:110px;color:#555;font-weight:600;padding:2px 6px}.rp-info td{padding:2px 6px;font-weight:600}
   .rp-sum{display:flex;gap:18px;border:1px solid #ccc;border-radius:6px;padding:5px 10px;margin-bottom:8px}
   .rp-tbl{width:100%;border-collapse:collapse}.rp-tbl th{background:#c70404;color:#fff;padding:5px;font-size:10.5px;text-align:left}.rp-tbl td{border:1px solid #ccc;padding:5px;vertical-align:top}.rp-tbl tr{break-inside:avoid}.rp-tbl .c{text-align:center;white-space:nowrap}
-  .rp-tbl td.ph{width:150px}.rp-tbl td.ph img{width:70px;height:70px;object-fit:cover;margin:1px;border:1px solid #ddd}.rp-tbl .none{color:#aaa}.rp-note{color:#555;font-size:10px;margin-top:2px;white-space:pre-wrap}
+  .rp-tbl td.ph{width:150px}.rp-tbl td.ph img{width:70px;height:70px;object-fit:cover;margin:1px;border:1px solid #ddd}.rp-tbl .none{color:#aaa}.rp-rmk{white-space:pre-wrap;font-size:10.5px;width:200px}
   .rp-tbl .st-open{color:#b00000;background:none}.rp-tbl .st-wip{color:#8a5a00;background:none}.rp-tbl .st-check{color:#1d5fa8;background:none}.rp-tbl .st-done{color:#147052;background:none}
   .rp-sign{display:flex;gap:60px;margin-top:28px;break-inside:avoid}.rp-sign div{flex:1}.rp-sign i{display:block;border-bottom:1px solid #333;height:36px}}
 @media (max-width:820px){.pl-grid2{grid-template-columns:1fr}.pl-form{grid-template-columns:1fr 1fr}.pl-form .wide3{grid-column:1/-1}.pl-brow{grid-template-columns:110px 1fr 110px}.pl-actions{justify-content:flex-start}

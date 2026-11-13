@@ -32,7 +32,8 @@ create table if not exists public.punch_list_items (
   due_date       date,
   status         text not null default 'open' check (status in ('open', 'wip', 'check', 'done')),
   finished_date  date,
-  note           text not null default '',             -- shown in the customer report
+  remark         text not null default '',             -- message to the customer (customer report / Excel)
+  note           text not null default '',             -- internal note (not sent to the customer)
   ncr            boolean not null default false,       -- needs an NCR (internal)
   ncr_no         text not null default '',
   cause          text not null default '',             -- root cause (internal, not in the customer report)
