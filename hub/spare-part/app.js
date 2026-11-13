@@ -37,6 +37,15 @@
       const r = await fetch("/api/spare-part/projects", { cache: "no-store" });
       if (!r.ok) throw 0;
       PROJECTS = await r.json(); MODE = "server";
+      // Projects made while the database was not connected live only in this browser: upload them once, then clear them.
+      const onServer = x => PROJECTS.some(p => p.id === x.id || (p.jo && p.jo === x.jo));
+      const all = lsRead(), local = all.filter(x => x && x.id && !onServer(x));
+      const left = all.filter(x => x && x.id && onServer(x)); // same Job No. already on the server: keep the browser copy, don't overwrite
+      for (const x of local) {
+        const u = await fetch("/api/spare-part/projects", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(x) }).catch(() => null);
+        if (u && u.ok) PROJECTS.unshift(x); else left.push(x);
+      }
+      if (local.length) lsWrite(left);
     } catch { PROJECTS = lsRead(); MODE = "local"; }
   }
   async function save(p) {
