@@ -238,6 +238,7 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:#f1f3
   </div>
 </div>
 <script src="/spare-part/app.js"></script>
+<script src="/punch-list/app.js"></script>
 <script src="/site-expense/app.js"></script>
 <script src="/sp-request/app.js"></script>
 <script src="/service-plan/app.js"></script>
@@ -255,8 +256,8 @@ const MODULES = [
      plan:["Dashboard: Budget vs Actual ค้นหาด้วย Project no.","Estimate จาก Scope of Work → อนุมัติ → เปิด Job → Budgetary","Actual record: ทีมหน้างานบันทึกค่าใช้จ่ายรายวัน"]},
   {id:"spare-part",  icon:"i-gear",    live:true, name:"Spare Part",   th:"รายการอะไหล่แนะนำ",        desc:"รายการอะไหล่แนะนำให้ลูกค้า แยกตามระบบ อ้างอิง P&ID และ Aux list",
      plan:["สร้างรายการอะไหล่จาก P&ID + Aux list + BOM","จุดใช้งานตาม P&ID และข้อมูลผู้ผลิต","Export Excel ตามแบบฟอร์มลูกค้า"]},
-  {id:"punch-list",  icon:"i-punch",   name:"Punch List",   th:"ติดตามงานค้างก่อนส่งมอบ",    desc:"บันทึกและติดตาม punch list ระหว่างติดตั้ง จนถึง SAT และปิดงาน",
-     plan:["บันทึกรายการพร้อมรูปถ่ายและผู้รับผิดชอบ","สถานะ Open / In progress / Closed","รายงานให้ลูกค้าก่อน SAT","สรุปจำนวนงานค้างรายโปรเจค"]},
+  {id:"punch-list",  icon:"i-punch",   beta:true, name:"Punch List",   th:"ติดตามงานค้างก่อนส่งมอบ",    desc:"Punch list รายโปรเจค (Master project on hand) · เพิ่มรายการทีละบรรทัด ผู้รับผิดชอบ Due date สถานะ รูปก่อน / หลัง · ที่มาของปัญหาเพื่อติดตาม NCR · Export ส่งลูกค้า",
+     plan:["บันทึกรายการพร้อมรูปถ่ายก่อน / หลัง และผู้รับผิดชอบ","สถานะ Open / WIP / Check / Done","ที่มาของปัญหา (ออกแบบ ผลิต ติดตั้ง …) → ติดตาม NCR","Export Excel และรายงาน PDF ส่งลูกค้า"]},
   {id:"service-plan",icon:"i-plan",    live:true, name:"Service Plan", th:"แผนงานบริการลูกค้า",         desc:"ปฏิทินงานบริการ IS / SO / IN / WR จากใบร้องขอคน (Google Sheet) · มุมมองรายวัน สัปดาห์ เดือน ปี",
      plan:["ปฏิทินรายวัน / สัปดาห์ / เดือน / ปี จาก Google Sheet ใบขอคน","กดดูรายละเอียดงาน + ทะเบียนรถ","แจ้งเตือนก่อนถึงกำหนดเข้าบริการ","บันทึกผลการบริการ"]},
   {id:"manpower",    icon:"i-team",    live:true, name:"Manpower",     th:"วางแผนกำลังคน",              desc:"ภาพรวม Manpower / Man-day summary · Planning Board คน × วัน ใครอยู่งานไหน ลา หรือว่าง · Milestone โปรเจกต์",
@@ -365,14 +366,16 @@ function render(){
   document.title = (id === "home" ? "SSM Work" : m.name + " · SSM Work") + " · RAK Engineering";
   const sp = id === "spare-part" && ME !== null && allowed(id) && window.SparePart;
   const se = id === "site-expense" && ME !== null && allowed(id) && !isSoon(id) && window.SiteExpense;
+  const pu = id === "punch-list" && ME !== null && allowed(id) && !isSoon(id) && window.PunchList;
   const pl = id === "service-plan" && ME !== null && allowed(id) && window.ServicePlan;
   const mp = id === "manpower" && ME !== null && allowed(id) && window.Manpower;
   const mn = id === "manual" && ME !== null && window.Manual;
-  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : mn ? hero(m) + `<div id="mnRoot"></div>` : sp ? (subRoute() ? "" : hero(m)) + `<div id="spRoot"></div>` : se ? (subRoute() ? "" : hero(m)) + `<div id="seRoot"></div>` : pl ? `<div id="plRoot" class="spc-root"></div>` : mp ? `<div id="mpRoot" class="mp-root"></div>` : allowed(id) ? pageModule(m) : pageDenied(m))
+  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : mn ? hero(m) + `<div id="mnRoot"></div>` : sp ? (subRoute() ? "" : hero(m)) + `<div id="spRoot"></div>` : se ? (subRoute() ? "" : hero(m)) + `<div id="seRoot"></div>` : pu ? (subRoute() ? "" : hero(m)) + `<div id="puRoot"></div>` : pl ? `<div id="plRoot" class="spc-root"></div>` : mp ? `<div id="mpRoot" class="mp-root"></div>` : allowed(id) ? pageModule(m) : pageDenied(m))
     + `<div class="foot"><span>RAK Engineering Co., Ltd. · Site &amp; Service Management</span><span>${REG.updated ? "อัปเดตรายการ " + esc(REG.updated) : ""}</span></div>`;
   renderNav();
   if (sp) window.SparePart.mount(document.getElementById("spRoot"), subRoute());
   if (se) window.SiteExpense.mount(document.getElementById("seRoot"), subRoute());
+  if (pu) window.PunchList.mount(document.getElementById("puRoot"), subRoute());
   if (pl) window.ServicePlan.mount(document.getElementById("plRoot"), subRoute());
   if (mp) window.Manpower.mount(document.getElementById("mpRoot"), subRoute());
   if (mn) window.Manual.mount(document.getElementById("mnRoot"), subRoute());
