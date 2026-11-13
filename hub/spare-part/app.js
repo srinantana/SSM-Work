@@ -1,7 +1,7 @@
 /* SSM Work · Spare Part module.
    Routes (inside the hub): #spare-part          → project list + "Create new project" button + search bar
-                            #spare-part/<id>     → one spare part project (editable, export CSV)
-   Data:  /spare-part/data/sources.json  – jobs (Job Order header + scope, P&ID refs, aux equipment from Project Pipeline)
+                            #spare-part/sp-<JO> → one spare part project in the "Suggested spares" format (import / export .xlsx)
+   Data:  /api/spare-part/jobs – job list from RAK_Master_Project_on_hand; /spare-part/data/sources.json – Job Order / P&ID / aux snapshot added by Job No.
           /api/spare-part/projects       – saved spare part projects (Supabase via middleware);
                                            falls back to this browser's storage if the table is not set up yet. */
 (function () {
@@ -15,8 +15,23 @@
   /* ---------- storage ---------- */
   const lsRead = () => { try { return JSON.parse(localStorage.getItem(LS) || "[]"); } catch { return []; } };
   const lsWrite = list => { try { localStorage.setItem(LS, JSON.stringify(list)); } catch {} };
+  /* Jobs: RAK_Master_Project_on_hand (via /api/spare-part/jobs) is the job list; Job Order header, P&ID and aux equipment
+     from sources.json (snapshot of Drive + Project Pipeline) are added when the same Job No. is there. */
+  const jobKey = v => String(v ?? "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+  async function loadJobs() {
+    const snap = await fetch("/spare-part/data/sources.json", { cache: "no-store" }).then(r => r.ok ? r.json() : { jobs: [] }).catch(() => ({ jobs: [] }));
+    const master = await fetch("/api/spare-part/jobs", { cache: "no-store" }).then(r => r.ok ? r.json() : null).catch(() => null);
+    if (!master || !Array.isArray(master.jobs)) return { ...snap, from: "snapshot" };
+    const byJo = new Map((snap.jobs || []).map(j => [jobKey(j.jo), j]));
+    const jobs = master.jobs.map(m => {
+      const d = byJo.get(jobKey(m.job_no)) || {};
+      return { scope: [], aux: [], pid: [], pidTags: [], layout: [], ...d, jo: m.job_no, customerShort: m.customer || d.customerShort || "",
+        customer: m.customer_full || d.customer || m.customer || "", name: m.job_full || m.job_name || d.name || "", shortName: m.job_name || "", detail: !!d.jo };
+    }).sort((a, b) => String(b.jo).localeCompare(String(a.jo), "en", { numeric: true }));
+    return { ...snap, jobs, from: master.table };
+  }
   async function loadAll() {
-    if (!SRC) SRC = await fetch("/spare-part/data/sources.json", { cache: "no-store" }).then(r => r.ok ? r.json() : { jobs: [] }).catch(() => ({ jobs: [] }));
+    if (!SRC) SRC = await loadJobs();
     if (PROJECTS) return;
     try {
       const r = await fetch("/api/spare-part/projects", { cache: "no-store" });
@@ -46,46 +61,18 @@
   const slugOf = p => "sp-" + (String(p.jo || "").trim().replace(/[^\w-]+/g, "-") || p.id);
   const uid = () => "sp-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
-  /* ---------- spare part suggestions (rules per equipment category) ---------- */
-  const R = (part, per, unit, prio, remark = "") => ({ part, per, unit, prio, remark });
-  function rulesFor(eq) {
-    const n = (eq.name || "").toLowerCase(), c = (eq.category || "").toLowerCase();
-    if (/peristaltic/.test(n)) return [R("Pump tubing (Tygon) – ตามขนาดหัวปั๊ม", 2, "roll", "Consumable", "สายสึกหรอ เปลี่ยนตามชั่วโมงใช้งาน"), R("Pump head (same model)", .25, "pc", "Recommended")];
-    if (/tygon|tubing/.test(n)) return [R(eq.name, 1, eq.unit || "roll", "Consumable")];
-    if (/grundfos|cm 3|crne/.test(n)) return [R("Shaft seal kit", .5, "set", "Critical"), R("O-ring / gasket kit", .5, "set", "Recommended")];
-    if (c.includes("pump")) return [R("Impeller", .5, "pc", "Recommended"), R("Bushing / bearing set", .5, "set", "Critical"), R("O-ring / seal kit (Viton)", 1, "set", "Consumable")];
-    if (c.includes("filtration")) return [R("Filter cartridge 20\" (ไมครอนตามกระบวนการ)", 6, "pc", "Consumable", "เผื่อเปลี่ยน ~6 ครั้ง/ปี/ชุด ปรับตามหน้างาน"), R("Chamber lid O-ring (Viton)", 1, "pc", "Consumable")];
-    if (c.includes("heater")) return [R("Spare heater (same model)", .5, "pc", "Critical"), R("Over-temperature (OTP) sensor", .5, "pc", "Recommended")];
-    if (c.includes("heating & cooling")) return [R("Connection gasket / fitting set", 1, "set", "Recommended")];
-    if (c.includes("rectifier")) return [R("Cooling fan", 1, "pc", "Recommended"), R("Fuse / control board set (ตามคำแนะนำผู้ผลิต)", 1, "set", "Critical", "ขอรายการจาก PE ตาม serial no.")];
-    if (c.includes("agitator")) return [R("Brushless motor + driver (same model)", 1, "set", "Critical")];
-    if (c.includes("fan")) return [R("Motor bearing set", 1, "set", "Recommended"), R("Flexible connector / shaft seal", 1, "pc", "Recommended")];
-    return [R("Spare (ระบุ)", 1, eq.unit || "pc", "Recommended")];
+  /* ---------- starting lines from the Project Pipeline aux list (category per equipment type) ---------- */
+  function auxCat(eq) {
+    const c = (eq.category || "").toLowerCase(), n = (eq.name || "").toLowerCase();
+    if (c.includes("pump") || /pump/.test(n)) return "Pump";
+    if (c.includes("filtration")) return "Filter";
+    if (c.includes("heat") || c.includes("heater")) return "Heater & Heat Exchanger";
+    if (c.includes("rectifier")) return "Electrical Part";
+    if (c.includes("instrument")) return "Instrument & Sensor";
+    return "Mechanical Part";
   }
-  const PID_COMMON = [
-    R("Level float switch (PVDF)", 1, "pc", "Critical", "LL/L/H/HH ตาม P&ID"),
-    R("Temperature sensor PT-100 (Teflon coated)", 1, "pc", "Critical", "TE ตาม P&ID"),
-    R("Air solenoid valve 'Festo' 2x3/2", 1, "pc", "Recommended", "VCA / jig clamping"),
-    R("PVDF union ball valve d32", 2, "pc", "Recommended"),
-  ];
-  // Specification / Material without the model text already shown under Manufacturer / Model
-  const specOf = eq => (eq.spec || "").split(" · ").filter(seg => { const k = norm(seg).slice(0, 6); return !(k && norm(eq.model).includes(k)) && !/^(series|power station|ptfe immersion coil$)/i.test(seg); }).join(" · ");
-  function suggest(job, eqs) {
-    const lines = [];
-    const weeks = d => d ? Math.ceil(d / 7) : "";
-    eqs.forEach(eq => rulesFor(eq).forEach(r => {
-      const same = /same model|pump head/i.test(r.part);
-      lines.push({
-        id: uid(), zone: eq.zone || eq.location || eq.system || "Zone A", equip: eq.name, tag: eq.tag || "", part: r.part, partNo: same ? (eq.model || "") : "",
-        maker: [eq.maker, eq.model].filter(Boolean).join(" / "), spec: specOf(eq), installed: eq.qty || "",
-        qty: Math.max(1, Math.ceil((eq.qty || 1) * r.per)), unit: r.unit, prio: r.prio, leadWeeks: weeks(eq.leadDays), unitPrice: "", source: "Aux list", remark: r.remark,
-      });
-    }));
-    if ((job.pid || []).length) PID_COMMON.forEach(r => lines.push({ id: uid(), zone: "Instrument & Valve (ตาม P&ID)", equip: "Instrument / valve", tag: "", part: r.part, partNo: "", maker: "", spec: "", installed: "",
-      qty: r.per, unit: r.unit, prio: r.prio, leadWeeks: "", unitPrice: "", source: "P&ID", remark: r.remark }));
-    const order = [...new Set(lines.map(l => l.zone))].sort((x, y) => (x.startsWith("Instrument") ? 1 : 0) - (y.startsWith("Instrument") ? 1 : 0) || x.localeCompare(y));
-    return lines.sort((x, y) => order.indexOf(x.zone) - order.indexOf(y.zone));
-  }
+  const auxLines = eqs => eqs.map(eq => ({ id: uid(), prio: "Recommended", cat: auxCat(eq), code: "", desc: [eq.name, eq.spec].filter(Boolean).join(" · "),
+    pqty: eq.qty || "", unit: eq.unit || "pc", ovr: "", tech: [eq.tag && "Tag: " + eq.tag, eq.zone].filter(Boolean).join(" · "), reason: "", source: "Aux list" }));
 
   /* ---------- views ---------- */
   const STATUS = { draft: ["Draft", "soon"], review: ["Review", "soon"], issued: ["Issued", "live"], inactive: ["Inactive", "off"] };
@@ -130,22 +117,22 @@
     const used = new Set(PROJECTS.map(p => p.jo));
     let body = "", foot = "";
     if (WIZ.step === 1) {
-      const jobs = SRC.jobs.filter(j => has([j.jo, j.customer, j.customerShort, j.name, j.pmName].join(" "), WIZ.q));
-      body = `<p class="sp-sub">เลือก Job ที่จะทำรายการอะไหล่ (Job Order ตั้งแต่ ต.ค. 2026)</p>
+      const jobs = SRC.jobs.filter(j => has([j.jo, j.customer, j.customerShort, j.name, j.shortName, j.pmName].join(" "), WIZ.q));
+      body = `<p class="sp-sub">เลือก Job ที่จะทำรายการอะไหล่ · ${SRC.from === "snapshot" ? "จากข้อมูล Job Order ตั้งแต่ ต.ค. 2026" : "จาก RAK_Master_Project_on_hand (" + SRC.jobs.length + " งาน)"}</p>
         <input class="sp-in" id="wq" placeholder="ค้นหา Job No. / ลูกค้า / ชื่องาน" value="${esc(WIZ.q)}">
         <div class="sp-jobs">${jobs.map(j => `<button class="sp-job" data-jo="${esc(j.jo)}" ${used.has(j.jo) ? "disabled" : ""}>
           <span class="jo">${esc(j.jo)}</span><b>${esc(j.name)}</b><span class="sub">${esc(j.customerShort)} · ${esc(j.customer)}</span>
-          <span class="sp-tags"><i>${j.aux.length} equipment</i><i>${j.pid.length ? j.pid.length + " P&ID" : "ไม่มี P&ID"}</i>${used.has(j.jo) ? "<i>มีโปรเจคแล้ว</i>" : ""}</span></button>`).join("") || `<div class="empty">ไม่พบ job</div>`}</div>`;
+          <span class="sp-tags">${j.aux.length ? `<i>${j.aux.length} equipment</i>` : ""}${j.pid.length ? `<i>${j.pid.length} P&ID</i>` : ""}${used.has(j.jo) ? "<i>มีโปรเจคแล้ว</i>" : ""}</span></button>`).join("") || `<div class="empty">ไม่พบ job</div>`}</div>`;
     } else if (WIZ.step === 2) {
       const h = WIZ.head, j = WIZ.job;
       const f = (k, label, wide) => `<label class="${wide ? "wide" : ""}"><span>${label}</span><input data-h="${k}" value="${esc(h[k])}"></label>`;
-      body = `<p class="sp-sub">ข้อมูลเบื้องต้นจาก <a href="${esc(j.joFile)}" target="_blank" rel="noopener">Job Order ${esc(j.jo)}</a> แก้ไขได้</p>
+      body = `<p class="sp-sub">ข้อมูลเบื้องต้นจาก RAK_Master_Project_on_hand${j.joFile ? ` และ <a href="${esc(j.joFile)}" target="_blank" rel="noopener">Job Order ${esc(j.jo)}</a>` : ""} แก้ไขได้</p>
         <div class="sp-form">${f("jo", "Job No.")}${f("customerShort", "Customer (ย่อ)")}${f("customer", "Customer", 1)}${f("name", "Project name", 1)}
-        ${f("site", "สถานที่")}${f("contact", "ผู้ติดต่อลูกค้า")}${f("tel", "โทร")}${f("qo", "QO No.")}${f("po", "PO No.")}${f("delivery", "กำหนดส่งมอบ")}${f("pm", "หัวหน้าโครงการ")}${f("coordinator", "ผู้ประสานงาน")}</div>
-        <h4 class="sp-h">ขอบเขตงานตาม Job Order</h4><ul class="sp-scope">${j.scope.map(s => `<li>${esc(s)}</li>`).join("")}</ul>`;
+        ${f("site", "สถานที่")}${f("contact", "ผู้ติดต่อลูกค้า")}${f("tel", "โทร")}${f("qo", "QO No.")}${f("po", "PO No.")}${f("delivery", "กำหนดส่งมอบ")}${f("pm", "หัวหน้าโครงการ")}${f("coordinator", "ผู้ประสานงาน")}${f("systems", "Systems (จำนวนชุด)")}${f("rate", "Maximum rate (%)")}</div>
+        ${j.scope.length ? `<h4 class="sp-h">ขอบเขตงานตาม Job Order</h4><ul class="sp-scope">${j.scope.map(s => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}`;
     } else {
       const j = WIZ.job;
-      body = `<p class="sp-sub">Aux / Equipment list จาก Project Pipeline (JO ${esc(j.jo)}) · เลือกอุปกรณ์ที่จะทำอะไหล่แนะนำ</p>
+      body = `<p class="sp-sub">Aux / Equipment list จาก Project Pipeline (JO ${esc(j.jo)}) · เลือกอุปกรณ์ที่จะเป็นรายการตั้งต้น (หรือไม่เลือกเลย แล้ว Import ไฟล์ Suggested spares ในหน้าโปรเจค)</p>
         <div class="tbl"><table><thead><tr><th></th><th>Equipment</th><th>Tag (P&ID)</th><th>Zone</th><th>Qty</th></tr></thead><tbody>${j.aux.map((e, i) => `
           <tr><td><input type="checkbox" data-eq="${i}" ${WIZ.eqSel[i] ? "checked" : ""}></td><td><b>${esc(e.name)}</b><div class="sub">${esc(e.spec)}</div>${e.specStatus !== "approved" ? `<span class="badge soon">spec ${esc(e.specStatus)}</span>` : ""}</td>
           <td>${esc(e.tag || "–")}</td><td>${esc(e.zone || e.system || "")}<div class="sub">${esc([e.system, e.location].filter(Boolean).join(" · "))}</div></td><td>${e.qty} ${esc(e.unit)}</td></tr>`).join("")}</tbody></table></div>
@@ -153,7 +140,7 @@
           : `<p class="sub">ยังไม่พบ P&ID ในโฟลเดอร์ job${(j.layout || []).length ? ` · มี <a href="${esc(j.layout[0].url)}" target="_blank" rel="noopener">${esc(j.layout[0].title)}</a>` : ""}</p>`}`;
     }
     if (WIZ.step > 1) foot += `<button class="sp-btn" data-w="back">← ย้อนกลับ</button>`;
-    if (WIZ.step === 2) foot += `<button class="sp-btn primary" data-w="next">ถัดไป: Equipment →</button>`;
+    if (WIZ.step === 2) foot += WIZ.job.aux.length || WIZ.job.pid.length ? `<button class="sp-btn primary" data-w="next">ถัดไป: Equipment →</button>` : `<button class="sp-btn primary" data-w="create">สร้าง Draft</button>`;
     if (WIZ.step === 3) foot += `<button class="sp-btn primary" data-w="create">สร้าง Draft</button>`;
     m.innerHTML = `<div class="sp-dlg" role="dialog" aria-modal="true" aria-label="Create new project">
       <div class="sp-dlg-h"><b>Create new project</b><span class="sp-steps">${["เลือก Job", "ข้อมูลโปรเจค", "Equipment & P&ID"].map((s, i) => `<i class="${WIZ.step === i + 1 ? "on" : ""}">${i + 1}. ${s}</i>`).join("")}</span><button class="sp-x" data-w="close" aria-label="ปิด">✕</button></div>
@@ -164,7 +151,7 @@
     m.querySelectorAll("[data-jo]").forEach(b => b.onclick = () => {
       const j = SRC.jobs.find(x => x.jo === b.dataset.jo);
       WIZ.job = j; WIZ.step = 2; WIZ.eqSel = j.aux.map(() => true);
-      WIZ.head = { jo: j.jo, customer: j.customer, customerShort: j.customerShort, name: j.name, site: j.site, contact: j.contact, tel: j.tel, qo: j.qo, po: j.po, delivery: j.delivery, pm: j.pm, coordinator: j.coordinator };
+      WIZ.head = { jo: j.jo, customer: j.customer, customerShort: j.customerShort, name: j.name, site: j.site, contact: j.contact, tel: j.tel, qo: j.qo, po: j.po, delivery: j.delivery, pm: j.pm, coordinator: j.coordinator, systems: 1, rate: 15 };
       drawWizard();
     });
     m.querySelectorAll("[data-h]").forEach(i => i.oninput = () => { WIZ.head[i.dataset.h] = i.value; });
@@ -176,101 +163,138 @@
     if (a === "next") { WIZ.step = 3; return drawWizard(); }
     if (a === "create") {
       const j = WIZ.job, eqs = j.aux.filter((_, i) => WIZ.eqSel[i]);
-      const p = { id: uid(), ...WIZ.head, ij: j.ij, status: "draft", created: new Date().toISOString(), createdBy: (window.SSM_ME && window.SSM_ME.email) || "",
+      const { systems: _s, rate: _r, ...head } = WIZ.head;
+      const p = { id: uid(), ...head, ij: j.ij, status: "draft", created: new Date().toISOString(), createdBy: (window.SSM_ME && window.SSM_ME.email) || "",
         refs: { folder: j.folder, joFile: j.joFile, pid: j.pid, layout: j.layout || [], pipeline: SRC.sources?.pipeline },
-        equipment: eqs, lines: suggest(j, eqs) };
+        equipment: eqs, lines: auxLines(eqs), systems: Math.max(1, num(_s) || 1), maxRate: (num(_r) || 15) / 100 };
       const saved = await save(p); closeWizard(); location.hash = "#spare-part/" + encodeURIComponent(slugOf(saved));
     }
   }
 
-  /* --- project detail --- */
-  const PRIOS = ["Critical", "Recommended", "Consumable"];
-  //              No. Equip/Tag Part PartNo Maker Spec Inst Rec Unit Prio Lead Price Amount Remarks (actions)
-  const COL_W  = [46, 230, 210, 150, 180, 220, 76, 96, 64, 152, 76, 116, 124, 210, 74];
-  const COL_AL = ["c", "", "", "", "", "", "c", "c", "c", "c", "c", "r", "r", ""];
+  /* --- project detail: "Suggested spare part list" format (EP500L Rev01, 13 Nov 2026) ---
+     Qty / system = Project qty ÷ Systems; Spare / system = MAX(1, ROUNDDOWN(Qty / system × Maximum rate)) (0 when Qty / system = 0);
+     Spare / all systems = Spare / system × Systems; a value typed in Spare / system overrides the formula for that row. */
+  const PRIOS = ["Critical", "Recommended", "Optional"];
+  const CATS = ["Pump", "Filter", "Instrument & Sensor", "Electrical Part", "Pneumatic Part", "Valve", "Mechanical Part", "Heater & Heat Exchanger", "Seal & O-Ring", "Nozzle & Cleaning Accessory"];
   const prioCls = v => "p-" + String(v || "recommended").toLowerCase();
-  const COLS = ["No.", "Equipment / Tag", "Part description", "Part No. / Drawing Ref.", "Manufacturer / Model", "Specification / Material", "Installed qty", "Recommended spare qty", "Unit", "Priority", "Lead time (weeks)", "Unit price", "Amount", "Remarks"];
   const num = v => { const n = parseFloat(String(v ?? "").replace(/,/g, "")); return isFinite(n) ? n : 0; };
-  const money = n => n ? n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "";
-  const amountOf = l => num(l.qty) * num(l.unitPrice);
-  const zonesOf = p => { const z = []; (p.lines || []).forEach(l => { if (!z.includes(l.zone)) z.push(l.zone); }); (p.zones || []).forEach(x => { if (!z.includes(x)) z.push(x); }); return z; };
-  function migrate(p) { // projects saved before the 14-column layout
+  const fmtN = n => Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
+  const settingsOf = p => ({ systems: Math.max(1, num(p.systems) || 1), rate: (num(p.maxRate) > 0 ? num(p.maxRate) : 0.15) });
+  function calc(l, p) {
+    const { systems, rate } = settingsOf(p);
+    const qps = num(l.pqty) / systems;
+    const manual = String(l.ovr ?? "").trim() !== "";
+    const auto = qps > 0 ? Math.max(1, Math.floor(qps * rate + 1e-9)) : 0;
+    const sps = manual ? num(l.ovr) : auto;
+    const lr = qps > 0 ? sps / qps : 0;
+    const note = (qps % 1 ? "Check allocation; " : "") + (manual ? "Manual; " : "") + (qps <= 0 ? "No project qty" : lr > rate + 1e-9 ? "Minimum-1 exception" : `Within ${fmtN(rate * 100)}%`);
+    return { qps, auto, sps, total: sps * systems, lr, note, manual };
+  }
+  const catsOf = p => { const c = []; (p.lines || []).forEach(l => { if (!c.includes(l.cat)) c.push(l.cat); }); (p.cats || []).forEach(x => { if (!c.includes(x)) c.push(x); });
+    return c.sort((a, b) => (CATS.indexOf(a) < 0 ? 99 : CATS.indexOf(a)) - (CATS.indexOf(b) < 0 ? 99 : CATS.indexOf(b))); };
+  function migrate(p) { // projects saved in the earlier zone / 14-column layout
+    if (p.systems === undefined) p.systems = 1;
+    if (p.maxRate === undefined) p.maxRate = 0.15;
     (p.lines || []).forEach(l => {
-      if (l.zone === undefined) l.zone = l.location || "Zone A";
-      if (l.maker === undefined) l.maker = "";
-      if (l.spec === undefined) l.spec = "";
-      if (l.installed === undefined) l.installed = "";
-      if (l.leadWeeks === undefined) l.leadWeeks = "";
-      if (l.unitPrice === undefined) l.unitPrice = "";
+      if (l.cat !== undefined) return;
+      Object.assign(l, { cat: l.zone || "Mechanical Part", code: l.partNo || "", desc: [l.equip, l.tag, l.part, l.maker, l.spec].filter(Boolean).join(" · "),
+        pqty: l.installed ?? "", ovr: "", tech: l.remark || "", reason: "", prio: l.prio === "Consumable" ? "Recommended" : (l.prio || "Recommended") });
     });
     return p;
   }
+  const COLS = ["No.", "Priority", "Category", "Material code", "Description / model as supplied", "Project qty", "Qty / system", "Spare / system", "Spare / all systems", "Spare rate / system", "Unit", "Quantity note", "Technical note", "Reason for recommendation"];
+  //              No  Prio Cat  Code Desc PQty QPS  SPS  Tot  Rate Unit QNote Tech Reason (actions)
+  const COL_W  = [46, 150, 176, 170, 330, 84, 84, 96, 96, 84, 70, 170, 280, 260, 48];
+  const COL_AL = ["c", "c", "", "", "", "c", "c", "c", "c", "c", "c", "", "", ""];
   function pageProject(p) {
     migrate(p);
+    const S = settingsOf(p);
     const r = p.refs || {};
     const links = [r.joFile && `<a href="${esc(r.joFile)}" target="_blank" rel="noopener">Job Order</a>`, r.folder && `<a href="${esc(r.folder)}" target="_blank" rel="noopener">โฟลเดอร์ Job</a>`,
       ...(r.pid || []).map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>`), ...(r.layout || []).map(x => `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a>`)].filter(Boolean).join(" · ");
-    const zones = zonesOf(p);
-    const NUMK = /^(qty|installed|leadWeeks|unitPrice|unit)$/;
-    const inp = (l, k, cls = "", ph = "") => NUMK.test(k)
-      ? `<input class="sp-cell ${cls}" data-l="${l.id}" data-k="${k}" value="${esc(l[k])}" placeholder="${esc(ph)}"${k !== "unit" ? ' inputmode="decimal"' : ""}>`
-      : `<textarea class="sp-cell sp-wrap ${cls}" rows="1" data-l="${l.id}" data-k="${k}" placeholder="${esc(ph)}">${esc(l[k])}</textarea>`;
+    const cats = catsOf(p);
+    const txt = (l, k, ph = "") => `<textarea class="sp-cell sp-wrap" rows="1" data-l="${l.id}" data-k="${k}" placeholder="${esc(ph)}">${esc(l[k])}</textarea>`;
+    const box = (l, k, v, ph = "", cls = "") => `<input class="sp-cell ${cls}" data-l="${l.id}" data-k="${k}" value="${esc(v)}" placeholder="${esc(ph)}" inputmode="decimal">`;
     let no = 0;
-    const body = zones.map((z, zi) => {
-      const rows = p.lines.filter(l => l.zone === z);
+    const body = cats.map((c, ci) => {
+      const rows = p.lines.filter(l => l.cat === c);
       return `<tr class="sp-zone"><td colspan="${COLS.length + 1}"><div class="sp-zone-in">
-          <input class="sp-zname" data-zone="${zi}" value="${esc(z)}" aria-label="ชื่อโซน">
-          <span class="sub">${rows.length} รายการ</span><span class="sp-ztot" data-ztot="${zi}"></span>
-          <button class="sp-btn sm" data-addin="${zi}">＋ เพิ่มรายการในโซนนี้</button><button class="sp-btn sm" data-master="${zi}">🔍 เพิ่มจาก Master</button></div></td></tr>`
-        + rows.map(l => { no++; return `<tr data-row="${l.id}">
+          <input class="sp-zname" data-cat="${ci}" value="${esc(c)}" aria-label="ชื่อหมวด">
+          <span class="sub">${rows.length} รายการ</span><span class="sp-ztot" data-ctot="${ci}"></span>
+          <button class="sp-btn sm" data-addin="${ci}">＋ เพิ่มรายการ</button><button class="sp-btn sm" data-master="${ci}">🔍 เพิ่มจาก Master</button></div></td></tr>`
+        + rows.map(l => { no++; const k = calc(l, p); return `<tr data-row="${l.id}">
           <td class="c">${no}</td>
-          <td>${inp(l, "equip", "", "Equipment")}${inp(l, "tag", "tag", "Tag")}</td>
-          <td>${inp(l, "part")}</td><td><div class="sp-pn">${inp(l, "partNo")}<button class="sp-x sp-find" data-find="${l.id}" title="ค้นหาจาก Master Item แล้วเติมแถวนี้" aria-label="ค้นหาจาก Master Item">🔍</button></div></td><td>${inp(l, "maker")}</td><td>${inp(l, "spec")}</td>
-          <td class="c">${inp(l, "installed")}</td><td class="c">${inp(l, "qty")}</td><td class="c">${inp(l, "unit")}</td>
           <td class="c"><select class="sp-cell sp-prio ${prioCls(l.prio)}" data-l="${l.id}" data-k="prio">${PRIOS.map(o => `<option class="${prioCls(o)}" ${l.prio === o ? "selected" : ""}>${o}</option>`).join("")}</select></td>
-          <td class="c">${inp(l, "leadWeeks")}</td><td class="r">${inp(l, "unitPrice")}</td><td class="r amt" data-amt="${l.id}">${money(amountOf(l))}</td>
-          <td>${inp(l, "remark")}</td>
-          <td class="act"><select class="sp-move" data-move="${l.id}" title="ย้ายโซน" aria-label="ย้ายโซน"><option value="">⇄</option>${zones.map((x, i) => x === z ? "" : `<option value="${i}">${esc(x)}</option>`).join("")}</select><button class="sp-x" data-del="${l.id}" title="ลบรายการ">✕</button></td></tr>`; }).join("");
+          <td><select class="sp-cell sp-cat" data-move="${l.id}" aria-label="Category">${[...new Set([...cats, ...CATS])].map(x => `<option ${x === l.cat ? "selected" : ""}>${esc(x)}</option>`).join("")}</select></td>
+          <td><div class="sp-pn">${txt(l, "code", "Material code")}<button class="sp-x sp-find" data-find="${l.id}" title="ค้นหาจาก Master Item แล้วเติมแถวนี้" aria-label="ค้นหาจาก Master Item">🔍</button></div></td>
+          <td>${txt(l, "desc")}</td>
+          <td class="c">${box(l, "pqty", l.pqty)}</td>
+          <td class="c calc" data-qps="${l.id}">${fmtN(k.qps)}</td>
+          <td class="c">${box(l, "ovr", k.manual ? l.ovr : "", String(k.auto), k.manual ? "sp-manual" : "")}</td>
+          <td class="c calc tot" data-tot="${l.id}">${fmtN(k.total)}</td>
+          <td class="c calc" data-rate="${l.id}">${k.qps > 0 ? fmtN(k.lr * 100) + "%" : "–"}</td>
+          <td class="c">${txt(l, "unit")}</td>
+          <td class="calc note" data-note="${l.id}">${esc(k.note)}</td>
+          <td>${txt(l, "tech")}</td><td>${txt(l, "reason")}</td>
+          <td class="act"><button class="sp-x" data-del="${l.id}" title="ลบรายการ">✕</button></td></tr>`; }).join("");
     }).join("");
+    const crit = p.lines.filter(l => l.prio === "Critical").length;
     ROOT.innerHTML = `<a class="open" href="#spare-part">← รายการโปรเจค</a>
       <div class="sp-head"><div><span class="jo">JO ${esc(p.jo)}</span> ${pill(p.status)}<h2>${esc(p.name)}</h2>
         <div class="sub">${esc(p.customer)} · ${esc(p.site || "")} · ผู้ติดต่อ ${esc(p.contact || "-")} ${esc(p.tel || "")} · QO ${esc(p.qo || "-")} · PO ${esc(p.po || "-")} · ส่งมอบ ${esc(p.delivery || "-")}</div>
+        ${p.tplTitle ? `<div class="sub">${esc(p.tplTitle)}${p.tplSub ? " · " + esc(p.tplSub) : ""}</div>` : ""}
         <div class="sp-links">${links}</div>
         <div class="sp-docs">${(p.docs || []).map((d, i) => `<span class="sp-doc"><a href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">🔗 ${esc(d.title || d.url)}</a><button class="sp-x" data-deldoc="${i}" title="เอาลิงก์ออก" aria-label="เอาลิงก์ออก">✕</button></span>`).join("")}
           <button class="sp-btn sm" data-a="adddoc">＋ แนบลิงก์เอกสาร</button></div>
         <form class="sp-docform" id="spDocForm" hidden><input class="sp-in" name="title" placeholder="ชื่อเอกสาร เช่น Datasheet Serfilco EO1, Quotation PE"><input class="sp-in" name="url" type="url" required placeholder="https://… (Google Drive, SharePoint, เว็บผู้ผลิต)">
           <button class="sp-btn primary sm" type="submit">เพิ่ม</button><button class="sp-btn sm" type="button" data-a="canceldoc">ยกเลิก</button><span class="sp-docerr" id="spDocErr"></span></form></div>
         <div class="sp-actions"><select class="sp-in" id="spStatus">${Object.keys(STATUS).map(s => `<option value="${s}" ${p.status === s ? "selected" : ""}>${STATUS[s][0]}</option>`).join("")}</select>
-          <button class="sp-btn" data-a="zone">＋ เพิ่มโซน</button><button class="sp-btn" data-a="import">⬆ Import from template</button><button class="sp-btn" data-a="csv" title="ไฟล์ CSV สำหรับส่งลูกค้า: ไม่มี Remarks และเฉพาะรายการที่ใส่ Unit price แล้ว">Export for customer</button><button class="sp-btn primary" data-a="save">บันทึก</button>${isAdmin() ? `<button class="sp-btn" data-a="edithead">✎ แก้ไขรายละเอียด</button><button class="sp-btn danger" data-a="delete">ลบโปรเจค</button>` : ""}</div></div>
-      <div class="tbl sp-edit"><table><colgroup>${COL_W.map(w => `<col style="width:${w}px">`).join("")}</colgroup><thead><tr>${COLS.map((c, i) => `<th class="${COL_AL[i]}">${c}</th>`).join("")}<th></th></tr></thead><tbody>${body || `<tr><td colspan="${COLS.length + 1}" class="sub">ยังไม่มีรายการ · กด ＋ เพิ่มโซน</td></tr>`}</tbody>
-        <tfoot><tr><td colspan="12" class="r"><b>Total (excl. VAT)</b></td><td class="r"><b id="spGrand"></b></td><td colspan="2"></td></tr></tfoot></table></div>
-      <p class="sp-src">อะไหล่ที่ระบบเสนอเป็นค่าเริ่มต้นตามประเภทอุปกรณ์ · ใส่ Part No. และ Unit price (ราคาขาย) ก่อนส่งลูกค้า · Lead time เริ่มต้นจาก Project Pipeline</p>
+          <button class="sp-btn" data-a="cat">＋ เพิ่มหมวด</button><button class="sp-btn" data-a="import">⬆ Import from template</button>
+          <button class="sp-btn" data-a="xlsx" title="ไฟล์ Excel รูปแบบ Suggested spares พร้อมสูตร + Engineering review / Material basis / Engineering source">⬇ Export (.xlsx)</button>
+          <button class="sp-btn" data-a="customer" title="ไม่มี Quantity note, Technical note และ Spare rate">Export for customer</button>
+          <button class="sp-btn primary" data-a="save">บันทึก</button>${isAdmin() ? `<button class="sp-btn" data-a="edithead">✎ แก้ไขรายละเอียด</button><button class="sp-btn danger" data-a="delete">ลบโปรเจค</button>` : ""}</div></div>
+      <div class="sp-params"><label>Systems <input class="sp-in" id="spSys" value="${S.systems}" inputmode="numeric"></label>
+        <label>Maximum rate <input class="sp-in" id="spRate" value="${fmtN(S.rate * 100)}" inputmode="decimal"> %</label>
+        <span class="sub">Qty / system = Project qty ÷ ${S.systems} · Spare / system = MAX(1, ROUNDDOWN(Qty / system × ${fmtN(S.rate * 100)}%)) · พิมพ์ในช่อง Spare / system เพื่อกำหนดเอง (ลบค่าออก = กลับไปใช้สูตร)</span>
+        <span class="sp-kpi"><b>${p.lines.length}</b> รายการ · <b>${crit}</b> Critical · รวม <b id="spGrand"></b> ชิ้น</span></div>
+      <div class="tbl sp-edit"><table style="width:${COL_W.reduce((a, b) => a + b, 0)}px"><colgroup>${COL_W.map(w => `<col style="width:${w}px">`).join("")}</colgroup><thead><tr>${COLS.map((c, i) => `<th class="${COL_AL[i]}">${i === 8 ? `Spare / ${S.systems} system${S.systems > 1 ? "s" : ""}` : c}</th>`).join("")}<th></th></tr></thead><tbody>${body || `<tr><td colspan="${COLS.length + 1}" class="sub">ยังไม่มีรายการ · กด ⬆ Import from template หรือ ＋ เพิ่มหมวด</td></tr>`}</tbody></table></div>
+      ${reviewHtml(p)}
+      ${refSheetsHtml(p)}
       <span class="sp-saved" id="spSaved" aria-live="polite"></span>`;
     const totals = () => {
-      zones.forEach((z, i) => { const t = p.lines.filter(l => l.zone === z).reduce((a, l) => a + amountOf(l), 0); const el = ROOT.querySelector(`[data-ztot="${i}"]`); if (el) el.textContent = t ? "รวม " + money(t) : ""; });
-      ROOT.querySelector("#spGrand").textContent = money(p.lines.reduce((a, l) => a + amountOf(l), 0)) || "–";
+      cats.forEach((c, i) => { const t = p.lines.filter(l => l.cat === c).reduce((a, l) => a + calc(l, p).total, 0); const el = ROOT.querySelector(`[data-ctot="${i}"]`); if (el) el.textContent = t ? `spare ${fmtN(t)} ชิ้น` : ""; });
+      ROOT.querySelector("#spGrand").textContent = fmtN(p.lines.reduce((a, l) => a + calc(l, p).total, 0));
     };
     totals();
     const fit = t => { t.style.height = "auto"; t.style.height = t.scrollHeight + 2 + "px"; };
     ROOT.querySelectorAll("textarea.sp-wrap").forEach(t => { fit(t); t.addEventListener("input", () => fit(t)); });
     const mark = () => { ROOT.querySelector("#spSaved").textContent = "มีการแก้ไขที่ยังไม่บันทึก"; };
-    const redraw = () => { const y = window.scrollY; pageProject(p); window.scrollTo(0, y); mark(); };
-    const blank = zone => ({ id: uid(), zone, equip: "", tag: "", part: "", partNo: "", maker: "", spec: "", installed: "", qty: 1, unit: "pc", prio: "Recommended", leadWeeks: "", unitPrice: "", remark: "", source: "Manual" });
-    ROOT.querySelectorAll(".sp-cell").forEach(i => i.oninput = i.onchange = () => {
+    const redraw = () => { const box = ROOT.querySelector(".sp-edit"), sx = box ? box.scrollLeft : 0, sy = box ? box.scrollTop : 0, y = window.scrollY; pageProject(p); const nb = ROOT.querySelector(".sp-edit"); if (nb) { nb.scrollLeft = sx; nb.scrollTop = sy; } window.scrollTo(0, y); mark(); };
+    const blank = cat => ({ id: uid(), prio: "Recommended", cat, code: "", desc: "", pqty: "", unit: "pc", ovr: "", tech: "", reason: "", source: "Manual" });
+    const refreshRow = l => { const k = calc(l, p); const q = s => ROOT.querySelector(s);
+      q(`[data-qps="${l.id}"]`).textContent = fmtN(k.qps); q(`[data-tot="${l.id}"]`).textContent = fmtN(k.total);
+      q(`[data-rate="${l.id}"]`).textContent = k.qps > 0 ? fmtN(k.lr * 100) + "%" : "–"; q(`[data-note="${l.id}"]`).textContent = k.note;
+      const o = q(`[data-l="${l.id}"][data-k="ovr"]`); o.placeholder = String(k.auto); o.classList.toggle("sp-manual", k.manual); totals(); };
+    ROOT.querySelectorAll(".sp-cell[data-l]").forEach(i => i.oninput = i.onchange = () => {
       const l = p.lines.find(x => x.id === i.dataset.l); l[i.dataset.k] = i.value; mark();
       if (i.dataset.k === "prio") i.className = "sp-cell sp-prio " + prioCls(i.value);
-      if (i.dataset.k === "qty" || i.dataset.k === "unitPrice") { ROOT.querySelector(`[data-amt="${l.id}"]`).textContent = money(amountOf(l)); totals(); }
+      if (i.dataset.k === "pqty" || i.dataset.k === "ovr") refreshRow(l);
     });
+    const setParam = () => { const s = num(ROOT.querySelector("#spSys").value), rt = num(ROOT.querySelector("#spRate").value);
+      if (s >= 1) p.systems = Math.round(s); if (rt > 0 && rt <= 100) p.maxRate = rt / 100; redraw(); };
+    ROOT.querySelector("#spSys").onchange = setParam; ROOT.querySelector("#spRate").onchange = setParam;
     ROOT.querySelectorAll(".sp-zname").forEach(i => i.onchange = () => {
-      const old = zones[+i.dataset.zone], nu = i.value.trim() || old;
-      p.lines.forEach(l => { if (l.zone === old) l.zone = nu; }); p.zones = (p.zones || []).map(z => z === old ? nu : z); redraw();
+      const old = cats[+i.dataset.cat], nu = i.value.trim() || old;
+      p.lines.forEach(l => { if (l.cat === old) l.cat = nu; }); p.cats = (p.cats || []).map(c => c === old ? nu : c); redraw();
     });
-    ROOT.querySelectorAll("[data-master]").forEach(b => b.onclick = () => { const z = zones[+b.dataset.master];
-      openMaster({ title: "เพิ่มจาก Master Item → " + z, multi: true, onPick: its => { its.forEach(it => p.lines.push(fromItem(it, { ...blank(z), equip: it.kind === "2" ? it.d1 : "" }))); redraw(); ROOT.querySelector("#spSaved").textContent = `เพิ่ม ${its.length} รายการจาก Master · กด บันทึก เพื่อเก็บ`; } }); });
+    ROOT.querySelectorAll("[data-master]").forEach(b => b.onclick = () => { const c = cats[+b.dataset.master];
+      openMaster({ title: "เพิ่มจาก Master Item → " + c, multi: true, onPick: its => { its.forEach(it => p.lines.push(fromItem(it, blank(c)))); redraw(); ROOT.querySelector("#spSaved").textContent = `เพิ่ม ${its.length} รายการจาก Master · ใส่ Project qty แล้วกด บันทึก`; } }); });
     ROOT.querySelectorAll("[data-find]").forEach(b => b.onclick = () => { const l = p.lines.find(x => x.id === b.dataset.find);
       openMaster({ title: "เลือก item ให้แถวนี้", multi: false, onPick: ([it]) => { fromItem(it, l); redraw(); } }); });
-    ROOT.querySelectorAll("[data-addin]").forEach(b => b.onclick = () => { p.lines.push(blank(zones[+b.dataset.addin])); redraw(); });
-    ROOT.querySelectorAll("[data-move]").forEach(s => s.onchange = () => { if (s.value === "") return; p.lines.find(x => x.id === s.dataset.move).zone = zones[+s.value]; redraw(); });
+    ROOT.querySelectorAll("[data-addin]").forEach(b => b.onclick = () => { p.lines.push(blank(cats[+b.dataset.addin])); redraw(); });
+    ROOT.querySelectorAll("[data-move]").forEach(s => s.onchange = () => { p.lines.find(x => x.id === s.dataset.move).cat = s.value; redraw(); });
+    bindReview(p, redraw, mark);
+    ROOT.querySelectorAll("details.sp-ref").forEach(d => d.ontoggle = () => { if (d.open && !d.dataset.done) { d.dataset.done = 1; d.querySelector(".sp-refbody").innerHTML = aoaTable((p.sheets || {})[d.dataset.sheet] || []); } });
     const df = ROOT.querySelector("#spDocForm");
     df.onsubmit = e => {
       e.preventDefault();
@@ -285,18 +309,44 @@
     ROOT.querySelectorAll("[data-del]").forEach(b => b.onclick = () => { p.lines = p.lines.filter(x => x.id !== b.dataset.del); redraw(); });
     ROOT.querySelectorAll("[data-a]").forEach(b => b.onclick = async () => {
       const a = b.dataset.a;
-      if (a === "zone") { const n = prompt("ชื่อโซนใหม่ (Process tank หรือ System)", "Zone " + String.fromCharCode(65 + zones.length) + " – "); if (n && n.trim()) { p.zones = [...(p.zones || []), n.trim()]; p.lines.push(blank(n.trim())); redraw(); } }
-      if (a === "adddoc") { df.hidden = false; df.title.focus(); }
-      if (a === "canceldoc") { df.hidden = true; df.reset(); ROOT.querySelector("#spDocErr").textContent = ""; }
-      if (a === "edithead" && isAdmin()) editHead(p, async () => { await save(p); const h = "#spare-part/" + encodeURIComponent(slugOf(p)); if (location.hash !== h) history.replaceState(null, "", h); pageProject(p); ROOT.querySelector("#spSaved").textContent = "บันทึกรายละเอียดโปรเจคแล้ว " + new Date().toLocaleTimeString("th-TH"); });
-      if (a === "csv") exportCsv(p);
-      if (a === "import") openImport(p, (n, how) => { redraw(); ROOT.querySelector("#spSaved").textContent = `นำเข้า ${n} รายการ (${how === "replace" ? "แทนที่" : "เพิ่มต่อท้าย"}) · กด บันทึก เพื่อเก็บ`; });
-      if (a === "save") { p.zones = zonesOf(p); await save(p); ROOT.querySelector("#spSaved").textContent = "บันทึกแล้ว " + new Date().toLocaleTimeString("th-TH") + (MODE === "local" ? " (ในเบราว์เซอร์นี้)" : ""); }
-      if (a === "delete" && isAdmin() && confirm("ลบโปรเจค Spare Part " + p.jo + " – " + p.name + " ?\nลบแล้วกู้คืนไม่ได้ (ถ้าแค่เลิกใช้ ให้เปลี่ยนสถานะเป็น Inactive)")) {
-        const ok = await remove(p.id); if (ok) location.hash = "#spare-part"; else ROOT.querySelector("#spSaved").textContent = "ลบไม่สำเร็จ (ต้องเป็น admin)"; }
+      try {
+        if (a === "cat") { const n = prompt("ชื่อหมวดใหม่ (เช่น Pump, Filter, Valve)", ""); if (n && n.trim()) { p.cats = [...(p.cats || []), n.trim()]; p.lines.push(blank(n.trim())); redraw(); } }
+        if (a === "adddoc") { df.hidden = false; df.title.focus(); }
+        if (a === "canceldoc") { df.hidden = true; df.reset(); ROOT.querySelector("#spDocErr").textContent = ""; }
+        if (a === "edithead" && isAdmin()) editHead(p, async () => { await save(p); const h = "#spare-part/" + encodeURIComponent(slugOf(p)); if (location.hash !== h) history.replaceState(null, "", h); pageProject(p); ROOT.querySelector("#spSaved").textContent = "บันทึกรายละเอียดโปรเจคแล้ว " + new Date().toLocaleTimeString("th-TH"); });
+        if (a === "xlsx") await exportXlsx(p, false);
+        if (a === "customer") await exportXlsx(p, true);
+        if (a === "import") openImport(p, (n, how) => { redraw(); ROOT.querySelector("#spSaved").textContent = `นำเข้า ${n} รายการ (${how === "replace" ? "แทนที่" : "เพิ่มต่อท้าย"}) · กด บันทึก เพื่อเก็บ`; });
+        if (a === "save") { p.cats = catsOf(p); await save(p); ROOT.querySelector("#spSaved").textContent = "บันทึกแล้ว " + new Date().toLocaleTimeString("th-TH") + (MODE === "local" ? " (ในเบราว์เซอร์นี้)" : ""); }
+        if (a === "delete" && isAdmin() && confirm("ลบโปรเจค Spare Part " + p.jo + " – " + p.name + " ?\nลบแล้วกู้คืนไม่ได้ (ถ้าแค่เลิกใช้ ให้เปลี่ยนสถานะเป็น Inactive)")) {
+          const ok = await remove(p.id); if (ok) location.hash = "#spare-part"; else ROOT.querySelector("#spSaved").textContent = "ลบไม่สำเร็จ (ต้องเป็น admin)"; }
+      } catch (e) { ROOT.querySelector("#spSaved").textContent = "⚠️ " + (e.message || e); }
     });
   }
-  /* --- Excel / spreadsheet template: download + import --- */
+  /* Engineering review (sheet of the same name) – editable list under the table */
+  const REV_COLS = [["ref", "Ref."], ["topic", "Topic"], ["item", "Item / scope"], ["finding", "Finding / source"], ["action", "Required action"]];
+  function reviewHtml(p) {
+    const rv = p.review || [];
+    return `<details class="sp-box" ${rv.length ? "open" : ""}><summary><b>Engineering review before purchase</b> <span class="sub">${rv.length} หัวข้อ</span></summary>
+      <div class="tbl"><table class="sp-rev"><colgroup><col style="width:60px"><col style="width:160px"><col style="width:220px"><col><col><col style="width:40px"></colgroup>
+      <thead><tr>${REV_COLS.map(([, t]) => `<th>${t}</th>`).join("")}<th></th></tr></thead><tbody>
+      ${rv.map((x, i) => `<tr>${REV_COLS.map(([k]) => `<td><textarea class="sp-cell sp-wrap" rows="1" data-rv="${i}" data-rk="${k}">${esc(x[k])}</textarea></td>`).join("")}<td><button class="sp-x" data-rvdel="${i}" title="ลบหัวข้อ">✕</button></td></tr>`).join("")}
+      </tbody></table></div><button class="sp-btn sm" data-rvadd="1">＋ เพิ่มหัวข้อ review</button></details>`;
+  }
+  function bindReview(p, redraw, mark) {
+    ROOT.querySelectorAll("[data-rv]").forEach(t => t.oninput = () => { p.review[+t.dataset.rv][t.dataset.rk] = t.value; mark(); });
+    ROOT.querySelectorAll("[data-rvdel]").forEach(b => b.onclick = () => { p.review.splice(+b.dataset.rvdel, 1); redraw(); });
+    const add = ROOT.querySelector("[data-rvadd]"); if (add) add.onclick = () => { p.review = [...(p.review || []), { ref: String((p.review || []).length + 1).padStart(2, "0"), topic: "", item: "", finding: "", action: "" }]; redraw(); };
+  }
+  /* Material basis / Engineering source are kept as imported (read-only) and written back on export */
+  const REF_SHEETS = [["basis", "Material basis"], ["source", "Engineering source"]];
+  function refSheetsHtml(p) {
+    const s = p.sheets || {};
+    return REF_SHEETS.filter(([k]) => (s[k] || []).length).map(([k, t]) => `<details class="sp-box sp-ref" data-sheet="${k}"><summary><b>${t}</b> <span class="sub">${Math.max(0, s[k].length - 1)} แถว · จากไฟล์ที่นำเข้า (อ่านอย่างเดียว)</span></summary><div class="sp-refbody sub">กำลังแสดง…</div></details>`).join("");
+  }
+  const aoaTable = aoa => !aoa.length ? "" : `<div class="tbl" style="max-height:420px;overflow:auto"><table class="sp-mt"><thead><tr>${aoa[0].map(h => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>${aoa.slice(1).map(r => `<tr>${r.map(v => `<td>${esc(v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+
+  /* --- Excel: export in the Suggested spares format, import the same file back --- */
   const XLSX_SRC = "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js";
   const XLSX_SRI = "sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT";
   let xlsxP = null;
@@ -306,86 +356,123 @@
     s.onload = () => ok(window.XLSX); s.onerror = () => { xlsxP = null; no(new Error("โหลดตัวอ่าน Excel ไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่")); };
     document.head.appendChild(s);
   }));
-  const TPL_COLS = ["Zone", ...COLS];
-  async function downloadTemplate(p) {
+  const sortedLines = p => { const cs = catsOf(p); return [...(p.lines || [])].sort((a, b) => cs.indexOf(a.cat) - cs.indexOf(b.cat)); };
+  async function exportXlsx(p, customer) {
     const X = await loadXLSX(); migrate(p);
-    const meta = [["Recommended Spare Part List – import template"], ["Customer", p.customer], ["Project", p.name], ["Job No.", p.jo],
-      ["วิธีใช้: แก้/เพิ่มแถวใต้หัวตาราง · คอลัมน์ Zone ใส่ชื่อ Process tank หรือ System · แถวที่ไม่มี Part description จะถูกข้าม · Amount คำนวณเอง (ไม่ต้องกรอก)"], []];
-    const head = meta.length;
-    const rows = (p.lines || []).map((l, i) => [l.zone, i + 1, [l.equip, l.tag].filter(Boolean).join(" / "), l.part, l.partNo, l.maker, l.spec, l.installed === "" ? null : num(l.installed), num(l.qty), l.unit, l.prio,
-      l.leadWeeks === "" ? null : num(l.leadWeeks), l.unitPrice === "" ? null : num(l.unitPrice), null, l.remark]);
-    if (!rows.length) rows.push(["Zone A – EP Tank T101 (ตัวอย่าง)", 1, "Serfilco vertical pump / P101A1", "Impeller", "", "Serfilco / EO1KV3-D.75", "PVDF/Viton", 2, 1, "pc", "Recommended", 9, 12500, null, ""]);
-    const ws = X.utils.aoa_to_sheet([...meta, TPL_COLS, ...rows]);
-    rows.forEach((_, i) => { const r = head + 2 + i; ws["N" + r] = { t: "n", f: `IF(M${r}="","",I${r}*M${r})` }; });
-    ws["!cols"] = [28, 6, 40, 34, 22, 30, 36, 10, 12, 8, 13, 10, 12, 14, 34].map(w => ({ wch: w }));
-    const lists = X.utils.aoa_to_sheet([["Priority"], ["Critical"], ["Recommended"], ["Consumable"]]);
-    const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, "Spare Part"); X.utils.book_append_sheet(wb, lists, "Lists");
-    X.writeFile(wb, `SparePart_${p.jo}_template.xlsx`);
+    const S = settingsOf(p), pct = fmtN(S.rate * 100), lines = sortedLines(p);
+    const title = p.tplTitle || `${p.name} | SUGGESTED SPARE PART LIST`;
+    const sub = p.tplSub || `RAK • ${p.customerShort || p.customer || ""} • JO ${p.jo} • ${new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+    const wb = X.utils.book_new();
+    if (customer) {
+      const head = ["No.", "Priority", "Category", "Material code", "Description / model", `Qty / system`, "Spare / system", `Spare / ${S.systems} systems`, "Unit", "Reason for recommendation"];
+      const rows = lines.map((l, i) => { const k = calc(l, p); return [i + 1, l.prio, l.cat, l.code, l.desc, k.qps, k.sps, k.total, l.unit, l.reason]; });
+      const ws = X.utils.aoa_to_sheet([[], [title], [sub], [], ["Systems", S.systems], [], head, ...rows]);
+      ws["!cols"] = [6, 14, 22, 20, 60, 12, 12, 14, 10, 55].map(w => ({ wch: w }));
+      X.utils.book_append_sheet(wb, ws, "Suggested spares");
+      return X.writeFile(wb, `SparePart_${p.jo}_${(p.customerShort || "").replace(/\W+/g, "")}_customer.xlsx`);
+    }
+    const H0 = 10; // header row, data from row 11 (same layout as the Rev01 file)
+    const aoa = [[], [title], [sub], [], ["Systems", S.systems, "Maximum rate", S.rate], [`Quantity per system = project quantity ÷ ${S.systems}. Spare per system = MAX(1, ROUNDDOWN(quantity per system × ${pct}%, 0)).`],
+      [`Total spare = spare per system × ${S.systems}; separate stock per system. Minimum 1 is an explicit exception where the rate exceeds ${pct}%.`],
+      ["Material code identifies the proposed item; exact OEM part number and as-built compatibility must be confirmed before purchase. No prices included."], [],
+      COLS.map((c, i) => i === 5 ? "Project qty (Excel)" : i === 8 ? `Spare / ${S.systems} systems` : c)];
+    lines.forEach((l, i) => aoa.push([i + 1, l.prio, l.cat, l.code, l.desc, num(l.pqty), null, null, null, null, l.unit, null, l.tech, l.reason]));
+    const ws = X.utils.aoa_to_sheet(aoa);
+    lines.forEach((l, i) => { const r = H0 + 1 + i, k = calc(l, p);
+      ws["G" + r] = { t: "n", f: `F${r}/$B$5`, v: k.qps };
+      ws["H" + r] = k.manual ? { t: "n", v: k.sps } : { t: "n", f: `IF(G${r}>0,MAX(1,ROUNDDOWN(G${r}*$D$5,0)),0)`, v: k.sps };
+      ws["I" + r] = { t: "n", f: `H${r}*$B$5`, v: k.total };
+      ws["J" + r] = { t: "n", f: `IF(G${r}>0,H${r}/G${r},0)`, v: k.lr, z: "0.0%" };
+      ws["L" + r] = { t: "s", f: `IF(MOD(G${r},1)<>0,"Check allocation; ","")&IF(J${r}>$D$5,"Minimum-1 exception","Within ${pct}%")`, v: k.note };
+    });
+    ws["D5"].z = "0%";
+    ws["!cols"] = [6, 16, 22, 23, 65, 14, 13, 13, 13, 12, 13, 24, 63, 55].map(w => ({ wch: w }));
+    ws["!autofilter"] = { ref: `A${H0}:N${H0 + lines.length}` };
+    X.utils.book_append_sheet(wb, ws, "Suggested spares");
+    const rv = X.utils.aoa_to_sheet([["ENGINEERING REVIEW BEFORE PURCHASE"], REV_COLS.map(([, t]) => t), ...(p.review || []).map(x => REV_COLS.map(([k]) => x[k] || ""))]);
+    rv["!cols"] = [8, 22, 34, 70, 70].map(w => ({ wch: w }));
+    X.utils.book_append_sheet(wb, rv, "Engineering review");
+    REF_SHEETS.forEach(([k, t]) => { const a = (p.sheets || {})[k]; if (a && a.length) X.utils.book_append_sheet(wb, X.utils.aoa_to_sheet(a), t); });
+    X.writeFile(wb, `SparePart_${p.jo}_${(p.customerShort || "").replace(/\W+/g, "")}_Suggested_spares.xlsx`);
   }
   const hkey = s => norm(s).replace(/[^a-z0-9ก-๙]/g, "");
-  const HEADS = { zone: ["zone", "โซน", "processtank", "system"], no: ["no"], equipTag: ["equipmenttag"], equip: ["equipment"], tag: ["tag", "tagno"],
-    part: ["partdescription", "description", "sparepart", "part"], partNo: ["partnodrawingref", "partno", "partnumber", "drawingref"],
-    maker: ["manufacturermodel", "manufacturer", "maker", "brand"], spec: ["specificationmaterial", "specification", "material", "spec"],
-    installed: ["installedqty", "installed"], qty: ["recommendedspareqty", "recommendedqty", "spareqty", "qty", "quantity"], unit: ["unit", "uom"],
-    prio: ["priority"], leadWeeks: ["leadtimeweeks", "leadtime"], unitPrice: ["unitprice", "price"], amount: ["amount"], remark: ["remarks", "remark", "note", "notes"] };
-  function parseSheet(aoa) {
+  const HEADS = { no: ["no"], prio: ["priority"], cat: ["category", "zone", "หมวด"], code: ["materialcode", "partnodrawingref", "partno", "code"],
+    desc: ["descriptionmodelassupplied", "descriptionmodel", "description", "partdescription"], pqty: ["projectqtyexcel", "projectqty", "installedqty", "qty"],
+    qps: ["qtysystem"], sps: ["sparesystem"], unit: ["unit"], tech: ["technicalnote", "remarks", "remark"], reason: ["reasonforrecommendation", "reason"] };
+  function parseSpares(aoa) {
     let hr = -1, map = {};
     for (let r = 0; r < Math.min(aoa.length, 40) && hr < 0; r++) {
       const keys = (aoa[r] || []).map(hkey);
-      if (keys.some(k => k === "partdescription" || k === "description" || k === "sparepart")) {
-        hr = r;
-        keys.forEach((k, c) => { for (const [f, al] of Object.entries(HEADS)) if (map[f] === undefined && al.includes(k)) { map[f] = c; break; } });
+      if (keys.includes("materialcode") || keys.some(k => k.startsWith("descriptionmodel")) || keys.includes("partdescription")) {
+        hr = r; keys.forEach((k, c) => { for (const [f, al] of Object.entries(HEADS)) if (map[f] === undefined && al.includes(k)) { map[f] = c; break; } });
       }
     }
-    if (hr < 0 || map.part === undefined) throw new Error("ไม่พบหัวตาราง (ต้องมีคอลัมน์ Part description)");
-    const lines = []; let zone = "Zone A", skipped = 0;
+    if (hr < 0 || map.desc === undefined) throw new Error("ไม่พบหัวตาราง (ต้องมีคอลัมน์ Material code / Description)");
+    let systems = 1, rate = 0.15;
+    for (let r = 0; r < hr; r++) (aoa[r] || []).forEach((v, c) => {
+      const k = hkey(v);
+      if (k === "systems") systems = num(aoa[r][c + 1]) || systems;
+      if (k === "maximumrate") { const x = num(aoa[r][c + 1]); if (x > 0) rate = x > 1 ? x / 100 : x; }
+    });
+    const firstText = r => (aoa[r] || []).find(v => String(v ?? "").trim()) || "";
+    const title = String(firstText(1) || firstText(0) || "").trim(), sub = String(firstText(2) || "").trim();
     const g = (row, f) => map[f] === undefined ? "" : String(row[map[f]] ?? "").trim();
+    const lines = []; let skipped = 0, cat = CATS[0];
     for (let r = hr + 1; r < aoa.length; r++) {
-      const row = aoa[r] || []; const filled = row.map(v => String(v ?? "").trim()).filter(Boolean);
+      const row = aoa[r] || [], filled = row.map(v => String(v ?? "").trim()).filter(Boolean);
       if (!filled.length) continue;
-      const part = g(row, "part");
-      if (!part) { // zone header row (grouped layout) or subtotal / total / note row
-        if (map.zone === undefined && filled.length === 1 && !/total|subtotal|ช่องเหลือง|unit price/i.test(filled[0])) zone = filled[0]; else skipped++;
-        continue;
-      }
-      if (/^(sub)?total/i.test(part)) { skipped++; continue; }
-      let equip = g(row, "equip"), tag = g(row, "tag");
-      if (map.equipTag !== undefined) { const v = g(row, "equipTag"), i = v.lastIndexOf(" / "), last = i > 0 ? v.slice(i + 3) : "";
-        if (last && !/\s/.test(last) && /\d/.test(last)) { equip = v.slice(0, i); tag = last; } else equip = v; }
+      const desc = g(row, "desc"), code = g(row, "code");
+      if (!desc && !code) { if (filled.length === 1 && !/total/i.test(filled[0])) cat = filled[0]; else skipped++; continue; }
       const pr = g(row, "prio").toLowerCase();
-      const n = v => { const x = num(v); return v === "" ? "" : x; };
-      lines.push({ id: uid(), zone: g(row, "zone") || zone, equip, tag, part, partNo: g(row, "partNo"), maker: g(row, "maker"), spec: g(row, "spec"),
-        installed: n(g(row, "installed")), qty: n(g(row, "qty")) || 1, unit: g(row, "unit") || "pc",
-        prio: pr.startsWith("c") && pr.includes("crit") ? "Critical" : pr.startsWith("con") ? "Consumable" : "Recommended",
-        leadWeeks: n(g(row, "leadWeeks")), unitPrice: n(g(row, "unitPrice")), source: "Import", remark: g(row, "remark") });
+      const l = { id: uid(), prio: pr.startsWith("crit") ? "Critical" : pr.startsWith("opt") ? "Optional" : "Recommended", cat: g(row, "cat") || cat, code, desc,
+        pqty: g(row, "pqty") === "" ? "" : num(g(row, "pqty")), unit: g(row, "unit") || "pc", ovr: "", tech: g(row, "tech"), reason: g(row, "reason"), source: "Import" };
+      const want = g(row, "sps");
+      if (want !== "") { const k = calc(l, { systems, maxRate: rate }); if (num(want) !== k.auto) l.ovr = num(want); }
+      lines.push(l);
     }
-    return { lines, skipped };
+    return { lines, skipped, systems, rate, title, sub };
   }
+  function parseReview(aoa) {
+    const hr = aoa.findIndex(r => (r || []).map(hkey).includes("topic"));
+    if (hr < 0) return [];
+    const keys = aoa[hr].map(hkey), idx = { ref: keys.indexOf("ref"), topic: keys.indexOf("topic"), item: keys.indexOf("itemscope"), finding: keys.indexOf("findingsource"), action: keys.indexOf("requiredaction") };
+    return aoa.slice(hr + 1).filter(r => (r || []).some(v => String(v ?? "").trim())).map(r => Object.fromEntries(Object.entries(idx).map(([k, i]) => [k, i < 0 ? "" : String(r[i] ?? "").trim()])));
+  }
+  const trimAoa = aoa => { const hr = aoa.findIndex(r => (r || []).filter(v => String(v ?? "").trim()).length >= 4); return (hr < 0 ? aoa : aoa.slice(hr)).filter(r => (r || []).some(v => String(v ?? "").trim())).map(r => r.map(v => v ?? "")).slice(0, 3000); };
   async function readFile(file) {
     const X = await loadXLSX();
     const wb = X.read(await file.arrayBuffer(), { type: "array" });
-    for (const name of wb.SheetNames) {
-      if (/^lists$|^readme$/i.test(name)) continue;
-      try { const res = parseSheet(X.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: "" })); if (res.lines.length) return { ...res, sheet: name }; } catch (e) { if (wb.SheetNames.length === 1) throw e; }
-    }
-    throw new Error("ไม่พบรายการในไฟล์ (ต้องมีหัวตาราง Part description และอย่างน้อย 1 แถว)");
+    const aoaOf = n => X.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: "" });
+    const pick = re => wb.SheetNames.find(n => re.test(n));
+    const order = [pick(/suggest|spare/i), ...wb.SheetNames].filter(Boolean);
+    let res = null, sheet = "";
+    for (const n of order) { if (/review|basis|source|lists|readme/i.test(n)) continue; try { const r = parseSpares(aoaOf(n)); if (r.lines.length) { res = r; sheet = n; break; } } catch (e) { if (wb.SheetNames.length === 1) throw e; } }
+    if (!res) throw new Error("ไม่พบรายการในไฟล์ (ต้องมีหัวตาราง Material code / Description และอย่างน้อย 1 แถว)");
+    const rvName = pick(/review/i), bName = pick(/basis/i), sName = pick(/engineering\s*source|^source/i);
+    res.review = rvName ? parseReview(aoaOf(rvName)) : null;
+    res.sheets = { basis: bName ? trimAoa(aoaOf(bName)) : null, source: sName ? trimAoa(aoaOf(sName)) : null };
+    res.sheet = sheet;
+    return res;
   }
   function openImport(p, done) {
     const m = document.createElement("div"); m.className = "sp-modal"; m.id = "spImport"; document.body.appendChild(m);
     let res = null;
     const draw = (msg = "") => {
-      m.innerHTML = `<div class="sp-dlg" role="dialog" aria-modal="true" aria-label="Import from template" style="width:min(640px,100%)">
+      const cs = res ? [...new Set(res.lines.map(l => l.cat))] : [];
+      m.innerHTML = `<div class="sp-dlg" role="dialog" aria-modal="true" aria-label="Import from template" style="width:min(680px,100%)">
         <div class="sp-dlg-h"><b>Import from template</b><span class="sp-steps"></span><button class="sp-x" data-i="close" aria-label="ปิด">✕</button></div>
         <div class="sp-dlg-b">
-          <p class="sp-sub">นำเข้ารายการอะไหล่จากไฟล์ Excel (.xlsx, .xls) หรือ CSV · จาก Google Sheets ให้กด File → Download → Microsoft Excel (.xlsx) ก่อน</p>
-          <p><button class="sp-btn" data-i="tpl">⬇ Download template (.xlsx)</button> <span class="sub">template มีรายการปัจจุบันของโปรเจคนี้อยู่แล้ว แก้แล้ว import กลับได้</span></p>
+          <p class="sp-sub">นำเข้าไฟล์ Excel รูปแบบ <b>Suggested spares</b> (เช่น EP500L_Suggested_Spare_Parts Rev01) · อ่าน Systems, Maximum rate, รายการอะไหล่ และ sheet Engineering review / Material basis / Engineering source ถ้ามี · จาก Google Sheets ให้ Download เป็น .xlsx ก่อน</p>
+          <p><button class="sp-btn" data-i="tpl">⬇ Download template (.xlsx)</button> <span class="sub">ไฟล์รูปแบบเดียวกัน มีรายการปัจจุบันของโปรเจคนี้</span></p>
           <label class="sp-drop"><input type="file" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" hidden>
             <b>เลือกไฟล์</b> หรือลากไฟล์มาวางที่นี่</label>
           ${msg ? `<div class="sp-note">${msg}</div>` : ""}
-          ${res ? `<div class="sp-preview"><b>พบ ${res.lines.length} รายการ</b> ใน ${[...new Set(res.lines.map(l => l.zone))].length} โซน (sheet "${esc(res.sheet)}")${res.skipped ? ` · ข้าม ${res.skipped} แถว (หัวโซน/ยอดรวม/หมายเหตุ)` : ""}
-            <ul class="sp-scope">${[...new Set(res.lines.map(l => l.zone))].map(z => `<li>${esc(z)} – ${res.lines.filter(l => l.zone === z).length} รายการ</li>`).join("")}</ul></div>` : ""}
+          ${res ? `<div class="sp-preview"><b>พบ ${res.lines.length} รายการ</b> ใน ${cs.length} หมวด (sheet "${esc(res.sheet)}") · Systems ${res.systems} · Maximum rate ${fmtN(res.rate * 100)}%
+            ${res.lines.some(l => l.ovr !== "") ? `<br><span class="sub">${res.lines.filter(l => l.ovr !== "").length} แถวมี Spare / system ต่างจากสูตร → เก็บเป็นค่ากำหนดเอง</span>` : ""}
+            <ul class="sp-scope">${cs.map(c => `<li>${esc(c)} – ${res.lines.filter(l => l.cat === c).length} รายการ</li>`).join("")}</ul>
+            <span class="sub">${res.review ? `Engineering review ${res.review.length} หัวข้อ · ` : ""}${res.sheets.basis ? `Material basis ${res.sheets.basis.length - 1} แถว · ` : ""}${res.sheets.source ? `Engineering source ${res.sheets.source.length - 1} แถว` : ""}</span></div>` : ""}
         </div>
-        <div class="sp-dlg-f">${res ? `<button class="sp-btn" data-i="append">เพิ่มต่อท้ายรายการเดิม</button><button class="sp-btn primary" data-i="replace">แทนที่รายการเดิมทั้งหมด (${(p.lines || []).length})</button>` : `<button class="sp-btn" data-i="close">ยกเลิก</button>`}</div></div>`;
+        <div class="sp-dlg-f">${res ? `<button class="sp-btn" data-i="append">เพิ่มต่อท้ายรายการเดิม</button><button class="sp-btn primary" data-i="replace">แทนที่ทั้งหมด (${(p.lines || []).length} รายการเดิม)</button>` : `<button class="sp-btn" data-i="close">ยกเลิก</button>`}</div></div>`;
       const fi = m.querySelector("input[type=file]"), drop = m.querySelector(".sp-drop");
       const take = async f => { if (!f) return; draw("กำลังอ่าน " + esc(f.name) + " …"); try { res = await readFile(f); draw(); } catch (e) { res = null; draw("⚠️ " + esc(e.message || e)); } };
       fi.onchange = () => take(fi.files[0]);
@@ -394,9 +481,13 @@
       m.querySelectorAll("[data-i]").forEach(b => b.onclick = async () => {
         const a = b.dataset.i;
         if (a === "close") return m.remove();
-        if (a === "tpl") { try { await downloadTemplate(p); } catch (e) { draw("⚠️ " + esc(e.message || e)); } return; }
-        if (a === "replace" && (p.lines || []).length && !confirm(`แทนที่ ${p.lines.length} รายการเดิมด้วย ${res.lines.length} รายการจากไฟล์?`)) return;
-        p.lines = a === "replace" ? res.lines : [...(p.lines || []), ...res.lines];
+        if (a === "tpl") { try { await exportXlsx(p, false); } catch (e) { draw("⚠️ " + esc(e.message || e)); } return; }
+        if (a === "replace") {
+          if ((p.lines || []).length && !confirm(`แทนที่ ${p.lines.length} รายการเดิม, Systems/Maximum rate, Engineering review และข้อมูลอ้างอิง ด้วยข้อมูลจากไฟล์?`)) return;
+          Object.assign(p, { lines: res.lines, systems: res.systems, maxRate: res.rate, cats: [], tplTitle: res.title, tplSub: res.sub });
+          if (res.review) p.review = res.review;
+          p.sheets = { ...(p.sheets || {}), ...Object.fromEntries(Object.entries(res.sheets).filter(([, v]) => v)) };
+        } else p.lines = [...(p.lines || []), ...res.lines];
         m.remove(); done(res.lines.length, a);
       });
     };
@@ -430,7 +521,7 @@
     if (it.kind === "2") return m ? { part: m[1].trim(), spec: m[2].trim() } : { part: it.d2.replace(/^part\s*:\s*/i, ""), spec: "" };
     return { part: it.d1, spec: it.d2 };
   };
-  const fromItem = (it, l) => { const x = itemPart(it); Object.assign(l, { partNo: it.code, part: x.part, spec: x.spec, maker: it.maker, unit: it.unit || l.unit, unitPrice: it.sale || l.unitPrice || "", source: "Master" }); return l; };
+  const fromItem = (it, l) => Object.assign(l, { code: it.code, desc: [it.d1, it.d2, it.maker].filter(Boolean).join(" "), unit: it.unit || l.unit, source: "Master" });
   function openMaster(opt) { // opt: { title, multi, onPick(items) }
     const m = document.createElement("div"); m.className = "sp-modal"; document.body.appendChild(m);
     let q = "", kind = "", items = [], total = 0, sel = new Map(), msg = "พิมพ์รหัส ชื่ออุปกรณ์ หรือชื่ออะไหล่ เช่น impeller, PAE1001, serfilco", group = null, timer = 0;
@@ -479,27 +570,6 @@
     draw();
   }
 
-  function exportCsv(p) { // customer copy: no Remarks column, only lines that have a Unit price
-    migrate(p);
-    const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const cols = COLS.filter(c => c !== "Remarks"), pad = n => Array(n).fill("");
-    const priced = l => String(l.unitPrice ?? "").trim() !== "" && num(l.unitPrice) > 0;
-    if (!p.lines.some(priced)) { alert("ยังไม่มีรายการที่ใส่ Unit price · Export for customer ส่งออกเฉพาะรายการที่มีราคา"); return; }
-    const out = [["Recommended Spare Part List"], ["Customer", p.customer], ["Project", p.name], ["Job No.", p.jo], ["QO / PO", (p.qo || "") + " / " + (p.po || "")], [], cols];
-    let no = 0, grand = 0;
-    zonesOf(p).forEach(z => {
-      const rows = p.lines.filter(l => l.zone === z && priced(l)); if (!rows.length) return;
-      out.push([z]); let sub = 0;
-      rows.forEach(l => { const a = amountOf(l); sub += a; out.push([++no, [l.equip, l.tag].filter(Boolean).join(" / "), l.part, l.partNo, l.maker, l.spec, l.installed, l.qty, l.unit, l.prio, l.leadWeeks, num(l.unitPrice), a]); });
-      grand += sub; out.push([...pad(11), "Subtotal " + z, sub]);
-    });
-    out.push([], [...pad(11), "Total (excl. VAT)", grand]);
-    const csv = "\ufeff" + out.map(r => r.map(q).join(",")).join("\r\n");
-    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    a.download = `SparePart_${p.jo}_${(p.customerShort || "").replace(/\W+/g, "")}_customer.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
-  }
-
-
   /* ---------- mount ---------- */
   const CSS = `
 .main,.content,#spRoot{min-width:0;max-width:100%}.sp-bar>*,.sp-form>*{min-width:0}
@@ -520,6 +590,11 @@ option.p-critical,option.p-recommended,option.p-consumable{font-weight:600}
 .sp-pn{display:flex;gap:2px;align-items:flex-start}.sp-find{font-size:12px;padding:5px 4px;opacity:.55}.sp-find:hover{opacity:1}
 .sp-msearch{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.sp-msearch .sp-in{flex:1 1 320px}.sp-seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden}.sp-seg button{font:inherit;font-size:13px;border:0;background:#fff;padding:7px 12px;cursor:pointer;color:var(--muted)}.sp-seg button.on{background:var(--blush);color:var(--rak);font-weight:600}
 .sp-mt td{vertical-align:top;padding:8px 8px}.sp-mt .c{text-align:center}.sp-mt .r{text-align:right;font-variant-numeric:tabular-nums}.sp-mt tr.on td{background:var(--blush)}.sp-mt .mono{font-family:"IBM Plex Mono",monospace;font-size:12.5px;white-space:nowrap}.badge.sp-loss{background:#fde2e2;color:#b00000}.sp-mt .badge{white-space:nowrap}
+.p-optional{background:#e9edf2!important;color:#4a5563!important;border-color:#cfd6df!important}
+.sp-edit td.calc{color:var(--muted);padding-top:11px;font-variant-numeric:tabular-nums}.sp-edit td.tot{color:var(--ink);font-weight:700}.sp-edit td.note{font-size:12px;line-height:1.35}
+.sp-edit input.sp-manual{background:#fff6e0;border-color:#f1d38a;font-weight:700}.sp-edit select.sp-cat{font-size:12.5px}
+.sp-params{display:flex;flex-wrap:wrap;gap:14px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin:0 0 12px}.sp-params label{display:flex;gap:6px;align-items:center;font-size:13px;font-weight:600}.sp-params .sp-in{width:70px;padding:6px 8px;text-align:center}.sp-params .sub{flex:1 1 360px;font-size:12px}.sp-kpi{font-size:13px}
+.sp-box{background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 14px;margin-top:14px}.sp-box summary{cursor:pointer}.sp-box .tbl{margin:10px 0}.sp-rev td{vertical-align:top;padding:4px}
 .sp-note{background:var(--amber-soft,#fff6e0);border:1px solid #f1d38a;border-radius:10px;padding:10px 12px;margin:0 0 14px;font-size:13px}
 .sp-src{color:var(--muted);font-size:12.5px;margin-top:14px}.sp-src a{color:var(--rak)}
 .sp-modal{position:fixed;inset:0;background:rgba(18,18,18,.45);display:grid;place-items:center;z-index:50;padding:16px}
@@ -540,7 +615,7 @@ option.p-critical,option.p-recommended,option.p-consumable{font-weight:600}
 .sp-docs{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}.sp-doc{display:inline-flex;align-items:center;gap:2px;background:var(--bg);border:1px solid var(--line);border-radius:20px;padding:2px 4px 2px 10px;font-size:13px}.sp-doc a{color:var(--ink);text-decoration:none;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.sp-doc a:hover{color:var(--rak);text-decoration:underline}.sp-doc .sp-x{font-size:11px;padding:2px 5px}
 .sp-docform{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px}.sp-docform .sp-in{width:auto;font-size:13px;padding:6px 9px}.sp-docform .sp-in[name=title]{flex:1 1 220px}.sp-docform .sp-in[name=url]{flex:2 1 320px}.sp-docerr{color:var(--rak);font-size:12.5px}.sp-docform[hidden]{display:none}
 .sp-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.sp-actions .sp-in{width:auto}
-.sp-edit{overflow:auto;max-height:calc(100vh - 96px)}.sp-edit thead th{position:sticky;top:0;z-index:4;background:#f7f8fa;box-shadow:inset 0 -1px 0 var(--line)}.sp-edit tfoot td{position:sticky;bottom:0;z-index:3;background:#fff;box-shadow:inset 0 1px 0 var(--line)}.sp-edit table{table-layout:fixed;width:2024px}.sp-edit th{white-space:normal;vertical-align:bottom;line-height:1.3;padding:10px 6px}.sp-edit td{vertical-align:top;padding:6px 5px}.sp-edit .c{text-align:center}.sp-edit td.c:first-child{color:var(--muted);padding-top:11px}.sp-edit .r{text-align:right}.sp-edit td.c .sp-cell{text-align:center}.sp-edit td.r .sp-cell{text-align:right}.sp-edit .sp-cell{width:100%;min-width:0;box-sizing:border-box;line-height:1.4}.sp-edit select.sp-prio{text-align:center;text-align-last:center}.sp-edit td.amt{font-variant-numeric:tabular-nums;white-space:nowrap;padding-top:11px;padding-right:10px;font-weight:600}.sp-edit .tag{font-size:12px;color:var(--muted)}.sp-edit td.act{white-space:nowrap;text-align:center}.sp-move{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:6px;background:#fff;width:34px;padding:3px}
+.sp-edit{overflow:auto;max-height:calc(100vh - 96px)}.sp-edit thead th{position:sticky;top:0;z-index:4;background:#f7f8fa;box-shadow:inset 0 -1px 0 var(--line)}.sp-edit tfoot td{position:sticky;bottom:0;z-index:3;background:#fff;box-shadow:inset 0 1px 0 var(--line)}.sp-edit table{table-layout:fixed}.sp-edit th{white-space:normal;vertical-align:bottom;line-height:1.3;padding:10px 6px}.sp-edit td{vertical-align:top;padding:6px 5px}.sp-edit .c{text-align:center}.sp-edit td.c:first-child{color:var(--muted);padding-top:11px}.sp-edit .r{text-align:right}.sp-edit td.c .sp-cell{text-align:center}.sp-edit td.r .sp-cell{text-align:right}.sp-edit .sp-cell{width:100%;min-width:0;box-sizing:border-box;line-height:1.4}.sp-edit select.sp-prio{text-align:center;text-align-last:center}.sp-edit td.amt{font-variant-numeric:tabular-nums;white-space:nowrap;padding-top:11px;padding-right:10px;font-weight:600}.sp-edit .tag{font-size:12px;color:var(--muted)}.sp-edit td.act{white-space:nowrap;text-align:center}.sp-move{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:6px;background:#fff;width:34px;padding:3px}
 .sp-zone td{background:var(--blush);padding:8px 10px!important}.sp-zone-in{display:flex;align-items:center;gap:12px;flex-wrap:wrap;position:sticky;left:10px;width:max-content}.sp-zname{font:inherit;font-weight:600;color:var(--rak);border:1px solid transparent;background:transparent;border-radius:6px;padding:4px 6px;min-width:320px}.sp-zname:hover,.sp-zname:focus{border-color:var(--blush-2);background:#fff}.sp-ztot{font-weight:600;font-size:13px}.sp-btn.sm{font-size:12px;padding:4px 10px}.sp-edit tfoot td{padding:10px 8px;border-top:2px solid var(--line)}.sp-edit td{padding:4px 4px;vertical-align:top}.sp-cell{font:inherit;font-size:13px;line-height:1.4;width:100%;min-width:0;box-sizing:border-box;border:1px solid transparent;border-radius:6px;padding:5px 6px;background:transparent;color:var(--ink)}
 .sp-cell:hover{border-color:var(--line);background:#fff}textarea.sp-wrap{resize:none;overflow:hidden;display:block;white-space:pre-wrap;word-break:break-word}
 .sp-saved{display:block;font-size:12.5px;color:var(--muted);margin-top:6px}.sp-link{all:unset;color:var(--rak);cursor:pointer;text-decoration:underline}
