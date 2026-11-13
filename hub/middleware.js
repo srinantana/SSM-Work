@@ -349,7 +349,7 @@ async function sparePartApi(cfg, req, url, prof) {
 
 // ---------- Punch List (trial — open to Dew only, 13 Nov 2026) ----------
 // hub/punch-list/app.js. One punch list per project (Job no. from RAK_Master_Project_on_hand), items added line by line:
-// details, assignee, due date, status open / wip / check / done, finished date, note, where the problem came from (process —
+// details, assignee (internal), due date, status open / wip / check / done, finished date, remark (to the customer), note (internal), where the problem came from (process —
 // design / purchase / fab / assembly / install / commission / customer / other, for NCR follow-up), discipline, severity A/B/C,
 // NCR flag + NCR no. + root cause, and several photos before / after. Tables + Storage bucket: database/punch_list.sql.
 // Photos are uploaded through POST /api/punch-list/photo (already shrunk to JPEG in the browser) and read back through
@@ -459,21 +459,27 @@ async function punchApi(cfg, req, url, prof) {
     const row = { project_id: pid, no: Math.max(1, Math.min(99999, parseInt(b.no, 10) || 1)), details: plText(b.details, 2000).trim(),
       process: PL_PROCESS.includes(b.process) ? b.process : '', discipline: plText(b.discipline, 60), severity: ['A', 'B', 'C'].includes(b.severity) ? b.severity : '',
       assignee: plText(b.assignee, 120).trim(), due_date: plDay(b.due_date), status: PL_STATUS.includes(b.status) ? b.status : 'open', finished_date: plDay(b.finished_date),
-      note: plText(b.note, 2000), ncr: b.ncr === true, ncr_no: plText(b.ncr_no, 60).trim(), cause: plText(b.cause, 1000),
+      remark: plText(b.remark, 2000), note: plText(b.note, 2000), ncr: b.ncr === true, ncr_no: plText(b.ncr_no, 60).trim(), cause: plText(b.cause, 1000),
       photos_before: plPhotos(b.photos_before, by), photos_after: plPhotos(b.photos_after, by), updated_by: by, updated_at: now };
     if (!row.details) return json({ error: 'details' }, 400);
     if (row.status === 'done' && !row.finished_date) row.finished_date = now.slice(0, 10);
     const id = parseInt(b.id, 10);
+    // database/punch_list-002.sql adds "remark"; until it is run, save without it instead of failing
+    const save = async (path, method) => {
+      let x = await plWrite(cfg, path, method, row);
+      if (!x.ok && x.status === 400 && /remark/i.test(JSON.stringify(x.data || ''))) { delete row.remark; x = await plWrite(cfg, path, method, row); }
+      return x;
+    };
     let r, removed = [];
     if (id > 0) {
       const old = await rest(`${PL_I}?select=project_id,photos_before,photos_after&id=eq.${id}`, { method: 'GET' });
       if (!old.ok || !old.data[0] || old.data[0].project_id !== pid) return json({ error: 'not found' }, 404);
       const keep = new Set([...row.photos_before, ...row.photos_after].map((x) => x.p));
       removed = [...(old.data[0].photos_before || []), ...(old.data[0].photos_after || [])].map((x) => x.p).filter((x) => !keep.has(x) && PL_PHOTO.test(x));
-      r = await plWrite(cfg, `${PL_I}?id=eq.${id}`, 'PATCH', row);
+      r = await save(`${PL_I}?id=eq.${id}`, 'PATCH');
     } else {
       row.created_by = by;
-      r = await plWrite(cfg, PL_I, 'POST', row);
+      r = await save(PL_I, 'POST');
     }
     if (!r.ok) return json({ error: r.status === 404 ? 'no_table' : 'supabase' }, r.status === 404 ? 503 : 502);
     let saved = Array.isArray(r.data) ? r.data[0] : null;
