@@ -326,6 +326,65 @@ async function siteExpenseRates(cfg) {
     countries: Array.isArray(ct) ? ct.map((r) => [r.country, r.allowance_type]) : [] });
 }
 
+// /api/site-expense/projects — Site Expense projects in Supabase (site_expense_projects, database/site_expense_projects.sql).
+// GET → every project for anyone who can open the menu. POST {project, base} saves one project; `base` is the updated_at the
+// browser loaded (null for a new project) — a newer row on the server answers 409 with the server copy instead of overwriting.
+// The server works out what changed and checks the SITE_EXPENSE rights for each kind of change.
+const SE_TABLE = '/rest/v1/site_expense_projects';
+const SE_HEADER = ['ij', 'name', 'customer', 'city', 'destination', 'country', 'allowance_tier', 'start', 'end'];
+function seNeeds(old, nw) {
+  const ch = (k) => JSON.stringify(old[k] ?? null) !== JSON.stringify(nw[k] ?? null);
+  const need = new Set();
+  const draftish = ['draft', 'revise'].includes(old.status);
+  if (ch('status')) {
+    const to = nw.status, from = old.status;
+    if (to === 'requested' && ['draft', 'revise'].includes(from)) need.add('create');
+    else if ((to === 'approved' || to === 'revise') && from === 'requested') need.add('approve');
+    else if (to === 'locked' && from === 'approved') need.add('award');
+    else need.add('award'); // any other move (e.g. re-opening) is SSM only
+  }
+  if (['jo', 'budget', 'lockedAt', 'award'].some(ch)) need.add('award');
+  if (ch('actuals')) need.add('actual|check');
+  if (['lines', 'phases'].concat(SE_HEADER).some(ch)) need.add(draftish ? 'create|award' : 'award');
+  if (ch('list') || ch('docs')) need.add('create|award');
+  return [...need];
+}
+async function siteExpenseProjects(cfg, req, url, prof) {
+  if (req.method === 'GET') {
+    const rows = await restAll(cfg, `${SE_TABLE}?select=data,updated_at&order=updated_at.desc`);
+    if (!rows) return json({ error: 'no_table' }, 503);
+    return json({ projects: rows.map((r) => ({ project: r.data, v: r.updated_at })) });
+  }
+  if (req.method !== 'POST') return json({ error: 'method' }, 405);
+  const origin = req.headers.get('origin');
+  if (origin && origin !== cfg.app) return json({ error: 'bad origin' }, 403);
+  const perms = sitePerms(prof);
+  let body;
+  try { body = await req.json(); } catch { return json({ error: 'json' }, 400); }
+  const p = body && body.project;
+  if (!p || typeof p !== 'object' || !/^[\w-]{3,80}$/.test(String(p.id || '')) || !String(p.ij || '').trim()) return json({ error: 'project' }, 400);
+  if (JSON.stringify(p).length > 900000) return json({ error: 'too large' }, 413);
+  const cur = await call(cfg, `${SE_TABLE}?id=eq.${encodeURIComponent(p.id)}&select=data,updated_at`, { method: 'GET', admin: true });
+  if (!cur.ok) return json({ error: 'no_table' }, 503);
+  const old = Array.isArray(cur.data) && cur.data[0];
+  const user = String(prof.username || '').toLowerCase();
+  const row = { ij: String(p.ij).trim(), jo: String(p.jo || ''), status: String(p.status || 'draft'), list: String(p.list || 'active'), data: p, updated_by: user, updated_at: new Date().toISOString() };
+  if (!old) {
+    if (!perms.includes('create')) return json({ error: 'no_permission', need: ['create'] }, 403);
+    if (row.status !== 'draft') return json({ error: 'new projects start as draft' }, 400);
+    const r = await call(cfg, SE_TABLE, { method: 'POST', admin: true, body: { id: p.id, ...row, created_by: user }, headers: { prefer: 'return=representation' } });
+    if (!r.ok) return json({ error: r.status === 409 ? 'exists' : 'supabase' }, r.status === 409 ? 409 : 502);
+    return json({ ok: true, v: r.data[0].updated_at });
+  }
+  if (!body.base || Date.parse(body.base) !== Date.parse(old.updated_at)) return json({ error: 'conflict', project: old.data, v: old.updated_at }, 409);
+  const missing = seNeeds(old.data || {}, p).filter((n) => !n.split('|').some((k) => perms.includes(k)));
+  if (missing.length) return json({ error: 'no_permission', need: missing, project: old.data, v: old.updated_at }, 403);
+  const r = await call(cfg, `${SE_TABLE}?id=eq.${encodeURIComponent(p.id)}&updated_at=eq.${encodeURIComponent(old.updated_at)}`, { method: 'PATCH', admin: true, body: row, headers: { prefer: 'return=representation' } });
+  if (!r.ok) return json({ error: 'supabase' }, 502);
+  if (!Array.isArray(r.data) || !r.data.length) return json({ error: 'conflict' }, 409);
+  return json({ ok: true, v: r.data[0].updated_at });
+}
+
 async function sparePartApi(cfg, req, url, prof) {
   if (url.pathname === '/api/spare-part/items' && req.method === 'GET') return itemsApi(cfg, url, prof);
   // Jobs for "Create new project" come from RAK_Master_Project_on_hand (Dew, 13 Nov 2026), same reader as Manpower.
@@ -1410,11 +1469,11 @@ function authHeaders(key, bearer) {
   return h;
 }
 
-async function call(cfg, path, { method = 'POST', body, bearer, admin } = {}) {
+async function call(cfg, path, { method = 'POST', body, bearer, admin, headers } = {}) {
   const key = admin ? cfg.service : cfg.anon;
   const res = await fetch(cfg.url + path, {
     method,
-    headers: authHeaders(key, bearer),
+    headers: headers ? { ...authHeaders(key, bearer), ...headers } : authHeaders(key, bearer),
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   let data = {};
@@ -2040,6 +2099,7 @@ export default async function middleware(req) {
     const live = await liveProfile(cfg, user);
     if (!live) return json({ error: 'login required' }, 401);
     if (!canOpen(live, 'site-expense')) return json({ error: 'no access' }, 403);
+    if (url.pathname === '/api/site-expense/projects') { try { return await siteExpenseProjects(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); } }
     if (url.pathname !== '/api/site-expense/rates' || req.method !== 'GET') return json({ error: 'not found' }, 404);
     try { return await siteExpenseRates(cfg); } catch { return json({ error: 'supabase' }, 502); }
   }
