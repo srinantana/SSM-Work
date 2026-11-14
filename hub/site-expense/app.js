@@ -122,7 +122,7 @@
   /* ======================= TEST MODE =======================
      Everything below keeps its data in this browser only (localStorage key KEY).
      Swap load()/save() for calls to /api/site-expense/* (Supabase tables in database/site_expense.sql) to go live. */
-  const KEY = "ssm-site-expense-test-v3"; // v3: working periods (phases) + manpower per phase
+  const KEY = "ssm-site-expense-v4"; // v4 (14 Nov 2026): test data cleared, start empty before the Base44 move
   const num = v => { const n = parseFloat(String(v ?? "").replace(/,/g, "")); return isFinite(n) ? n : 0; };
   const baht = n => "฿" + Math.round(n).toLocaleString("en-US");
   const money = n => Math.round(n).toLocaleString("en-US");
@@ -604,7 +604,10 @@
 @media (max-width:640px){.se-catnav a span{display:none}.se-catnav a{padding:6px 9px}}`;
 
   /* ---------- store ---------- */
+  // Sample projects only when localStorage "ssm-site-expense-demo" = "1" (automated tests); everyone else starts empty.
   function seed() {
+    let demo = false; try { demo = localStorage.getItem("ssm-site-expense-demo") === "1"; } catch (e) {}
+    if (!demo) return { v: 2, user: "dew", projects: [] };
     const mk = (o) => Object.assign({ jo: "", list: "active", lines: [], history: [], budget: null, lockedAt: null, actuals: [], createdAt: new Date().toISOString() }, o);
     const L1 = (cat, kind, o) => Object.assign(newLine(cat, kind), o);
     return { v: 2, user: "dew", projects: [
@@ -688,7 +691,7 @@
   function wireRole(el, redraw) {
     el.querySelectorAll("[data-user]").forEach(b => b.onclick = () => { DB.user = b.dataset.user; DB.picked = true; save(); redraw(); });
     const r = el.querySelector("[data-reset]");
-    if (r) r.onclick = () => { if (confirm("ล้างข้อมูลทดลองทั้งหมดแล้วเริ่มใหม่จากตัวอย่าง?")) { DB = seed(); save(); location.hash = "#site-expense"; redraw(); } };
+    if (r) r.onclick = () => { if (confirm("ล้างข้อมูลทั้งหมดในเบราว์เซอร์นี้แล้วเริ่มใหม่ (ว่าง)?")) { DB = seed(); save(); location.hash = "#site-expense"; redraw(); } };
   }
   function toast(msg) {
     let t = document.getElementById("seToast"); if (!t) { t = document.createElement("div"); t.id = "seToast"; document.body.appendChild(t); }
