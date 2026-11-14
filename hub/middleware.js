@@ -130,7 +130,7 @@ const MENUS = [
 const MENU_IDS = MENUS.map((m) => m.id);
 function menuOfPath(path) {
   if (path.startsWith('/spare-part/') || path.startsWith('/api/spare-part/')) return 'spare-part';
-  if (path.startsWith('/site-expense/')) return 'site-expense';
+  if (path.startsWith('/site-expense/') || path.startsWith('/api/site-expense/')) return 'site-expense';
   if (path.startsWith('/punch-list/') || path.startsWith('/api/punch-list/')) return 'punch-list';
   if (path.startsWith('/service-plan/') || path.startsWith('/api/service-plan/')) return 'service-plan';
   if (path.startsWith('/manpower/') || path.startsWith('/api/manpower/')) return 'manpower';
@@ -300,6 +300,27 @@ async function itemsApi(cfg, url, prof) {
   const kind = url.searchParams.get('kind');
   const hit = rows.filter((r) => (!kind || r.kind === kind) && words.every((w) => (r.code + ' ' + r.d1 + ' ' + r.d2 + ' ' + r.maker).toLowerCase().includes(w)));
   return json({ items: hit.slice(0, 40).map(out), total: hit.length });
+}
+
+// GET /api/site-expense/rates — master rates from Supabase (database/site_expense_rates.sql, run by Dew 14 Nov 2026),
+// in the same shapes as the built-in fallback in hub/site-expense/app.js.
+async function siteExpenseRates(cfg) {
+  const get = (t, q) => restAll(cfg, `/rest/v1/${t}?select=*&order=${q}`);
+  const [md, acc, zn, veh, tr] = await Promise.all([get('se_rate_manday', 'rate_per_day.desc,grp'), get('se_rate_accommodation', 'acc_type,period'),
+    get('se_rate_transport_zone', 'zone,province'), get('se_rate_transport', 'zone_a,transport_type'), get('se_rate_domestic_travel', 'travel_type,budget_rate,destination')]);
+  if (![md, acc, zn, veh, tr].every((x) => Array.isArray(x) && x.length)) return json({ error: 'no_table' }, 503);
+  const n = (v) => (v == null || v === '' ? '' : Number(v));
+  const zones = {};
+  zn.forEach((r) => { (zones[r.zone] = zones[r.zone] || { band: r.distance_band || '', th: r.zone_desc || '', prov: [] }).prov.push(r.province); });
+  const travel = {};
+  tr.forEach((r) => (travel[r.travel_type] = travel[r.travel_type] || []).push([r.destination, n(r.budget_rate)]));
+  const updated = [md, acc, veh, tr].flat().map((r) => r.updated_at || '').sort().pop() || '';
+  return json({ updated,
+    manday: md.map((r) => [r.grp, n(r.rate_per_day), n(r.ot_rate_per_hour)]),
+    acc: acc.map((r) => [r.acc_type, r.period, n(r.rate)]),
+    zones,
+    veh: veh.map((r) => [r.transport_type, [n(r.zone_a), n(r.zone_b), n(r.zone_c), n(r.zone_d), n(r.zone_e)], r.unit || '', r.remarks || '']),
+    travel });
 }
 
 async function sparePartApi(cfg, req, url, prof) {
@@ -2009,6 +2030,15 @@ export default async function middleware(req) {
     if (!live) return json({ error: 'login required' }, 401);
     if (!canOpen(live, 'spare-part')) return json({ error: 'no access' }, 403);
     try { return await sparePartApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
+  }
+
+  if (path.startsWith('/api/site-expense/')) {
+    if (!signedIn) return json({ error: 'login required' }, 401);
+    const live = await liveProfile(cfg, user);
+    if (!live) return json({ error: 'login required' }, 401);
+    if (!canOpen(live, 'site-expense')) return json({ error: 'no access' }, 403);
+    if (url.pathname !== '/api/site-expense/rates' || req.method !== 'GET') return json({ error: 'not found' }, 404);
+    try { return await siteExpenseRates(cfg); } catch { return json({ error: 'supabase' }, 502); }
   }
 
   if (path.startsWith('/api/punch-list/')) {

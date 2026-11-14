@@ -17,13 +17,13 @@ veh=[[t,[int(a),int(b),int(c),int(d),int(e)],u,rem] for t,a,b,c,d,e,u,rem in row
 trav={}
 for t,dest,r in rows('Domestic_Travel_Rate'): trav.setdefault(t,[]).append([dest,int(r)])
 J=lambda o:json.dumps(o,ensure_ascii=False)
-js=f"""  // ---- Master rate: generated from Master_rate_site_expense.xlsx (Dew, 14 Nov 2026) by database/rates/gen_rates.py — edit the xlsx, not these lines ----
-  const RATE_SRC = "Master rate 14 พ.ย. 2026";
-  const RATE_MANDAY = {J(md)}; // [group, rate/day, OT/hour]
-  const RATE_ACC = {J(acc)}; // [type, Daily|Monthly, rate]
-  const ZONES = {J(zones)};
-  const RATE_VEH = {J(veh)}; // [type, [Zone A..E], unit, remark]
-  const RATE_TRAVEL = {J(trav)}; // type → [[destination, rate]]
+js=f"""  // ---- Master rate: generated from Master_rate_site_expense.xlsx (Dew, 14 Nov 2026) by database/rates/gen_rates.py — fallback when Supabase rates cannot be read ----
+  let RATE_SRC = "Master rate 14 พ.ย. 2026";
+  let RATE_MANDAY = {J(md)}; // [group, rate/day, OT/hour]
+  let RATE_ACC = {J(acc)}; // [type, Daily|Monthly, rate]
+  let ZONES = {J(zones)};
+  let RATE_VEH = {J(veh)}; // [type, [Zone A..E], unit, remark]
+  let RATE_TRAVEL = {J(trav)}; // type → [[destination, rate]]
   // ---- end of generated master rate ----
 """
 open(OUT_JS,'w').write(js)
