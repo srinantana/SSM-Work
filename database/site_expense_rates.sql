@@ -8,8 +8,9 @@ create table if not exists se_rate_manday (grp text primary key, rate_per_day nu
 create table if not exists se_rate_accommodation (acc_type text not null, period text not null check (period in ('Daily','Monthly')), rate numeric not null, updated_at timestamptz default now(), primary key (acc_type, period));
 create table if not exists se_rate_transport_zone (province text primary key, zone text not null, distance_band text, zone_desc text, note text);
 create table if not exists se_rate_transport (transport_type text primary key, zone_a numeric, zone_b numeric, zone_c numeric, zone_d numeric, zone_e numeric, unit text, remarks text, updated_at timestamptz default now());
+create table if not exists se_rate_allowance (allowance_type text primary key, rate_per_day numeric not null, sort int not null default 0, updated_at timestamptz default now());
 create table if not exists se_rate_domestic_travel (travel_type text not null, destination text not null, budget_rate numeric not null, updated_at timestamptz default now(), primary key (travel_type, destination));
-truncate se_rate_manday, se_rate_accommodation, se_rate_transport_zone, se_rate_transport, se_rate_domestic_travel;
+truncate se_rate_manday, se_rate_accommodation, se_rate_transport_zone, se_rate_transport, se_rate_domestic_travel, se_rate_allowance;
 
 insert into se_rate_manday (grp, rate_per_day, ot_rate_per_hour) values
   ('Engineer', 2000, 300),
@@ -89,6 +90,11 @@ insert into se_rate_transport (transport_type, zone_a, zone_b, zone_c, zone_d, z
   ('รถเครน 100 ตัน', 75000, 95000, 125000, 175000, 250000, 'THB/1 day incl. estimated mobilization', 'Budget ceiling estimate; not supplier-verified'),
   ('รถเครน 200 ตัน', 150000, 190000, 250000, 350000, 500000, 'THB/day', 'Indicative budget allowance only; supplier quotation required; mobilization, rigging and permits may be extra');
 
+insert into se_rate_allowance (allowance_type, rate_per_day, sort) values
+  ('Local (Thailand)', 150, 0),
+  ('Developed Country', 1200, 1),
+  ('Developing Country', 800, 2);
+
 insert into se_rate_domestic_travel (travel_type, destination, budget_rate) values
   ('รถส่วนตัว (Round Trip)', 'Samutprakarn', 2000),
   ('รถส่วนตัว (Round Trip)', 'Samutsakhon', 2000),
@@ -131,5 +137,5 @@ insert into se_rate_domestic_travel (travel_type, destination, budget_rate) valu
   ('รถตู้ (Site Trip)', 'All Location', 1000);
 
 -- RLS on with no policies: browsers cannot read or write these tables directly; the SSM Work server reads them with the service role. Edit rates in Supabase or regenerate from the xlsx.
-alter table se_rate_manday enable row level security; alter table se_rate_accommodation enable row level security; alter table se_rate_transport_zone enable row level security; alter table se_rate_transport enable row level security; alter table se_rate_domestic_travel enable row level security;
+alter table se_rate_manday enable row level security; alter table se_rate_accommodation enable row level security; alter table se_rate_transport_zone enable row level security; alter table se_rate_transport enable row level security; alter table se_rate_domestic_travel enable row level security; alter table se_rate_allowance enable row level security;
 commit;
