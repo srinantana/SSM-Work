@@ -248,7 +248,7 @@
       amt: r => num(r.lump_qty) * num(r.lump_rate) + num(r.manday_qty) * num(r.manday_rate),
       brief: r => r.title || r.supplier || "–" }],
     transportation: [
-      { kind: "veh", title: "รถขนส่ง / เครน / โฟลคลิฟท์", hint: "คัน × เที่ยว (หรือวัน) × ราคา + คนให้สัญญาณ × ค่าให้สัญญาณ · ราคาตาม Zone ของ “จังหวัดปลายทาง” · รถ 6/10 ล้อ เทรลเลอร์ คิดต่อเที่ยว · เครน โฟล์คลิฟท์ คิดต่อวัน (รวม mobilization)",
+      { kind: "veh", title: "รถขนส่ง / เครน / โฟล์คลิฟท์", hint: "คัน × เที่ยว (หรือวัน) × ราคา + คนให้สัญญาณ × ค่าให้สัญญาณ · ราคาตาม Zone ของ “จังหวัดปลายทาง” · รถ 6/10 ล้อ เทรลเลอร์ คิดต่อเที่ยว · เครน โฟล์คลิฟท์ คิดต่อวัน (รวม mobilization)",
         fields: [F("description", "ประเภทรถ", { t: "pick", list: "vehicles", w: 190 }), F("vehicles_qty", "คัน", { w: 60, d: 1 }), F("trips", "เที่ยว/วัน", { w: 70, d: 1 }), F("rate", "ราคา/เที่ยว·วัน", { w: 110 }), F("signal_crew", "คนให้สัญญาณ", { w: 90 }), F("signal_rate", "ค่าให้สัญญาณ", { w: 100, d: MR.signal }), F("note", "หมายเหตุ", { t: "text" })],
         amt: r => num(r.vehicles_qty) * num(r.trips) * num(r.rate) + num(r.signal_crew) * num(r.signal_rate),
         brief: r => `${r.description || "–"} ×${num(r.trips) || 0} เที่ยว` }],
