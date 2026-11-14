@@ -306,23 +306,24 @@ async function itemsApi(cfg, url, prof) {
 // in the same shapes as the built-in fallback in hub/site-expense/app.js.
 async function siteExpenseRates(cfg) {
   const get = (t, q) => restAll(cfg, `/rest/v1/${t}?select=*&order=${q}`);
-  const [md, acc, zn, veh, tr, al] = await Promise.all([get('se_rate_manday', 'rate_per_day.desc,grp'), get('se_rate_accommodation', 'acc_type,period'),
+  const [md, acc, zn, veh, tr, al, ct] = await Promise.all([get('se_rate_manday', 'rate_per_day.desc,grp'), get('se_rate_accommodation', 'acc_type,period'),
     get('se_rate_transport_zone', 'zone,province'), get('se_rate_transport', 'zone_a,transport_type'), get('se_rate_domestic_travel', 'travel_type,budget_rate,destination'),
-    get('se_rate_allowance', 'sort,allowance_type').catch(() => null)]); // allowance table added 14 Nov 2026; optional
+    get('se_rate_allowance', 'sort,allowance_type').catch(() => null), get('se_rate_country', 'country').catch(() => null)]); // allowance / country tables added 14 Nov 2026; optional
   if (![md, acc, zn, veh, tr].every((x) => Array.isArray(x) && x.length)) return json({ error: 'no_table' }, 503);
   const n = (v) => (v == null || v === '' ? '' : Number(v));
   const zones = {};
   zn.forEach((r) => { (zones[r.zone] = zones[r.zone] || { band: r.distance_band || '', th: r.zone_desc || '', prov: [] }).prov.push(r.province); });
   const travel = {};
   tr.forEach((r) => (travel[r.travel_type] = travel[r.travel_type] || []).push([r.destination, n(r.budget_rate)]));
-  const updated = [md, acc, veh, tr, al || []].flat().map((r) => r.updated_at || '').sort().pop() || '';
+  const updated = [md, acc, veh, tr, al || [], ct || []].flat().map((r) => r.updated_at || '').sort().pop() || '';
   return json({ updated,
     manday: md.map((r) => [r.grp, n(r.rate_per_day), n(r.ot_rate_per_hour)]),
     acc: acc.map((r) => [r.acc_type, r.period, n(r.rate)]),
     zones,
     veh: veh.map((r) => [r.transport_type, [n(r.zone_a), n(r.zone_b), n(r.zone_c), n(r.zone_d), n(r.zone_e)], r.unit || '', r.remarks || '']),
     travel,
-    allowance: Array.isArray(al) ? al.map((r) => [r.allowance_type, n(r.rate_per_day)]) : [] });
+    allowance: Array.isArray(al) ? al.map((r) => [r.allowance_type, n(r.rate_per_day)]) : [],
+    countries: Array.isArray(ct) ? ct.map((r) => [r.country, r.allowance_type]) : [] });
 }
 
 async function sparePartApi(cfg, req, url, prof) {
