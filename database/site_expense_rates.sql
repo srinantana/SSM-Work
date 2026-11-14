@@ -58,6 +58,7 @@ insert into se_rate_transport_zone (province, zone, distance_band, zone_desc, no
   ('ตราด', 'D', '351-600', 'ระยะไกล', 'Preliminary grouping - verify actual route'),
   ('บุรีรัมย์', 'D', '351-600', 'ระยะไกล', 'Preliminary grouping - verify actual route'),
   ('สุรินทร์', 'D', '351-600', 'ระยะไกล', 'Preliminary grouping - verify actual route'),
+  ('กำแพงเพชร', 'D', '351-600', 'ระยะไกล', 'Same rate as neighbouring provinces (นครสวรรค์ / พิจิตร / พิษณุโลก) - Dew 14 Nov 2026'),
   ('เชียงใหม่', 'E', '>600', 'ระยะไกลพิเศษ', 'Preliminary grouping - verify actual route'),
   ('ลำพูน', 'E', '>600', 'ระยะไกลพิเศษ', 'Preliminary grouping - verify actual route'),
   ('เชียงราย', 'E', '>600', 'ระยะไกลพิเศษ', 'Preliminary grouping - verify actual route'),
@@ -106,7 +107,7 @@ insert into se_rate_domestic_travel (travel_type, destination, budget_rate) valu
   ('รถ Pick up (Round Trip)', 'Samutsakhon', 2000),
   ('รถ Pick up (Round Trip)', 'Chacheongsao', 2000),
   ('รถ Pick up (Round Trip)', 'Chonburi', 2000),
-  ('รถ Pick up (Round Trip)', 'Bangkok', 2500),
+  ('รถ Pick up (Round Trip)', 'Bangkok', 2000),
   ('รถ Pick up (Round Trip)', 'Pathumthani', 2000),
   ('รถ Pick up (Round Trip)', 'Ayutthaya', 2500),
   ('รถ Pick up (Round Trip)', 'Rayong', 2500),
@@ -129,6 +130,6 @@ insert into se_rate_domestic_travel (travel_type, destination, budget_rate) valu
   ('รถตู้ (Round Trip)', 'Lamphun', 12000),
   ('รถตู้ (Site Trip)', 'All Location', 1000);
 
--- Signed-in users read the rates; edits are made here in Supabase (or via service role) only.
+-- RLS on with no policies: browsers cannot read or write these tables directly; the SSM Work server reads them with the service role. Edit rates in Supabase or regenerate from the xlsx.
 alter table se_rate_manday enable row level security; alter table se_rate_accommodation enable row level security; alter table se_rate_transport_zone enable row level security; alter table se_rate_transport enable row level security; alter table se_rate_domestic_travel enable row level security;
 commit;

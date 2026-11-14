@@ -41,7 +41,7 @@ sql.append("insert into se_rate_accommodation (acc_type, period, rate) values\n 
 sql.append("insert into se_rate_transport_zone (province, zone, distance_band, zone_desc, note) values\n  "+",\n  ".join(f"({q(prov)}, {q(z)}, {q(band)}, {q(desc)}, {q(n)})" for z,band,desc,prov,n in rows('Transportation_Zone'))+";")
 sql.append("insert into se_rate_transport (transport_type, zone_a, zone_b, zone_c, zone_d, zone_e, unit, remarks) values\n  "+",\n  ".join(f"({q(t)}, {', '.join(map(str,v))}, {q(u)}, {q(rm)})" for t,v,u,rm in veh)+";")
 sql.append("insert into se_rate_domestic_travel (travel_type, destination, budget_rate) values\n  "+",\n  ".join(f"({q(t)}, {q(d)}, {r})" for t,l in trav.items() for d,r in l)+";")
-sql.append("""-- Signed-in users read the rates; edits are made here in Supabase (or via service role) only.
+sql.append("""-- RLS on with no policies: browsers cannot read or write these tables directly; the SSM Work server reads them with the service role. Edit rates in Supabase or regenerate from the xlsx.
 alter table se_rate_manday enable row level security; alter table se_rate_accommodation enable row level security; alter table se_rate_transport_zone enable row level security; alter table se_rate_transport enable row level security; alter table se_rate_domestic_travel enable row level security;
 commit;""")
 open(OUT_SQL,'w').write("\n\n".join(sql)+"\n")
