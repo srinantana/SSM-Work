@@ -178,22 +178,38 @@
      Totals: manpower = คน×วัน×ค่าแรง + คน×ชม.OT×ค่า OT · subcontract = เหมา + manday · vehicles = คัน×เที่ยว×ราคา + คนให้สัญญาณ
              ground = จำนวน×ครั้ง×ราคา · accommodation = ห้อง×คืน/เดือน×ราคา · air = ใบ×ราคา · documents/site = จำนวน×ราคา */
   // Master rates copied from the SC Site Expense app in Base44 (10 Nov 2026) until the SSM Work rate tables exist in Supabase.
-  const DESTS = ["กรุงเทพฯ", "ปทุมธานี", "อยุธยา", "สมุทรปราการ", "สมุทรสาคร", "ฉะเชิงเทรา", "ชลบุรี", "ระยอง", "ขอนแก่น"];
-  const byDest = (o) => (p) => ({ rate: o[p.destination] != null ? o[p.destination] : "" });
-  const MR = { allowance: 150, signal: 4500 };
-  const otOf = (d) => Math.round(d / 8 * 1.5 * 100) / 100; // OT/hour = day rate ÷ 8 × 1.5
-  const pos = (n, d) => [n, { day_rate: d, ot_rate: otOf(d) }];
+  // ---- Master rate: generated from Master_rate_site_expense.xlsx (Dew, 14 Nov 2026) by database/rates/gen_rates.py — edit the xlsx, not these lines ----
+  const RATE_SRC = "Master rate 14 พ.ย. 2026";
+  const RATE_MANDAY = [["Engineer", 2000, 300], ["SC/SSM", 2000, 300], ["Lead technician", 1500, 300], ["Technician", 1000, 300]]; // [group, rate/day, OT/hour]
+  const RATE_ACC = [["Local Hotel", "Daily", 700], ["Local Hotel", "Monthly", 10000], ["International Hotel", "Daily", 2000], ["International Hotel", "Monthly", 45000], ["Local Apartment", "Monthly", 10000], ["International Apartment", "Daily", 1500], ["International Apartment", "Monthly", 30000]]; // [type, Daily|Monthly, rate]
+  const ZONES = {"A": {"band": "0-100", "th": "กรุงเทพฯ และใกล้เคียง", "prov": ["กรุงเทพมหานคร", "สมุทรปราการ", "สมุทรสาคร", "ปทุมธานี", "นนทบุรี", "นครปฐม", "พระนครศรีอยุธยา"]}, "B": {"band": "101-200", "th": "ภาคตะวันออกและรอบนอก", "prov": ["ชลบุรี", "ระยอง", "ฉะเชิงเทรา", "ปราจีนบุรี", "สระบุรี", "นครนายก", "ราชบุรี", "สุพรรณบุรี"]}, "C": {"band": "201-350", "th": "ระยะกลาง", "prov": ["จันทบุรี", "กาญจนบุรี", "ลพบุรี", "นครราชสีมา", "เพชรบุรี", "สระแก้ว", "ชัยนาท", "อ่างทอง"]}, "D": {"band": "351-600", "th": "ระยะไกล", "prov": ["ประจวบคีรีขันธ์", "ขอนแก่น", "นครสวรรค์", "พิจิตร", "พิษณุโลก", "ตราด", "บุรีรัมย์", "สุรินทร์"]}, "E": {"band": ">600", "th": "ระยะไกลพิเศษ", "prov": ["เชียงใหม่", "ลำพูน", "เชียงราย", "อุดรธานี", "อุบลราชธานี", "สุราษฎร์ธานี", "สงขลา", "ภูเก็ต"]}};
+  const RATE_VEH = [["6 ล้อ (คอกยาว, ธรรมดา)", [5500, 8500, 13000, 21000, 35000], "THB/trip", "Budget ceiling estimate; not supplier-verified"], ["รถ 6 ล้อ เฮี๊ยบติดเครน", [9000, 12000, 18000, 27000, 40000], "THB/trip", "Budget ceiling estimate; not supplier-verified"], ["รถ 10 ล้อ เฮี๊ยบติดเครน", [12000, 17000, 24000, 36000, 55000], "THB/trip", "Budget ceiling estimate; not supplier-verified"], ["เทรลเลอร์", [12000, 17000, 25000, 38000, 60000], "THB/trip", "Budget ceiling estimate; not supplier-verified"], ["โฟล์คลิฟท์ 2 ตัน", [7000, 10000, 14000, 20000, 30000], "THB/1 day incl. estimated mobilization", "Budget ceiling estimate; not supplier-verified"], ["โฟล์คลิฟท์ 5 ตัน", [10000, 14000, 19000, 28000, 42000], "THB/1 day incl. estimated mobilization", "Budget ceiling estimate; not supplier-verified"], ["รถเครน 10 ตัน", [10000, 14000, 19000, 27000, 40000], "THB/1 day incl. estimated mobilization", "Budget ceiling estimate; not supplier-verified"], ["รถเครน 20 ตัน", [13000, 18000, 24000, 34000, 50000], "THB/1 day incl. estimated mobilization", "Budget ceiling estimate; not supplier-verified"], ["รถเครน 25 ตัน", [15000, 20000, 27000, 38000, 55000], "THB/1 day incl. estimated mobilization", "Budget ceiling estimate; not supplier-verified"], ["รถเครน 30 ตัน", [18000, 24000, 32000, 45000, 65000], "THB/1 day incl. estimated mobilization", "Budget ceiling estimate; not supplier-verified"], ["รถเครน 35 ตัน", [20000, 27000, 36000, 50000, 75000], "THB/1 day incl. estimated mobilization", "Budget ceiling estimate; not supplier-verified"], ["รถเครน 50 ตัน", [26000, 35000, 47000, 65000, 95000], "THB/1 day incl. estimated mobilization", "Budget ceiling estimate; not supplier-verified"], ["รถเครน 55 ตัน", [29000, 39000, 52000, 72000, 105000], "THB/1 day incl. estimated mobilization", "Budget ceiling estimate; not supplier-verified"], ["รถเครน 60 ตัน", [33000, 44000, 58000, 80000, 115000], "THB/1 day incl. estimated mobilization", "Budget ceiling estimate; not supplier-verified"], ["รถเครน 70 ตัน", [39000, 52000, 68000, 95000, 135000], "THB/1 day incl. estimated mobilization", "Budget ceiling estimate; not supplier-verified"], ["รถเครน 75 ตัน", [43000, 57000, 75000, 105000, 150000], "THB/1 day incl. estimated mobilization", "Budget ceiling estimate; not supplier-verified"], ["รถเครน 80 ตัน", [50000, 65000, 85000, 120000, 170000], "THB/1 day incl. estimated mobilization", "Budget ceiling estimate; not supplier-verified"], ["รถเครน 100 ตัน", [75000, 95000, 125000, 175000, 250000], "THB/1 day incl. estimated mobilization", "Budget ceiling estimate; not supplier-verified"], ["รถเครน 200 ตัน", [150000, 190000, 250000, 350000, 500000], "THB/day", "Indicative budget allowance only; supplier quotation required; mobilization, rigging and permits may be extra"]]; // [type, [Zone A..E], unit, remark]
+  const RATE_TRAVEL = {"รถส่วนตัว (Round Trip)": [["Samutprakarn", 2000], ["Samutsakhon", 2000], ["Chacheongsao", 2000], ["Chonburi", 2500], ["Bangkok", 2000], ["Pathumthani", 2500], ["Ayutthaya", 2500], ["Rayong", 3000], ["Nakornratchasrima", 4000], ["Kamphaengphet", 6000], ["Khonkean", 6000], ["Lamphun", 10000]], "รถส่วนตัว (Site Trip)": [["All Location", 500]], "รถ Pick up (Round Trip)": [["Samutprakarn", 2000], ["Samutsakhon", 2000], ["Chacheongsao", 2000], ["Chonburi", 2000], ["Bangkok", 2500], ["Pathumthani", 2000], ["Ayutthaya", 2500], ["Rayong", 2500], ["Nakornratchasrima", 3000], ["Kamphaengphet", 4000], ["Khonkean", 6000], ["Lamphun", 6000]], "รถ Pick up (Site Trip)": [["All Location", 1000]], "รถตู้ (Round Trip)": [["Samutprakarn", 2500], ["Samutsakhon", 2500], ["Chacheongsao", 2500], ["Chonburi", 3000], ["Bangkok", 2500], ["Pathumthani", 3000], ["Ayutthaya", 3000], ["Rayong", 3500], ["Nakornratchasrima", 4500], ["Kamphaengphet", 6500], ["Khonkean", 7000], ["Lamphun", 12000]], "รถตู้ (Site Trip)": [["All Location", 1000]]}; // type → [[destination, rate]]
+  // ---- end of generated master rate ----
+  // Project destination (Thai province) → transport zone and the destination names used in the domestic travel sheet
+  const DEST_ALIAS = { "กรุงเทพฯ": "กรุงเทพมหานคร", "อยุธยา": "พระนครศรีอยุธยา" }; // names saved before the master rate
+  const TRAVEL_DEST = { "สมุทรปราการ": "Samutprakarn", "สมุทรสาคร": "Samutsakhon", "ฉะเชิงเทรา": "Chacheongsao", "ชลบุรี": "Chonburi", "กรุงเทพมหานคร": "Bangkok",
+    "ปทุมธานี": "Pathumthani", "พระนครศรีอยุธยา": "Ayutthaya", "ระยอง": "Rayong", "นครราชสีมา": "Nakornratchasrima", "กำแพงเพชร": "Kamphaengphet", "ขอนแก่น": "Khonkean", "ลำพูน": "Lamphun" };
+  const NO_ZONE = Object.keys(TRAVEL_DEST).filter(d => !Object.values(ZONES).some(z => z.prov.includes(d))); // in travel sheet but not zoned
+  const destOf = p => DEST_ALIAS[p.destination] || p.destination || "";
+  const zoneOf = p => Object.keys(ZONES).find(z => ZONES[z].prov.includes(destOf(p))) || "";
+  const destSelect = (id, cur) => { cur = DEST_ALIAS[cur] || cur || "";
+    const o = d => `<option value="${esc(d)}" ${cur === d ? "selected" : ""}>${esc(d)}</option>`;
+    return `<select id="${id}"><option value="">ต่างประเทศ / อื่นๆ</option>${Object.entries(ZONES).map(([z, v]) => `<optgroup label="Zone ${z} · ${esc(v.band)} km · ${esc(v.th)}">${v.prov.map(o).join("")}</optgroup>`).join("")}${NO_ZONE.length ? `<optgroup label="ไม่อยู่ใน Zone (ราคารถขนส่งกรอกเอง)">${NO_ZONE.map(o).join("")}</optgroup>` : ""}${cur && !Object.keys(TRAVEL_DEST).concat(...Object.values(ZONES).map(z => z.prov)).includes(cur) ? o(cur) : ""}</select>`; };
+  // A master item whose price depends on the project: fn(p) → { rate }, with how to describe it in the pick list
+  // no zone → no price (note "ABCDE".indexOf("") is 0)
+  const byZone = (arr, unit, remark) => Object.assign(p => { const z = zoneOf(p), i = z ? "ABCDE".indexOf(z) : -1; return { rate: i >= 0 ? arr[i] : "" }; }, { where: "zone", unit, remark });
+  const byTravel = (list) => { const m = Object.fromEntries(list); return Object.assign(p => ({ rate: m[TRAVEL_DEST[destOf(p)]] != null ? m[TRAVEL_DEST[destOf(p)]] : "" }), { where: "travel", unit: "เที่ยว" }); };
+  const MR = { allowance: 150, signal: 4500 }; // not in the master rate file — unchanged
+  const pos = (n, d, ot) => [n, { day_rate: d, ot_rate: ot }];
+  const unitTh = u => /day/i.test(u) ? "วัน" : "เที่ยว";
+  const accTh = (t, per) => `${t} · ${per === "Monthly" ? "รายเดือน" : "รายวัน"}`;
+  const ACC_RATE = (t, per) => (RATE_ACC.find(x => x[0] === t && x[1] === per) || [])[2];
   const MASTER = {
-    positions: [pos("Technician", 1000), pos("Team Lead", 2000), pos("Engineer", 2000), pos("Site Engineer", 2000), pos("Project Engineer", 3000), pos("Programmer", 5000)],
-    vehicles: [
-      ["รถเครน 10 ตัน", { rate: 7000 }], ["รถเครน 25 ตัน", { rate: 9000 }], ["รถเครน 50 ตัน", { rate: 20000 }], ["รถเครน 100 ตัน", { rate: 80000 }], ["รถเครน 200 ตัน", { rate: 120000 }],
-      ["โฟลคลิฟท์ 2 ตัน", { rate: 2000 }], ["โฟลคลิฟท์ 5 ตัน", { rate: 7500 }],
-      ["เทรลเลอร์", byDest({ "ขอนแก่น": 25000, "ระยอง": 12000, "อยุธยา": 12000, "ปทุมธานี": 9500, "กรุงเทพฯ": 9500, "ชลบุรี": 8500, "ฉะเชิงเทรา": 7000, "สมุทรสาคร": 7000 })],
-      ["รถ 10 ล้อ เฮี๊ยบติดเครน", byDest({ "ขอนแก่น": 19500, "ระยอง": 10000, "อยุธยา": 10000, "ปทุมธานี": 8500, "กรุงเทพฯ": 8500, "ชลบุรี": 7500, "ฉะเชิงเทรา": 7500, "สมุทรสาคร": 6500, "สมุทรปราการ": 6500 })],
-      ["รถ 6 ล้อ เฮี๊ยบติดเครน", byDest({ "ขอนแก่น": 18000, "ระยอง": 9000, "อยุธยา": 9000, "ปทุมธานี": 7000, "กรุงเทพฯ": 7000, "ชลบุรี": 7000, "ฉะเชิงเทรา": 7000, "สมุทรสาคร": 5000, "สมุทรปราการ": 5000 })],
-      ["6ล้อ (คอกยาว, ธรรมดา)", byDest({ "ขอนแก่น": 18000, "ระยอง": 7000, "อยุธยา": 7000, "ปทุมธานี": 6500, "กรุงเทพฯ": 6500, "ชลบุรี": 5000, "ฉะเชิงเทรา": 5000, "สมุทรสาคร": 4500, "สมุทรปราการ": 4500 })]],
-    ground: [["Taxi Airport Round trip (Thailand)", { rate: 1000 }], ["รถตู้ (Site Trip)", { rate: 1000 }], ["รถส่วนตัว (Site Trip)", { rate: 500 }], ["รถส่วนตัว (Round Trip)", { rate: 2000 }], ["รถ Pick up (Round Trip)", { rate: 1000 }], ["รถตู้ (Round Trip)", { rate: 2500 }]],
-    rooms: [["Hotel ในประเทศ", { rate: 700, billing: "night" }], ["Hotel ต่างประเทศ", { rate: 2000, billing: "night" }], ["Apartment รายเดือน", { rate: 4500, billing: "month" }], ["บ้านเช่า รายเดือน", { rate: 80000, billing: "month" }]],
+    positions: RATE_MANDAY.map(([g, d, ot]) => pos(g, d, ot)),
+    vehicles: RATE_VEH.map(([t, z, u, rm]) => [t, byZone(z, unitTh(u), /quotation/i.test(rm) ? "ต้องขอใบเสนอราคา · ค่า mobilization/rigging/permit อาจคิดเพิ่ม" : /mobili/i.test(u) ? "รวม mobilization แล้ว" : "")]),
+    ground: [].concat(...Object.entries(RATE_TRAVEL).map(([t, l]) => l.length === 1 && /all location/i.test(l[0][0]) ? [[t, { rate: l[0][1] }]] : [[t, byTravel(l)]])),
+    rooms: RATE_ACC.map(([t, per, r]) => [accTh(t, per), { rate: r, billing: per === "Monthly" ? "month" : "night" }]),
     airlines: [].concat(...[["Indonesia", 15000, 20000], ["Malaysia", 15000, 20000], ["Vietnam", 15000, 20000], ["Japan", 25000, 35000]].map(([c, a, t]) => [
       [`Air Asia · ${c}`, { airline: "Air Asia", country: c, fare: a }], [`Thai Airways · ${c}`, { airline: "Thai Airways", country: c, fare: t }]]), [["OTHER", { airline: "OTHER" }]]),
     docs: [["Visa fee / ค่าธรรมเนียมวีซ่า", { rate: 3000 }], ["Invitation letter / หนังสือเชิญจากปลายทาง", { rate: 1000 }], ["Travel Insurance", { rate: 1500 }], ["Passport ทำใหม่/ต่ออายุ (เหลือ < 6 เดือน)", { rate: 1500 }],
@@ -204,7 +220,7 @@
   };
   const F = (k, l, o = {}) => Object.assign({ k, l, t: "num" }, o);
   const FORMS = {
-    manpower: [{ kind: "mp", title: "กำลังคน", hint: "คน × วัน × ค่าแรง + คน × ชม. OT × ค่า OT (ค่าแรง ÷ 8 × 1.5) + ค้างคืน: คน × วัน × เบี้ยเลี้ยง",
+    manpower: [{ kind: "mp", title: "กำลังคน", hint: "คน × วัน × ค่าแรง + คน × ชม. OT × ค่า OT/ชม. + ค้างคืน: คน × วัน × เบี้ยเลี้ยง · ค่าแรงและค่า OT ตาม Master rate",
       fields: [F("position", "ตำแหน่ง", { t: "pick", list: "positions", w: 180 }), F("qty", "คน", { w: 64, d: 1 }), F("days", "วัน", { w: 64 }), F("day_rate", "ค่าแรง/วัน", { w: 100 }), F("ot_hours", "ชม. OT/คน", { w: 84 }), F("ot_rate", "ค่า OT/ชม.", { w: 90 }), F("overnight", "ค้างคืน", { t: "check", w: 64 }), F("allow_rate", "เบี้ยเลี้ยง/วัน", { w: 84, d: MR.allowance }), F("note", "หมายเหตุ", { t: "text" })],
       amt: r => num(r.qty) * num(r.days) * num(r.day_rate) + num(r.qty) * num(r.ot_hours) * num(r.ot_rate) + (r.overnight ? num(r.qty) * num(r.days) * num(r.allow_rate) : 0),
       brief: r => `${r.position || "–"} ×${num(r.qty) || 0}` }],
@@ -213,8 +229,8 @@
       amt: r => num(r.lump_qty) * num(r.lump_rate) + num(r.manday_qty) * num(r.manday_rate),
       brief: r => r.title || r.supplier || "–" }],
     transportation: [
-      { kind: "veh", title: "รถขนส่ง / เครน / โฟลคลิฟท์", hint: "คัน × เที่ยว × ราคา + คนให้สัญญาณ × ค่าให้สัญญาณ · รถที่ราคาตามจังหวัดใช้ “จังหวัดปลายทาง” ของโปรเจค",
-        fields: [F("description", "ประเภทรถ", { t: "pick", list: "vehicles", w: 190 }), F("vehicles_qty", "คัน", { w: 60, d: 1 }), F("trips", "เที่ยว", { w: 64, d: 1 }), F("rate", "ราคา/เที่ยว", { w: 100 }), F("signal_crew", "คนให้สัญญาณ", { w: 90 }), F("signal_rate", "ค่าให้สัญญาณ", { w: 100, d: MR.signal }), F("note", "หมายเหตุ", { t: "text" })],
+      { kind: "veh", title: "รถขนส่ง / เครน / โฟลคลิฟท์", hint: "คัน × เที่ยว (หรือวัน) × ราคา + คนให้สัญญาณ × ค่าให้สัญญาณ · ราคาตาม Zone ของ “จังหวัดปลายทาง” · รถ 6/10 ล้อ เทรลเลอร์ คิดต่อเที่ยว · เครน โฟล์คลิฟท์ คิดต่อวัน (รวม mobilization)",
+        fields: [F("description", "ประเภทรถ", { t: "pick", list: "vehicles", w: 190 }), F("vehicles_qty", "คัน", { w: 60, d: 1 }), F("trips", "เที่ยว/วัน", { w: 70, d: 1 }), F("rate", "ราคา/เที่ยว·วัน", { w: 110 }), F("signal_crew", "คนให้สัญญาณ", { w: 90 }), F("signal_rate", "ค่าให้สัญญาณ", { w: 100, d: MR.signal }), F("note", "หมายเหตุ", { t: "text" })],
         amt: r => num(r.vehicles_qty) * num(r.trips) * num(r.rate) + num(r.signal_crew) * num(r.signal_rate),
         brief: r => `${r.description || "–"} ×${num(r.trips) || 0} เที่ยว` }],
     accommodation: [{ kind: "acc", title: "ที่พัก", hint: "ห้อง × คืน (หรือเดือน) × ราคา",
@@ -230,7 +246,7 @@
         fields: [F("doc_name", "เอกสาร", { t: "pick", list: "docs", w: 220 }), F("qty", "คน", { w: 64, d: 1 }), F("rate", "ราคา/คน", { w: 100 }), F("note", "หมายเหตุ", { t: "text" })],
         amt: r => num(r.qty) * num(r.rate),
         brief: r => r.doc_name || "–" },
-      { kind: "tground", title: "รถรับส่ง / เดินทางในพื้นที่", hint: "คัน × เที่ยว × ราคา",
+      { kind: "tground", title: "รถรับส่ง / เดินทางในประเทศ", hint: "คัน × เที่ยว × ราคา · Round Trip ราคาตามจังหวัดปลายทาง · Site Trip ราคาเดียวทุกพื้นที่",
         fields: [F("description", "ประเภท", { t: "pick", list: "ground", w: 230 }), F("vehicles_qty", "คัน", { w: 60, d: 1 }), F("trips", "เที่ยว", { w: 64, d: 1 }), F("rate", "ราคา/เที่ยว", { w: 100 }), F("note", "หมายเหตุ", { t: "text" })],
         amt: r => num(r.vehicles_qty) * num(r.trips) * num(r.rate),
         brief: r => r.description || "–" }],
@@ -334,10 +350,10 @@
     const old = p.lines.filter(l => l.kind === "acc" && l.phase === id && l.auto);
     if (old.length && !confirm(`มีที่พักที่ Auto draft ไว้แล้วใน ${ph.name} · สร้างใหม่แทนของเดิม?`)) return;
     p.lines = p.lines.filter(l => !old.includes(l));
-    const local = !!p.destination, rate = local ? 700 : 2000, twin = Math.floor(n / 2), single = n % 2;
+    const local = !!p.destination, hotel = local ? "Local Hotel" : "International Hotel", rate = ACC_RATE(hotel, "Daily"), twin = Math.floor(n / 2), single = n % 2;
     const mk = (label, rooms) => Object.assign(newLine("accommodation", "acc"), { phase: id, auto: true, label, billing: "night", unit_qty: rooms, periods: nights, rate, note: `Auto · ${n} คนค้างคืน` });
-    if (twin) p.lines.push(mk(`Twin Room (${local ? "Hotel ในประเทศ" : "Hotel ต่างประเทศ"})`, twin));
-    if (single) p.lines.push(mk(`Single Room (${local ? "Hotel ในประเทศ" : "Hotel ต่างประเทศ"})`, single));
+    if (twin) p.lines.push(mk(`Twin Room (${hotel})`, twin));
+    if (single) p.lines.push(mk(`Single Room (${hotel})`, single));
     toast(`Auto draft: ${n} คน → ${twin ? twin + " Twin" : ""}${twin && single ? " + " : ""}${single ? single + " Single" : ""} × ${nights} คืน`);
   }
   // Working period page: phases + cost of every category per phase
@@ -463,10 +479,10 @@
       <div class="se-sec-h"><h3 class="se-cat-h">${c.ic}${esc(c.name)} <small>${esc(c.th)}</small></h3>${ed ? `<span class="badge live">แก้ไขได้</span>` : `<span class="badge off">${p.status === "locked" ? "🔒 ล็อกเป็น Budgetary แล้ว" : "อ่านอย่างเดียว"}</span>`}</div>
       <div class="se-kpis">${kpi("Estimate", baht(est))}${kpi("Budget", bud == null ? "—" : baht(bud))}${kpi("Actual", baht(act))}${kpi("คงเหลือ", bud == null ? "—" : baht(bud - act), bud != null && bud - act < 0 ? "over" : "")}</div>
       ${byPhase ? "" : `<div class="se-alert">ยังไม่ได้แบ่ง Working period · <a href="${href("period")}">กำหนด phase</a> แล้วค่าใช้จ่ายทุกหมวดจะแยกตาม phase ได้</div>`}
-      ${lists.map(k => `<datalist id="dl-${k}">${MASTER[k].map(([n, d]) => { const v = typeof d === "function" ? d(p) : d; return `<option value="${esc(n)}">${typeof d === "function" ? (v.rate ? money(v.rate) + " (" + esc(p.destination) + ")" : "ราคาตามจังหวัดปลายทาง") : Object.values(v).filter(x => typeof x === "number").map(money).join(" / ")}</option>`; }).join("")}</datalist>`).join("")}
+      ${lists.map(k => `<datalist id="dl-${k}">${MASTER[k].map(([n, d]) => { const v = typeof d === "function" ? d(p) : d; return `<option value="${esc(n)}">${typeof d === "function" ? (v.rate !== "" ? money(v.rate) + "/" + d.unit + " · " + (d.where === "zone" ? "Zone " + zoneOf(p) : esc(destOf(p))) : d.where === "zone" ? "ราคาตาม Zone ของจังหวัดปลายทาง" : "ราคาตามจังหวัดปลายทาง") + (d.remark ? " · " + d.remark : "") : Object.values(v).filter(x => typeof x === "number").map(money).join(" / ")}</option>`; }).join("")}</datalist>`).join("")}
       ${body}
       <div class="se-cat-tot"><span>รวม Estimate หมวด ${esc(c.name)}</span><b id="seCatTot">${baht(est)}</b></div>
-      ${ed ? `<p class="se-hint">พิมพ์หรือเลือกจากรายการ ระบบเติมราคาตาม Master rate ตัวอย่าง · บันทึกอัตโนมัติ</p>` : ""}
+      ${ed ? `<p class="se-hint">พิมพ์หรือเลือกจากรายการ ระบบเติมราคาตาม ${RATE_SRC}${p.destination ? ` · ปลายทาง ${esc(destOf(p))}${zoneOf(p) ? " (Zone " + zoneOf(p) + ")" : ""}` : ""} · แก้ราคาเองได้ · บันทึกอัตโนมัติ</p>` : ""}
       <div class="se-grp">
         <div class="se-grp-h"><b>🧾 Actual ในหมวดนี้</b><span class="se-hint">${p.status === "locked" ? (canAdd ? "บันทึกค่าใช้จ่ายจริงของหมวดนี้" : `บันทึกได้เฉพาะ ${namesWith("actual")}`) : "บันทึกได้หลัง Get Award"}</span><span class="se-grp-t">${baht(act)}</span></div>
         ${canAdd ? `<div class="se-form2">
@@ -634,7 +650,7 @@
   /* ---------- shared bits ---------- */
   function roleBar() {
     return `<div class="se-role"><span>🧪 โหมดทดลอง · ทดสอบเป็น</span>${PEOPLE.map(([k, n, u, t]) => `<button class="se-rb ${DB.user === k ? "on" : ""}" data-user="${k}" title="${esc(u)}">${esc(n)} <small>${esc(t)}</small></button>`).join("")}
-      <span class="se-role-n">ข้อมูลเก็บในเบราว์เซอร์นี้เท่านั้น · rate เป็นค่าตัวอย่าง</span><button class="se-link" data-reset>ล้างข้อมูลทดลอง</button></div>`;
+      <span class="se-role-n">ข้อมูลเก็บในเบราว์เซอร์นี้เท่านั้น · ราคาตาม ${RATE_SRC}</span><button class="se-link" data-reset>ล้างข้อมูลทดลอง</button></div>`;
   }
   function wireRole(el, redraw) {
     el.querySelectorAll("[data-user]").forEach(b => b.onclick = () => { DB.user = b.dataset.user; DB.picked = true; save(); redraw(); });
@@ -730,7 +746,7 @@
         <label class="w2">Project name *<input id="fName" value="${esc(v.name)}" placeholder="เช่น New Dual EP Line"></label>
         <label class="w2">Customer<input id="fCus" value="${esc(v.customer)}"></label>
         <label>City / Site<input id="fCity" value="${esc(v.city)}"></label>
-        <label>จังหวัดปลายทาง (ราคารถ)<select id="fDest"><option value="">ต่างประเทศ / อื่นๆ</option>${DESTS.map(d => `<option ${v.destination === d ? "selected" : ""}>${d}</option>`).join("")}</select></label>
+        <label>จังหวัดปลายทาง (Zone ราคารถ · ค่าเดินทาง)${destSelect("fDest", v.destination)}</label>
         <label>Start<input id="fStart" type="date" value="${esc(v.start)}"></label>
         <label>End<input id="fEnd" type="date" value="${esc(v.end)}"></label>
       </div>
@@ -771,7 +787,7 @@
         <label class="w2">Project name *<input id="dName" value="${esc(src.name)}"></label>
         <label class="w2">Customer<input id="dCus" value="${esc(src.customer || "")}"></label>
         <label>City / Site<input id="dCity" value="${esc(src.city || "")}"></label>
-        <label>จังหวัดปลายทาง (ราคารถ)<select id="dDest"><option value="">ต่างประเทศ / อื่นๆ</option>${DESTS.map(d => `<option ${src.destination === d ? "selected" : ""}>${d}</option>`).join("")}</select></label>
+        <label>จังหวัดปลายทาง (Zone ราคารถ · ค่าเดินทาง)${destSelect("dDest", src.destination)}</label>
         <label>วันเริ่มงานใหม่<input id="dStart" type="date" value="${esc(base)}"></label>
       </div>
       <p class="se-hint" style="margin:8px 0 0">เปลี่ยนวันเริ่มงาน แล้วทุก phase จะเลื่อนตาม โดยคงจำนวนวันและช่วงเว้นระหว่าง phase ไว้ แก้ทีละ phase ต่อได้</p>
