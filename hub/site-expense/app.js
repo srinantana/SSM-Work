@@ -657,8 +657,57 @@
   }
   let DB = null;
   function load() { try { const d = JSON.parse(localStorage.getItem(KEY) || "null"); if (d && (d.v === 1 || d.v === 2)) { if (!d.user) d.user = { sc: "spy", ssm: "dew", md: "bee" }[d.role] || "dew"; d.projects.forEach(p => p.lines = (p.lines || []).map(migrateLine)); d.v = 2; return d; } } catch (e) {} return seed(); }
-  function save() { try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {} }
-  const me = () => PEOPLE.find(x => x[0] === DB.user) || PEOPLE[0];
+  /* ---------- storage: Supabase via /api/site-expense/projects (14 Nov 2026); browser-only test mode when that API is not there ---------- */
+  const API = "/api/site-expense/projects";
+  let SERVER = false, booting = null, flushT = null, flushing = false;
+  const SYNC = {}; // project id → { json, v } as last saved on the server
+  const signedIn = () => (window.SSM_ME || {}).username || "";
+  const tidy = p => { p.lines = (p.lines || []).map(migrateLine); p.actuals = p.actuals || []; p.history = p.history || []; p.list = p.list || "active";
+    const ph = phasesOf(p); if (ph.length === 1) p.lines.forEach(l => { if (!l.phase) l.phase = ph[0].id; }); return p; };
+  async function loadServer() {
+    try {
+      const r = await fetch(API, { credentials: "same-origin", headers: { accept: "application/json" } });
+      if (!r.ok) return false;
+      const d = await r.json(); if (!d || !Array.isArray(d.projects)) return false;
+      const projects = d.projects.map(x => { const p = tidy(x.project); SYNC[p.id] = { json: JSON.stringify(p), v: x.v }; return p; });
+      const signed = PEOPLE.find(x => x[2] === signedIn());
+      DB = { v: 2, user: signed ? signed[0] : "guest", projects };
+      SERVER = true; return true;
+    } catch (e) { return false; }
+  }
+  function save() {
+    if (!SERVER) { try { localStorage.setItem(KEY, JSON.stringify(DB)); } catch (e) {} return; }
+    clearTimeout(flushT); flushT = setTimeout(flush, 250);
+  }
+  const pending = () => SERVER && DB && DB.projects.some(p => !SYNC[p.id] || SYNC[p.id].json !== JSON.stringify(p));
+  window.addEventListener("beforeunload", e => { if (pending()) { e.preventDefault(); e.returnValue = ""; } });
+  async function flush() {
+    if (flushing) { clearTimeout(flushT); flushT = setTimeout(flush, 300); return; }
+    flushing = true; let again = false;
+    try {
+      for (const p of DB.projects.slice()) {
+        const j = JSON.stringify(p), s = SYNC[p.id];
+        if (s && s.json === j) continue;
+        let r, d = {};
+        try {
+          r = await fetch(API, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify({ project: p, base: s ? s.v : null }) });
+          d = await r.json().catch(() => ({}));
+        } catch (e) { toast("บันทึกไม่สำเร็จ · ตรวจอินเทอร์เน็ตแล้วทำรายการอีกครั้ง"); continue; }
+        if (r.ok) { SYNC[p.id] = { json: j, v: d.v }; continue; }
+        const i = DB.projects.indexOf(p);
+        if (d.project && i >= 0) { // put back the server copy
+          const q = tidy(d.project); DB.projects[i] = q; SYNC[q.id] = { json: JSON.stringify(q), v: d.v }; again = true;
+          toast(r.status === 409 ? `${p.ij}: มีคนแก้โปรเจคนี้จากอีกเครื่องก่อน · โหลดข้อมูลล่าสุดแล้ว กรุณาทำรายการอีกครั้ง` : `${p.ij}: ไม่มีสิทธิ์ทำรายการนี้ · คืนค่าเดิมแล้ว`);
+        } else if (!s && i >= 0 && (r.status === 403 || r.status === 409)) {
+          DB.projects.splice(i, 1); again = true;
+          toast(r.status === 409 ? `มีโปรเจครหัสนี้ในระบบแล้ว (${p.ij})` : "ไม่มีสิทธิ์สร้างโปรเจค");
+        } else toast(`บันทึก ${p.ij} ไม่สำเร็จ (${r.status}) · ลองอีกครั้ง`);
+      }
+    } finally { flushing = false; }
+    if (again) window.dispatchEvent(new HashChangeEvent("hashchange"));
+  }
+  const GUEST = () => ["guest", (window.SSM_ME || {}).name || signedIn() || "ผู้ใช้", signedIn(), "ดู"];
+  const me = () => PEOPLE.find(x => x[0] === DB.user) || (SERVER ? GUEST() : PEOPLE[0]);
   const can = k => PERMS[k].includes(me()[2]);
   const who = () => me()[1];
 
@@ -685,6 +734,7 @@
 
   /* ---------- shared bits ---------- */
   function roleBar() {
+    if (SERVER) return "";
     return `<div class="se-role"><span>🧪 โหมดทดลอง · ทดสอบเป็น</span>${PEOPLE.map(([k, n, u, t]) => `<button class="se-rb ${DB.user === k ? "on" : ""}" data-user="${k}" title="${esc(u)}">${esc(n)} <small>${esc(t)}</small></button>`).join("")}
       <span class="se-role-n">ข้อมูลเก็บในเบราว์เซอร์นี้เท่านั้น · ราคาตาม ${RATE_SRC}</span><button class="se-link" data-reset>ล้างข้อมูลทดลอง</button></div>`;
   }
@@ -1193,10 +1243,16 @@ td.neg,.neg{color:var(--rak);font-weight:600}
     if (!document.getElementById("seCss")) { const s = document.createElement("style"); s.id = "seCss"; s.textContent = CSS + CSS2 + CSS3 + CSS4; document.head.appendChild(s); }
     document.querySelectorAll(".se-modal").forEach(m => m.remove());
     if (!DB) {
-      DB = load();
-      DB.projects.forEach(p => { const ph = phasesOf(p); if (ph.length === 1) p.lines.forEach(l => { if (!l.phase) l.phase = ph[0].id; }); });
-      const signed = PEOPLE.find(x => x[2] === ((window.SSM_ME || {}).username || ""));
-      if (signed && !DB.picked) DB.user = signed[0]; // start as the signed-in person until someone switches in the test bar
+      if (!booting) booting = loadServer().then(ok => {
+        if (ok) return;
+        DB = load(); // test mode: no projects API here (local test server, or the table is not created yet)
+        DB.projects.forEach(p => { const ph = phasesOf(p); if (ph.length === 1) p.lines.forEach(l => { if (!l.phase) l.phase = ph[0].id; }); });
+        const signed = PEOPLE.find(x => x[2] === signedIn());
+        if (signed && !DB.picked) DB.user = signed[0]; // start as the signed-in person until someone switches in the test bar
+      });
+      el.innerHTML = `<div class="empty">กำลังโหลด Site Expense…</div>`;
+      booting.then(() => { if (el.isConnected) mount(el, sub); });
+      return;
     }
     loadRates(() => { if (el.isConnected && !document.querySelector(".se-modal")) mount(el, sub); }); // re-draw once with Supabase rates
     const [pid, sec, code] = (sub || "").split("/").map(decodeURIComponent);
