@@ -891,9 +891,9 @@ async function manpowerClear(cfg, req, prof) {
 }
 
 // POST /api/manpower/leave {worker_id, from, to, type, note, skip_off, clear_work} — SC / PC / SSM record leave for anyone.
-// type ∈ ลาป่วย / พักร้อน / ลากิจ. skip_off leaves out Sundays, company holidays and the person's H / PH days.
+// type ∈ ลาป่วย / พักร้อน / ลากิจ / สลับวันหยุด. skip_off leaves out Sundays, company holidays and the person's H / PH days.
 // clear_work removes planned work on those days (kept in mp_change_log). POST /api/manpower/leave-clear {worker_id, days}.
-const MP_LEAVE = ['ลาป่วย', 'พักร้อน', 'ลากิจ'];
+const MP_LEAVE = ['ลาป่วย', 'พักร้อน', 'ลากิจ', 'สลับวันหยุด'];   // สลับวันหยุด = swapped day off (not leave; still bookable in ขอคน) — added 16 Nov 2026
 async function manpowerLeave(cfg, req, prof) {
   if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
   const d = await mpBody(req);
@@ -924,7 +924,7 @@ async function manpowerLeaveClear(cfg, req, prof) {
   if (!canEditManpower(prof)) return json({ error: 'forbidden' }, 403);
   const items = mpItems(await mpBody(req));
   if (!items.length) return json({ error: 'input' }, 400);
-  const types = ['ลาป่วย', 'ลาป่วยครึ่งวัน', 'พักร้อน', 'ลากิจ', 'ลาไม่รับค่าจ้าง', 'ลา'].map(encodeURIComponent).join(',');
+  const types = ['ลาป่วย', 'ลาป่วยครึ่งวัน', 'พักร้อน', 'ลากิจ', 'ลาไม่รับค่าจ้าง', 'ลา', 'สลับวันหยุด'].map(encodeURIComponent).join(',');
   const gone = [];
   for (const it of items) {
     const res = await fetch(cfg.url + `/rest/v1/mp_absences?worker_id=eq.${encodeURIComponent(it.wid)}&day=in.(${it.days.join(',')})&type=in.(${types})`, { method: 'DELETE', headers: { ...authHeaders(cfg.service), prefer: 'return=representation' } });
