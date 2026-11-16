@@ -635,19 +635,21 @@ const MANPOWER_EDIT = {
   usernames: ['nantana.s', 'sakkamon.c', 'teedanai.h', 'prakaikaew.p', 'kitisak.s', 'phattharada.t', 'pichayut.k', 'napat.t'],
   namesTh: ['นันทนา ศรีสกุลเตียว', 'ศักดิ์กมล จันทริมา', 'ธีร์ดนัย ฮุยสูงเนิน', 'ประกายแก้ว ปัญญา',
     'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์', 'พิชญ์ยุทธ คงดิศ', 'ภัทรลดา ทองสอาด', 'นภัท ทองอำไพ',
-    'อรอิศรา พงศ์ผาติโรจน์'],
+    'อรอิศรา พงศ์ผาติโรจน์', 'เจนรบ แก้วกระแสร์'],
+  firstTh: ['เจนรบ'],   // โจ้ เจนรบ แก้วกระแสร์ — same Manpower rights as กอล์ฟ (set by Dew, 16 Nov 2026)
 };
 const thKey = (s) => String(s || '').replace(/\s+/g, ' ').trim();
 // Milestones (top rows of the board): only ดิว (SSM), กอล์ฟ (PC) and เอ๋ (same rights as กอล์ฟ) may add / change / delete them (set by Dew, 10 Nov 2026)
-const MILESTONE_EDIT = { usernames: ['nantana.s', 'kitisak.s'], namesTh: ['นันทนา ศรีสกุลเตียว', 'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์', 'อรอิศรา พงศ์ผาติโรจน์'] };
+const MILESTONE_EDIT = { usernames: ['nantana.s', 'kitisak.s'], namesTh: ['นันทนา ศรีสกุลเตียว', 'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์', 'อรอิศรา พงศ์ผาติโรจน์', 'เจนรบ แก้วกระแสร์'], firstTh: ['เจนรบ'] };
+const thFirst = (prof) => thKey(prof.nameTh).split(' ')[0];
 const canEditManpower = (prof) => MANPOWER_EDIT.usernames.includes(String(prof.username || '').toLowerCase())
-  || MANPOWER_EDIT.namesTh.includes(thKey(prof.nameTh));
+  || MANPOWER_EDIT.namesTh.includes(thKey(prof.nameTh)) || MANPOWER_EDIT.firstTh.includes(thFirst(prof));
 // Edit the plan but may NOT Confirm Manpower (turn จอง into confirmed work): สปาย prakaikaew.p (set by Dew, 11 Nov 2026)
 const MANPOWER_NO_CONFIRM = { usernames: ['prakaikaew.p'], namesTh: ['ประกายแก้ว ปัญญา'] };
 const canConfirmManpower = (prof) => canEditManpower(prof)
   && !MANPOWER_NO_CONFIRM.usernames.includes(String(prof.username || '').toLowerCase()) && !MANPOWER_NO_CONFIRM.namesTh.includes(thKey(prof.nameTh));
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
-const canEditMilestone = (prof) => MILESTONE_EDIT.usernames.includes(String(prof.username || '').toLowerCase()) || MILESTONE_EDIT.namesTh.includes(thKey(prof.nameTh));
+const canEditMilestone = (prof) => MILESTONE_EDIT.usernames.includes(String(prof.username || '').toLowerCase()) || MILESTONE_EDIT.namesTh.includes(thKey(prof.nameTh)) || MILESTONE_EDIT.firstTh.includes(thFirst(prof));
 // PostgREST returns at most 1000 rows per request; page through with limit/offset.
 async function restAll(cfg, path, max = 40000) {
   const out = [];
@@ -1126,12 +1128,12 @@ async function manpowerApi(cfg, req, url, prof) {
 // Tables: database/service_plan_requests.sql + service_plan_requests-002.sql (งานรอนัดวัน). API under /api/service-plan/req/ (list, avail, create, update, decide, cancel).
 const SPR_TYPES = ['IS', 'SO', 'IN', 'WR', 'IJ', 'JO'];
 // Rights (set by Dew, 10 Nov 2026 22:45):
-//   Confirm / Reject — ดิว (SSM) and กอล์ฟ: everyone · โจ้ (เจนรบ แก้วกระแสร์): electricians (unit EE) only
+//   Confirm / Reject — ดิว (SSM), กอล์ฟ and โจ้ (เจนรบ แก้วกระแสร์, all units since 16 Nov 2026; before: electricians only)
 //   ขอคน (create)    — ดิว อิ๋ม ปุ๋ม หนุ่ม สปาย อาร์ต แพรวา ไอซ์ ซี กอล์ฟ โจ้
 // Matched by username, Thai full name, Thai first name (เจนรบ) or — for people whose full name is not known here yet
 // (แพรวา) — the nickname in RAK_Employee (by employee code, else Thai name) / mp_workers.
 // Requests may cover all 7 days: Sundays, company holidays and a person's weekly day off stay selectable; only leave blocks.
-const SPR_APPROVE_ALL = { usernames: ['nantana.s', 'kitisak.s'], namesTh: ['นันทนา ศรีสกุลเตียว', 'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์'] };
+const SPR_APPROVE_ALL = { usernames: ['nantana.s', 'kitisak.s'], namesTh: ['นันทนา ศรีสกุลเตียว', 'กิติศักดิ์ สุ่นศักดิ์สวัสดิ์', 'เจนรบ แก้วกระแสร์'], firstTh: ['เจนรบ'] };
 const SPR_APPROVE_EE = { firstTh: ['เจนรบ'] };
 const SPR_REQUEST = {
   usernames: ['nantana.s', 'teedanai.h', 'prakaikaew.p', 'sakkamon.c', 'pichayut.k', 'napat.t', 'kitisak.s'],
@@ -1152,7 +1154,7 @@ async function sprNicks(cfg, prof) {
 }
 // → 'all' | ['EE'] | null
 async function sprScope(cfg, prof) {
-  if (SPR_APPROVE_ALL.usernames.includes(String(prof.username || '').toLowerCase()) || SPR_APPROVE_ALL.namesTh.includes(thKey(prof.nameTh))) return 'all';
+  if (SPR_APPROVE_ALL.usernames.includes(String(prof.username || '').toLowerCase()) || SPR_APPROVE_ALL.namesTh.includes(thKey(prof.nameTh)) || SPR_APPROVE_ALL.firstTh.includes(sprFirst(prof))) return 'all';
   return SPR_APPROVE_EE.firstTh.includes(sprFirst(prof)) ? ['EE'] : null;
 }
 const sprCanApprove = async (cfg, prof) => !!(await sprScope(cfg, prof));
