@@ -23,7 +23,7 @@
   const S = { page: "board", zoom: "month", date: new Date(), units: new Set(UNITS.map(u => u[0])), cust: "", project: "", person: "", q: "", left: false, miles: true, msOpen: (() => { try { return localStorage.getItem("mp.msOpen") !== "0"; } catch (e) { return true; } })() };
   const WT = [["fab", "Fab"], ["assembly", "Assembly"], ["install", "Install"], ["service", "Service"], ["other", "Other"]];
   const WTL = Object.fromEntries(WT);
-  const LV = [["ลาป่วย", "ลาป่วย"], ["พักร้อน", "ลาพักร้อน"], ["ลากิจ", "ลากิจ"]];
+  const LV = [["ลาป่วย", "ลาป่วย"], ["พักร้อน", "ลาพักร้อน"], ["ลากิจ", "ลากิจ"], ["สลับวันหยุด", "สลับวันหยุด"]];
 
   /* ---------- dates ---------- */
   const pad = n => String(n).padStart(2, "0");
@@ -375,7 +375,7 @@
     const cust = pj ? pj.customer || "" : (S.cust || ""), job = pj ? pj.name : "", jno = pj ? pj.job_no || "" : "";
     const wt = a ? (a.work_type || "other") : "";
     const note = a && pj && a.text !== pj.name ? a.text.replace(/^จอง\s*/, "") : (a && !pj ? a.text : "");
-    const isLv = x && ABS[x.type] && ABS[x.type][1] === "lv";
+    const isLv = x && ABS[x.type] && (ABS[x.type][1] === "lv" || x.type === "สลับวันหยุด");
     const toField = `<label>ถึงวันที่<input type="date" name="to" value="${esc(to)}" min="${esc(from)}" max="2027-12-31"></label>`;
     return `${picker(ids)}
       <details class="mp-fwrap" ${a || isLv ? "" : "open"}><summary>${a ? "แก้ไขงาน" : "ลงงาน"}</summary><form class="mp-form mp-wform" autocomplete="off">
@@ -389,8 +389,8 @@
         <div class="mp-fbtn"><button type="submit" class="mp-save">บันทึก</button>${a || bulk ? `<button type="button" class="mp-del">${bulk ? "ลบงานทั้งหมดในช่องที่เลือก" : "ลบงานวันนี้"}</button>` : ""}</div>
         <datalist id="mpCustL">${customers(true).map(c => `<option value="${esc(c)}">`).join("")}</datalist><datalist id="mpJobL"></datalist>
       </form></details>
-      <details class="mp-fwrap lv" ${isLv ? "open" : ""}><summary>${isLv ? "แก้ไข / ยกเลิกวันลา" : "ลงวันลา"}</summary><form class="mp-form mp-lform" autocomplete="off">
-        <fieldset><legend>ประเภทการลา</legend>${LV.map(([v, l]) => `<label class="mp-wt"><input type="radio" name="type" value="${v}" ${isLv && x.type === v ? "checked" : ""} required>${l}</label>`).join("")}</fieldset>
+      <details class="mp-fwrap lv" ${isLv ? "open" : ""}><summary>${isLv ? "แก้ไข / ยกเลิกวันลา" : "ลงวันลา / สลับวันหยุด"}</summary><form class="mp-form mp-lform" autocomplete="off">
+        <fieldset><legend>ประเภทการลา / วันหยุด</legend>${LV.map(([v, l]) => `<label class="mp-wt"><input type="radio" name="type" value="${v}" ${isLv && x.type === v ? "checked" : ""} required>${l}</label>`).join("")}</fieldset>
         ${toField}
         <label>หมายเหตุ (ไม่บังคับ)<input name="note" value="${esc(isLv ? x.note || "" : "")}" placeholder="เช่น ไปโรงพยาบาล, ลาครึ่งวันเช้า"></label>
         <div class="mp-chks"><label><input type="checkbox" name="skip" checked> ข้ามวันอาทิตย์ / วันหยุด</label><label><input type="checkbox" name="clear" checked> ลบงานที่ลงไว้ในวันลา</label></div>
