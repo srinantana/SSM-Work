@@ -2,7 +2,7 @@
    window.SPRequest: load(force) · page(el, onChange) · openList(onChange) · open(id, onChange) · form(onChange)
    API /api/service-plan/req/{list,avail,create,decide,cancel} (hub/middleware.js). The requester is the signed-in user.
    Availability comes from the Manpower plan: f ว่าง · a มีคำขออื่นรอ PC · h ติดจอง · b มีงานยืนยันแล้ว · o ลา / วันหยุด.
-   Confirm / Reject: ดิว and กอล์ฟ for everyone, โจ้ for unit EE only (canApprove + approveUnits from the API); ขอคน only
+   Confirm / Reject: ดิว, กอล์ฟ and โจ้ for everyone (โจ้ was unit EE only until 16 Nov 2026) (canApprove + approveUnits from the API); ขอคน only
    for the people the API allows (canRequest). Sundays / holidays are bookable (7 days); only leave blocks a day. */
 (function () {
   "use strict";
@@ -137,7 +137,7 @@
           ${can && pend.length ? `<div class="spr-act"><input id="sprNote" placeholder="หมายเหตุถึงผู้ขอ (ถ้ามี)" maxlength="300">
             ${pend.length > 1 ? `<button type="button" class="spr-btn ok" data-act="confirm" data-id="all">✓ Confirm ทั้ง ${pend.length} คน${L.approveUnits ? " (ช่างไฟฟ้า)" : ""}</button><button type="button" class="spr-btn no" data-act="reject" data-id="all">✕ Reject ทั้งหมด</button>` : ""}
             <small>Confirm แล้วระบบจะลงงาน Service ใน Manpower board ให้ทันที (ทุกวันในช่วง รวมวันอาทิตย์ / วันหยุด ยกเว้นวันลา)${pend.some(p => p.mode === "swap") ? " · <b>คำขอสลับ: งานเดิมของคนนั้นในวันดังกล่าวจะถูกแทนที่</b> (เก็บไว้ในประวัติการแก้ไข)" : ""}</small></div>` : ""}
-          ${allPend.length && !pend.length ? `<p class="spr-hint">รอ Confirm — กอล์ฟ (ทุกคน) · โจ้ (เฉพาะช่างไฟฟ้า)</p>` : ""}
+          ${allPend.length && !pend.length ? `<p class="spr-hint">รอ Confirm — กอล์ฟ / โจ้</p>` : ""}
           ${r.draft && !r.cancelled ? `<div class="spr-act"><small style="flex:1 1 260px;font-size:13px;color:#4a515c">งานนี้ยังไม่ได้นัดวันกับลูกค้า — ยังไม่ขึ้นปฏิทินและไม่กันคิวใครใน Manpower</small>${L.canRequest ? `<button type="button" class="spr-btn pri" data-edit>ใส่วัน + เลือกคน / แก้ไข</button>` : ""}</div>` : ""}
           ${!r.cancelled && ((r.draft && L.canRequest) || ((mine || L.canApprove) && !anyC && allPend.length)) ? `<button type="button" class="spr-link" data-cancel>${r.draft ? "ยกเลิกงานนี้" : "ยกเลิกคำขอนี้"}</button>` : ""}
           <div class="spr-msg" role="status">${msg || ""}</div></div>`;
