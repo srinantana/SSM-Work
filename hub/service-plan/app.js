@@ -404,7 +404,7 @@
 @media (max-width:800px){.spd-g{grid-template-columns:1fr}.spd-m{grid-template-columns:repeat(6,1fr)}.spd-mb{height:70px}}
 .spc-nav{display:flex;align-items:center;gap:6px}.spc-nav h2{margin:0 0 0 8px;font-size:19px;font-weight:600}
 .spc-btn{display:inline-grid;place-items:center;min-width:36px;height:34px;padding:0 10px;border:1px solid var(--line);border-radius:8px;background:#fff;text-decoration:none;color:var(--ink);font-size:13.5px}
-.spc-btn:hover{border-color:#f0b9b9;color:var(--rak)}
+.spc-btn:hover{border-color:var(--rak-line,#f0b9b9);color:var(--rak)}
 .spc-views{display:flex;background:#eef0f3;border-radius:9px;padding:3px}
 .spc-views a{padding:5px 14px;border-radius:7px;text-decoration:none;color:#5d6572;font-size:13.5px}
 .spc-views a[aria-selected="true"]{background:#fff;color:var(--rak);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
@@ -433,7 +433,7 @@
 .spc-dots{display:none}
 .spc-week{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px}
 .spc-col{background:#fff;border:1px solid var(--line);border-radius:10px;padding:6px;display:flex;flex-direction:column;gap:6px;min-width:0}
-.spc-col.t{border-color:#f0b9b9;box-shadow:0 0 0 2px var(--blush)}
+.spc-col.t{border-color:var(--rak-line,#f0b9b9);box-shadow:0 0 0 2px var(--blush)}
 .spc-ch{display:flex;flex-wrap:wrap;gap:4px;align-items:baseline;text-decoration:none;color:var(--ink);font-size:13px;padding:2px 4px}
 .spc-ch span{margin-left:auto;font-size:11px;color:var(--muted)}
 .spc-none{color:#c3c8d0;text-align:center;padding:10px 0}
@@ -450,7 +450,7 @@
 .spc-yh,.spc-yg{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
 .spc-yh span{font-size:10px;color:#9aa1ab}
 .spc-yd{font-size:11px;line-height:24px;border-radius:5px;text-decoration:none;color:#4a515c}
-.spc-yd:hover{outline:1px solid #f0b9b9}
+.spc-yd:hover{outline:1px solid var(--rak-line,#f0b9b9)}
 .l1{background:#ffe1e1}.l2{background:#ffadad}.l3{background:var(--rak);color:#fff!important}
 .spc-yd.t{box-shadow:inset 0 0 0 2px #22252b;font-weight:600}
 .spc-legend{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px}.spc-legend i{display:inline-block;width:14px;height:14px;border-radius:4px;margin-left:6px}

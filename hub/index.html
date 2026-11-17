@@ -193,6 +193,17 @@ code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:#f1f3
 .due-l button{border:1px solid #c9b6f5;background:#fff;border-radius:999px;padding:3px 11px;font:inherit;font-size:12.5px;color:#3b2a66;cursor:pointer;text-align:left}
 .due-l button:hover{background:#ebe2ff}.due-l button.late{border-color:#e6b0aa;color:#a93226}.due-l i{font-style:normal;color:#6d28d9;margin-left:4px}.due-l button.late i{color:#c0392b}
 .due-l a{color:#6d28d9;font-size:12.5px}.due-x{border:0;background:none;color:#6d28d9;font:inherit;font-size:12.5px;cursor:pointer;text-decoration:underline}
+
+/* Inside each menu the accent (buttons, tabs, highlights) takes the menu colour; the shell (logo, sidebar, top bar) keeps RAK red.
+   Status colours (late, error, over budget) use --danger and stay red. */
+:root{--danger:#c92a2a;--rak-line:#f0b9b9}
+body[data-menu="site-expense"] .content,body[data-menu="site-expense"]>:not(#shell){--rak:#d97706;--rak-dark:#b45309;--blush:#fff7ed;--blush-2:#fed7aa;--rak-line:#fdba74}
+body[data-menu="spare-part"] .content,body[data-menu="spare-part"]>:not(#shell){--rak:#2563eb;--rak-dark:#1d4ed8;--blush:#eff6ff;--blush-2:#bfdbfe;--rak-line:#93c5fd}
+body[data-menu="punch-list"] .content,body[data-menu="punch-list"]>:not(#shell){--rak:#059669;--rak-dark:#047857;--blush:#ecfdf5;--blush-2:#a7f3d0;--rak-line:#6ee7b7}
+body[data-menu="service-plan"] .content,body[data-menu="service-plan"]>:not(#shell){--rak:#7c3aed;--rak-dark:#6d28d9;--blush:#f5f3ff;--blush-2:#ddd6fe;--rak-line:#c4b5fd}
+body[data-menu="manpower"] .content,body[data-menu="manpower"]>:not(#shell){--rak:#0891b2;--rak-dark:#0e7490;--blush:#ecfeff;--blush-2:#a5f3fc;--rak-line:#67e8f9}
+body[data-menu="site-team"] .content,body[data-menu="site-team"]>:not(#shell){--rak:#db2777;--rak-dark:#be185d;--blush:#fdf2f8;--blush-2:#fbcfe8;--rak-line:#f9a8d4}
+body[data-menu="manual"] .content,body[data-menu="manual"]>:not(#shell){--rak:#a16207;--rak-dark:#854d0e;--blush:#fefce8;--blush-2:#fde68a;--rak-line:#fcd34d}
 </style>
 </head>
 <body>
@@ -383,6 +394,7 @@ function pageModule(m){
 
 function render(){
   const id = route(), m = modOf(id);
+  document.body.dataset.menu = id;
   document.title = (id === "home" ? "SSM Work" : m.name + " · SSM Work") + " · RAK Engineering";
   const sp = id === "spare-part" && ME !== null && allowed(id) && window.SparePart;
   const se = id === "site-expense" && ME !== null && allowed(id) && !isSoon(id) && window.SiteExpense;
