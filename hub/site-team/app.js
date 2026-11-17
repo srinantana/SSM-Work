@@ -13,12 +13,19 @@
   const GROUPS = [["EN", "Engineer"], ["SP", "Support"], ["OT", "Other"]];   // for people who are not on the Manpower board (site_team_people.team)
   const GROUP_OK = new Set(GROUPS.map(g => g[0]));
   const UNIT_L = Object.fromEntries(UNITS);
+  const UNIT_ST = { ME: ["🔩", "#e8590c", "#fff4e6"], PP: ["🧪", "#1971c2", "#e7f5ff"], EE: ["⚡", "#f08c00", "#fff9db"], PC: ["📋", "#7048e8", "#f3f0ff"], SC: ["🧭", "#c2255c", "#fff0f6"],
+    EN: ["📐", "#0c8599", "#e3fafc"], SP: ["🤝", "#2f9e44", "#ebfbee"], OT: ["🌱", "#5c940d", "#f4fce3"], "-": ["👤", "#868e96", "#f1f3f5"] };
+  const unitBadge = u => { const [i, c, bg] = UNIT_ST[u] || UNIT_ST["-"]; return `<span class="stm-ub" style="color:${c};background:${bg}">${i} ${esc(u === "-" ? "อื่นๆ" : u)}</span>`; };
+  const FLAG = { "ญี่ปุ่น": "🇯🇵", "จีน": "🇨🇳", "เกาหลีใต้": "🇰🇷", "ไต้หวัน": "🇹🇼", "เวียดนาม": "🇻🇳", "มาเลเซีย": "🇲🇾", "สิงคโปร์": "🇸🇬", "อินโดนีเซีย": "🇮🇩", "ฟิลิปปินส์": "🇵🇭",
+    "อินเดีย": "🇮🇳", "กัมพูชา": "🇰🇭", "ลาว": "🇱🇦", "เมียนมา": "🇲🇲", "สหรัฐอเมริกา": "🇺🇸", "Schengen (ยุโรป)": "🇪🇺", "สหราชอาณาจักร": "🇬🇧", "ออสเตรเลีย": "🇦🇺",
+    "สหรัฐอาหรับเอมิเรตส์": "🇦🇪", "ซาอุดีอาระเบีย": "🇸🇦", "ไทย": "🇹🇭", "Thailand": "🇹🇭" };
+  const flag = c => FLAG[c] || "🌏";
   const MS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
   const RENEW = [["", "—"], ["needed", "ต้องต่ออายุ"], ["in_progress", "กำลังดำเนินการ"], ["done", "ต่อแล้ว"]];
   const RENEW_L = Object.fromEntries(RENEW);
   const INS = [["", "—"], ["trip", "รายเที่ยว"], ["annual", "รายปี"]];
   const INS_L = Object.fromEntries(INS);
-  const TABS = [["", "ภาพรวม"], ["people", "รายชื่อทีม"], ["renew", "ต่ออายุ Passport"], ["visas", "วีซ่า"], ["trips", "เดินทางต่างประเทศ"]];
+  const TABS = [["", "🏠 ภาพรวม"], ["people", "👷 รายชื่อทีม"], ["renew", "🔄 ต่ออายุ Passport"], ["visas", "🛂 วีซ่า"], ["trips", "✈️ เดินทางต่างประเทศ"]];
   const TRAVEL_MONTHS = 6;   // most countries need the passport valid ≥ 6 months after the return date
   const RENEW_MONTHS = 9;    // flag for renewal this early: a Thai passport takes ~1–2 weeks plus the trip to an office
 
@@ -74,7 +81,7 @@
   const visas = p => (Array.isArray(p.visas) ? p.visas : []).filter(v => v && v.country);
   const visaFor = (p, country) => { const k = cKey(country); return k ? visas(p).filter(v => cKey(v.country) === k).sort((a, b) => String(b.expiry || "").localeCompare(String(a.expiry || "")))[0] || null : null; };
   const visaChip = v => { const e = parse(v.expiry), bad = e && e < today();
-    return `<span class="stm-vchip${bad ? " bad" : ""}" title="${esc([v.type, v.visa_no, v.note].filter(Boolean).join(" · "))}">${esc(v.country)}${v.type ? " · " + esc(v.type) : ""}${v.expiry ? " · " + (bad ? "หมด " : "ถึง ") + fmt(v.expiry) : ""}</span>`; };
+    return `<span class="stm-vchip${bad ? " bad" : ""}" title="${esc([v.type, v.visa_no, v.note].filter(Boolean).join(" · "))}">${flag(cKey(v.country))} ${esc(v.country)}${v.type ? " · " + esc(v.type) : ""}${v.expiry ? " · " + (bad ? "หมด " : "ถึง ") + fmt(v.expiry) : ""}</span>`; };
   /* old free-text note "วีซ่าญี่ปุ่น หมดอายุ 2026-09-11" → one visa row */
   const visaSt = v => { const m = monthsLeft(v.expiry); return m == null ? ["unk", "ไม่ระบุวันหมดอายุ", "st-none"] : m < 0 ? ["exp", "หมดอายุแล้ว", "st-bad"] : m < VISA_SOON ? ["soon", "เหลือ < " + VISA_SOON + " เดือน", "st-warn"] : ["ok", "ใช้ได้", "st-ok"]; };
   /* one row per (active person × visa) — latest visa per country per person */
@@ -124,7 +131,7 @@
 
   /* ---------- views ---------- */
   function tabs() {
-    const t = TABS.slice(); if (D && D.canEdit) t.push(["import", "⬆ นำเข้า Excel"]);
+    const t = TABS.slice(); if (D && D.canEdit) t.push(["import", "📥 นำเข้า Excel"]);
     return `<div class="stm-tabs">${t.map(([id, l]) => `<a href="#site-team${id ? "/" + id : ""}" class="${S.page === id ? "on" : ""}">${l}</a>`).join("")}</div>`;
   }
   function draw() {
@@ -141,33 +148,34 @@
     const all = people().filter(r => r.active);
     const cnt = (f) => all.filter(f).length;
     const tiles = [
-      ["ทั้งหมด", all.length, ""], ["มี Passport ใช้ได้", cnt(r => r.st === "ok" || r.st === "lt12"), "ok"],
-      ["ต้องต่ออายุ", cnt(needsRenew), "warn"], ["หมดอายุแล้ว", cnt(r => r.st === "exp"), "bad"], ["ไม่มี Passport", cnt(r => r.st === "none"), "none"],
+      ["ทั้งหมด", all.length, "all", "👥", "people"], ["มี Passport ใช้ได้", cnt(r => r.st === "ok" || r.st === "lt12"), "ok", "✅", "people"],
+      ["ต้องต่ออายุ", cnt(needsRenew), "warn", "⏰", "renew"], ["หมดอายุแล้ว", cnt(r => r.st === "exp"), "bad", "⛔", "renew"], ["ไม่มี Passport", cnt(r => r.st === "none"), "none", "📭", "people"],
     ];
     const units = UNITS.map(([u, l]) => {
       const rs = all.filter(r => r.unit === u); if (!rs.length) return "";
       const c = k => rs.filter(r => r.st === k).length;
-      return `<tr><th title="${esc(l)}">${esc(u === "-" ? "อื่นๆ" : u)}</th><td class="n">${rs.length}</td><td class="n ok">${c("ok") + c("lt12")}</td><td class="n bad">${c("lt6") + c("exp") || ""}</td><td class="n muted">${c("none") + c("unk") || ""}</td></tr>`;
+      const ok = c("ok") + c("lt12"), bad = c("lt6") + c("exp"), no = c("none") + c("unk"), pc = x => (100 * x / rs.length).toFixed(1) + "%";
+      return `<tr><th title="${esc(l)}">${unitBadge(u)}<div class="stm-bar" title="ใช้ได้ ${ok} · ใกล้หมด ${bad} · ไม่มี ${no}"><i class="b-ok" style="width:${pc(ok)}"></i><i class="b-bad" style="width:${pc(bad)}"></i><i class="b-no" style="width:${pc(no)}"></i></div></th><td class="n">${rs.length}</td><td class="n ok">${ok}</td><td class="n bad">${bad || ""}</td><td class="n muted">${no || ""}</td></tr>`;
     }).join("");
     const soon = all.filter(r => r.m != null && r.m < RENEW_MONTHS + 3).sort((a, b) => a.m - b.m).slice(0, 12);
     const now = iso(today());
     const trips = D.trips.filter(t => (t.date_to || t.date_from || "") >= now).slice(0, 6);
-    return `<div class="stm-tiles">${tiles.map(([l, n, k]) => `<div class="stm-tile t-${k}"><b>${n}</b><span>${l}</span></div>`).join("")}</div>
+    return `<div class="stm-tiles">${tiles.map(([l, n, k, ic, go]) => `<a class="stm-tile t-${k}" href="#site-team/${go}"><i>${ic}</i><div><b>${n}</b><span>${l}</span></div></a>`).join("")}</div>
       <div class="stm-grid">
-        <div class="stm-card"><h3>แยกตามทีม</h3><table class="stm-t"><thead><tr><th>ทีม</th><th class="n">คน</th><th class="n">ใช้ได้</th><th class="n" title="เหลือ &lt; 6 เดือน หรือหมดอายุแล้ว">ใกล้หมด</th><th class="n">ไม่มี</th></tr></thead><tbody>${units}</tbody></table></div>
-        <div class="stm-card"><h3>Passport ใกล้หมดอายุ</h3>${soon.length ? `<table class="stm-t"><tbody>${soon.map(r => `<tr><td>${esc(label(r))}<div class="sub">${esc(UNIT_L[r.unit] || r.unit)}</div></td><td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${ST_CLS[r.st]}">${r.stL}</span></td><td>${esc(RENEW_L[r.p.renewal_status || ""] || "")}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">ไม่มีใครหมดอายุภายใน 1 ปี</p>`}
+        <div class="stm-card c-team"><h3><i>🧑‍🔧</i>แยกตามทีม</h3><table class="stm-t"><thead><tr><th>ทีม</th><th class="n">คน</th><th class="n">ใช้ได้</th><th class="n" title="เหลือ &lt; 6 เดือน หรือหมดอายุแล้ว">ใกล้หมด</th><th class="n">ไม่มี</th></tr></thead><tbody>${units}</tbody></table></div>
+        <div class="stm-card c-pass"><h3><i>⏳</i>Passport ใกล้หมดอายุ</h3>${soon.length ? `<table class="stm-t"><tbody>${soon.map(r => `<tr><td>${esc(label(r))}<div class="sub">${unitBadge(r.unit)}</div></td><td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${ST_CLS[r.st]}">${r.stL}</span></td><td>${esc(RENEW_L[r.p.renewal_status || ""] || "")}</td></tr>`).join("")}</tbody></table>` : `<p class="stm-empty">🎉 ไม่มีใครหมดอายุภายใน 1 ปี</p>`}
           <a class="stm-more" href="#site-team/renew">ดูรายการต่ออายุทั้งหมด →</a></div>
         ${visaCard()}
-        <div class="stm-card"><h3>ทริปต่างประเทศที่กำลังจะถึง</h3>${trips.length ? trips.map(tripLine).join("") : `<p class="muted">ยังไม่มีทริป</p>`}<a class="stm-more" href="#site-team/trips">วางแผนทริป →</a></div>
+        <div class="stm-card c-trip"><h3><i>✈️</i>ทริปต่างประเทศที่กำลังจะถึง</h3>${trips.length ? trips.map(tripLine).join("") : `<p class="stm-empty">🧳 ยังไม่มีทริป</p>`}<a class="stm-more" href="#site-team/trips">วางแผนทริป →</a></div>
       </div>`;
   }
   function visaCard() {
     const vr = visaRows(), cs = [...new Set(vr.map(x => x.country))].sort((a, b) => vr.filter(x => x.country === b).length - vr.filter(x => x.country === a).length || a.localeCompare(b));
     const rows = cs.map(c => { const rs = vr.filter(x => x.country === c), n = k => rs.filter(x => x.st === k).length;
-      return `<tr class="stm-click" data-href="#site-team/visas/${encodeURIComponent(c)}"><th><a href="#site-team/visas/${encodeURIComponent(c)}">${esc(c)}</a></th><td class="n">${rs.length}</td><td class="n ok">${n("ok") + n("unk") || ""}</td><td class="n warn">${n("soon") || ""}</td><td class="n bad">${n("exp") || ""}</td></tr>`; }).join("");
+      return `<tr class="stm-click" data-href="#site-team/visas/${encodeURIComponent(c)}"><th><a href="#site-team/visas/${encodeURIComponent(c)}"><span class="stm-flag">${flag(c)}</span>${esc(c)}</a></th><td class="n">${rs.length}</td><td class="n ok">${n("ok") + n("unk") || ""}</td><td class="n warn">${n("soon") || ""}</td><td class="n bad">${n("exp") || ""}</td></tr>`; }).join("");
     const soon = vr.filter(x => x.st === "soon" || x.st === "exp").length;
-    return `<div class="stm-card"><h3>วีซ่า</h3>${rows ? `<table class="stm-t"><thead><tr><th>ประเทศ</th><th class="n">คน</th><th class="n">ใช้ได้</th><th class="n" title="เหลือ &lt; ${VISA_SOON} เดือน">ใกล้หมด</th><th class="n">หมดแล้ว</th></tr></thead><tbody>${rows}</tbody></table>
-      ${soon ? `<p class="bad sub">ใกล้หมด / หมดแล้ว ${soon} รายการ</p>` : ""}` : `<p class="muted">ยังไม่มีข้อมูลวีซ่า</p>`}<a class="stm-more" href="#site-team/visas">ดูวีซ่าทั้งหมด →</a></div>`;
+    return `<div class="stm-card c-visa"><h3><i>🛂</i>วีซ่า</h3>${rows ? `<table class="stm-t"><thead><tr><th>ประเทศ</th><th class="n">คน</th><th class="n">ใช้ได้</th><th class="n" title="เหลือ &lt; ${VISA_SOON} เดือน">ใกล้หมด</th><th class="n">หมดแล้ว</th></tr></thead><tbody>${rows}</tbody></table>
+      ${soon ? `<p class="bad sub">⚠️ ใกล้หมด / หมดแล้ว ${soon} รายการ</p>` : ""}` : `<p class="stm-empty">🗺️ ยังไม่มีข้อมูลวีซ่า<br><span class="sub">ใส่ได้ที่ รายชื่อทีม → แก้ไข → + เพิ่มวีซ่า</span></p>`}<a class="stm-more" href="#site-team/visas">ดูวีซ่าทั้งหมด →</a></div>`;
   }
   function vVisas() {
     const ce = D.canEdit, all = visaRows(), cs = [...new Set(all.map(x => x.country))].sort();
@@ -179,14 +187,14 @@
       <select id="stVc"><option value="">ทุกประเทศ</option>${cs.map(c => `<option${S.vc === c ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>
       <span class="muted">${rs.length} รายการ · ใช้ได้ ${n("ok") + n("unk")} · ใกล้หมด ${n("soon")} · หมดแล้ว ${n("exp")}</span></div>
       <div class="stm-card stm-scroll"><table class="stm-t"><thead><tr><th>ชื่อ</th><th>ทีม</th><th>ประเทศ</th><th>ประเภท</th>${ce ? "<th>เลขวีซ่า</th>" : ""}<th>วันออก</th><th>หมดอายุ</th><th>สถานะ</th><th>หมายเหตุ</th>${ce ? "<th></th>" : ""}</tr></thead><tbody>
-      ${rs.map(x => `<tr><td>${esc(label(x.r))}<div class="sub">${esc(x.r.code)}</div></td><td>${esc(x.r.unit)}</td><td>${esc(x.country)}</td><td>${esc(x.v.type || "")}</td>${ce ? `<td class="mono">${esc(x.v.visa_no || "")}</td>` : ""}
+      ${rs.map(x => `<tr><td>${esc(label(x.r))}<div class="sub">${esc(x.r.code)}</div></td><td>${unitBadge(x.r.unit)}</td><td>${flag(x.country)} ${esc(x.country)}</td><td>${esc(x.v.type || "")}</td>${ce ? `<td class="mono">${esc(x.v.visa_no || "")}</td>` : ""}
         <td>${fmt(x.v.issue)}</td><td>${fmt(x.v.expiry)}</td><td><span class="stm-st ${x.cls}">${x.st === "soon" ? Math.max(0, Math.floor(monthsLeft(x.v.expiry))) + " เดือน" : x.stL}</span></td><td>${esc(x.v.note || "")}</td>
         ${ce ? `<td><button class="stm-lnk" data-a="edit" data-k="${esc(x.r.key)}">แก้ไข</button></td>` : ""}</tr>`).join("") || `<tr><td colspan="10" class="muted">ไม่มีข้อมูลวีซ่า${S.vc ? " " + esc(S.vc) : ""} — ใส่ได้ที่ รายชื่อทีม → แก้ไข → + เพิ่มวีซ่า</td></tr>`}
       </tbody></table></div>`;
   }
   function tripLine(t) {
     const ps = tripPeople(t), bad = ps.filter(x => !x.okTravel).length;
-    return `<div class="stm-trip"><span class="stm-st st-none">${esc(kindL(t))}</span> <b>${esc(t.title)}</b> <span class="muted">${esc([t.job_no, t.customer, t.country].filter(Boolean).join(" · "))}</span>
+    return `<div class="stm-trip"><span class="stm-st st-none">${esc(kindL(t))}</span> <b>${esc(t.title)}</b> <span class="muted">${esc([t.job_no, t.customer].filter(Boolean).join(" · "))}${t.country ? " · " + flag(cKey(t.country)) + " " + esc(t.country) : ""}</span>
       <div class="sub">${fmt(t.date_from)}${t.date_to && t.date_to !== t.date_from ? " – " + fmt(t.date_to) : ""} · ${ps.length} คน · ประกัน${INS_L[t.insurance_type] || ""}${bad ? ` · <span class="bad">Passport ไม่ผ่าน ${bad} คน</span>` : ""}</div></div>`;
   }
 
@@ -206,7 +214,7 @@
     const add = ce ? `<button class="stm-btn" data-a="add">+ เพิ่มคน (ไม่อยู่ใน Manpower)</button>` : "";
     return filterBar(add) + `<div class="stm-card stm-scroll"><table class="stm-t stm-roster"><thead><tr><th>ชื่อ</th><th>ทีม</th><th>ชื่อใน Passport</th>
       <th>เลขบัตรประชาชน</th><th>วันเกิด</th><th>Passport</th><th>หมดอายุ</th><th>สถานะ</th>${ce ? "<th></th>" : ""}</tr></thead><tbody>
-      ${rs.map(r => `<tr><td>${esc(label(r))}<div class="sub">${esc(r.code)}</div></td><td>${esc(r.unit)}</td><td>${esc(r.p.name_en || "")}</td>
+      ${rs.map(r => `<tr><td>${esc(label(r))}<div class="sub">${esc(r.code)}</div></td><td>${unitBadge(r.unit)}</td><td>${esc(r.p.name_en || "")}</td>
         <td class="mono">${ce ? esc(fmtId(r.p.national_id)) : (r.pid ? "•••••••••" : "")}</td>
         <td>${ce ? (r.p.birth_date ? fmt(r.p.birth_date) + ` <span class="muted">(${age(r.p.birth_date)})</span>` : "") : ""}</td>
         <td class="mono">${ce ? esc(r.p.passport_no || "") : esc(mask(r.p.passport_no || ""))}${ce && r.p.passport_file ? ` <a href="${esc(r.p.passport_file)}" target="_blank" rel="noopener" title="เปิดสแกน">📄</a>` : ""}</td>
@@ -500,6 +508,22 @@
 .stm-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.stm-chip{background:#ebfbee;color:#2b8a3e;border-radius:999px;padding:3px 10px;font-size:12.5px}.stm-chip.bad{background:#fff5f5;color:#c92a2a}
 select.warn{border-color:#fab005}select.bad{border-color:#fa5252}
 .stm-modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;z-index:200;overflow:auto;padding:40px 12px}.stm-dlg{background:#fff;border-radius:14px;padding:18px 20px;max-width:860px;width:100%}.stm-dlg h3{margin:0 0 12px}
+/* friendly look (Dew, 17 Nov 2026) */
+.stm-tabs a{transition:.15s}.stm-tabs a:hover{background:#fff5f5;border-color:#ffc9c9}
+.stm-tile{display:flex!important;align-items:center;gap:12px;text-decoration:none;color:inherit;border:0!important;border-radius:16px!important;box-shadow:0 1px 2px rgba(16,24,40,.06);transition:transform .15s,box-shadow .15s}
+.stm-tile:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(16,24,40,.10)}
+.stm-tile i{font-style:normal;font-size:24px;width:46px;height:46px;border-radius:14px;display:grid;place-items:center;background:#fff;flex:none}
+.stm-tile.t-all{background:linear-gradient(135deg,#f3f0ff,#e5dbff)}.stm-tile.t-all b{color:#5f3dc4}
+.stm-tile.t-ok{background:linear-gradient(135deg,#ebfbee,#d3f9d8)}.stm-tile.t-warn{background:linear-gradient(135deg,#fff4e6,#ffe8cc)}
+.stm-tile.t-bad{background:linear-gradient(135deg,#fff5f5,#ffe3e3)}.stm-tile.t-none{background:linear-gradient(135deg,#f8f9fa,#e9ecef)}
+.stm-grid .stm-card{border:0;border-radius:16px;box-shadow:0 1px 2px rgba(16,24,40,.06);border-top:4px solid #e9ecef}
+.stm-card.c-team{border-top-color:#845ef7}.stm-card.c-pass{border-top-color:#ff922b}.stm-card.c-visa{border-top-color:#339af0}.stm-card.c-trip{border-top-color:#20c997}
+.stm-card h3{display:flex;align-items:center;gap:8px}.stm-card h3 i{font-style:normal;font-size:16px;width:30px;height:30px;border-radius:10px;display:grid;place-items:center;background:#f8f9fa}
+.c-team h3 i{background:#f3f0ff}.c-pass h3 i{background:#fff4e6}.c-visa h3 i{background:#e7f5ff}.c-trip h3 i{background:#e6fcf5}
+.stm-ub{display:inline-flex;align-items:center;gap:3px;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.stm-bar{display:flex;height:6px;border-radius:999px;overflow:hidden;background:#f1f3f5;margin-top:5px;width:110px}.stm-bar i{display:block;height:100%}.stm-bar .b-ok{background:#51cf66}.stm-bar .b-bad{background:#ff922b}.stm-bar .b-no{background:#ced4da}
+.stm-flag{font-size:16px;margin-right:6px}.stm-empty{text-align:center;color:#868e96;padding:18px 6px;font-size:14px;line-height:1.7}
+.stm-more{display:inline-block;margin-top:10px;padding:5px 12px;border-radius:999px;background:#f8f9fa;text-decoration:none!important;font-size:12.5px;color:#495057}.stm-more:hover{background:#fff0f6;color:#c2255c}
 .stm-toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:10px 16px;border-radius:10px;z-index:300;font-size:13px}.stm-toast.bad{background:#c92a2a}
 `;
 
