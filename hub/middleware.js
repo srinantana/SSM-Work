@@ -1115,14 +1115,22 @@ async function stWrite(u, method, H, row) {
   }
   return r;
 }
+// Jobs a trip may be created for: Site Expense projects that got the award (status locked, Job no. set) with a Budget (Dew, 17 Nov 2026).
+async function stAwardedJobs(cfg) {
+  const rows = await restAll(cfg, `${SE_TABLE}?select=data&status=eq.locked&jo=neq.`).catch(() => null) || [];
+  return rows.map((r) => r.data || {}).filter((p) => p.jo && p.list !== 'trash' && p.budget && Object.values(p.budget).some((v) => Number(v) > 0))
+    .map((p) => ({ jo: String(p.jo), name: p.name || '', customer: p.customer || '', country: p.country || '', start: p.start || '', end: p.end || '', ij: p.ij || '' }))
+    .sort((a, b) => String(b.start).localeCompare(String(a.start)));
+}
 async function siteTeamApi(cfg, req, url, prof) {
   const path = url.pathname, can = canEditManpower(prof), who = prof.username || prof.email;
   const H = { ...authHeaders(cfg.service), prefer: 'return=representation' };
   if (path === '/api/site-team/data' && req.method === 'GET') {
-    const [workers, people, trips] = await Promise.all([
+    const [workers, people, trips, jobs] = await Promise.all([
       restAll(cfg, '/rest/v1/mp_workers?select=id,emp_code,name_th,nickname,unit,trade,active,sort&order=sort.asc'),
       restAll(cfg, '/rest/v1/site_team_people?select=*&order=id.asc'),
       restAll(cfg, '/rest/v1/site_team_trips?select=*&order=date_from.desc.nullslast'),
+      stAwardedJobs(cfg),
     ]);
     if (!people || !trips) return json({ error: 'no_table' }, 503);
     let names = new Map();
@@ -1133,6 +1141,7 @@ async function siteTeamApi(cfg, req, url, prof) {
       workers: (workers || []).map((w) => ({ ...w, name_en_hr: can ? names.get(String(w.emp_code || w.id).toUpperCase()) || '' : '' })),
       people: people.map(strip),
       trips,
+      jobs,
     });
   }
   if (req.method !== 'POST') return json({ error: 'method' }, 405);
@@ -1181,6 +1190,12 @@ async function siteTeamApi(cfg, req, url, prof) {
         date_from: from, date_to: to, insurance_type: d.insurance_type === 'annual' ? 'annual' : 'trip', note: mpStr(d.note, 500) || null,
         people: (Array.isArray(d.people) ? d.people : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 200), updated_at: now };
       const id = Number(d.id) || 0;
+      if (!id || row.job_no) {   // new trips (and any Job change) must use a Job that got the award with a Budget
+        const job = (await stAwardedJobs(cfg)).find((j) => j.jo === row.job_no);
+        const old = id ? ((await restAll(cfg, `/rest/v1/site_team_trips?select=job_no&id=eq.${id}`)) || [])[0] : null;
+        if (!job && !(old && old.job_no === row.job_no)) return json({ error: 'เลือก Job ที่ Get Award และมี Budget ใน Site Expense แล้วเท่านั้น' }, 400);
+        if (job) Object.assign(row, { title: job.name || job.jo, customer: job.customer || null });
+      }
       const r = id
         ? await fetch(cfg.url + `/rest/v1/site_team_trips?id=eq.${id}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) })
         : await fetch(cfg.url + '/rest/v1/site_team_trips', { method: 'POST', headers: H, body: JSON.stringify({ ...row, created_by: who }) });

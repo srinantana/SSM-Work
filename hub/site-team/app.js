@@ -68,7 +68,7 @@
   const C_ALIAS = { japan: "ญี่ปุ่น", jp: "ญี่ปุ่น", china: "จีน", cn: "จีน", korea: "เกาหลีใต้", kr: "เกาหลีใต้", เกาหลี: "เกาหลีใต้", taiwan: "ไต้หวัน", tw: "ไต้หวัน", vietnam: "เวียดนาม", vn: "เวียดนาม",
     malaysia: "มาเลเซีย", my: "มาเลเซีย", singapore: "สิงคโปร์", sg: "สิงคโปร์", indonesia: "อินโดนีเซีย", id: "อินโดนีเซีย", philippines: "ฟิลิปปินส์", ph: "ฟิลิปปินส์", india: "อินเดีย", in: "อินเดีย",
     cambodia: "กัมพูชา", kh: "กัมพูชา", laos: "ลาว", la: "ลาว", myanmar: "เมียนมา", mm: "เมียนมา", usa: "สหรัฐอเมริกา", us: "สหรัฐอเมริกา", อเมริกา: "สหรัฐอเมริกา", schengen: "Schengen (ยุโรป)",
-    ยุโรป: "Schengen (ยุโรป)", uk: "สหราชอาณาจักร", อังกฤษ: "สหราชอาณาจักร", australia: "ออสเตรเลีย", au: "ออสเตรเลีย", uae: "สหรัฐอาหรับเอมิเรตส์", saudi: "ซาอุดีอาระเบีย" };
+    ยุโรป: "Schengen (ยุโรป)", "korea (south)": "เกาหลีใต้", "united states": "สหรัฐอเมริกา", "united kingdom": "สหราชอาณาจักร", "united arab emirates": "สหรัฐอาหรับเอมิเรตส์", "saudi arabia": "ซาอุดีอาระเบีย", uk: "สหราชอาณาจักร", อังกฤษ: "สหราชอาณาจักร", australia: "ออสเตรเลีย", au: "ออสเตรเลีย", uae: "สหรัฐอาหรับเอมิเรตส์", saudi: "ซาอุดีอาระเบีย" };
   const cKey = c => { const k = String(c || "").trim().toLowerCase(); return C_ALIAS[k] || COUNTRIES.find(x => x.toLowerCase() === k) || String(c || "").trim(); };
   const visas = p => (Array.isArray(p.visas) ? p.visas : []).filter(v => v && v.country);
   const visaFor = (p, country) => { const k = cKey(country); return k ? visas(p).filter(v => cKey(v.country) === k).sort((a, b) => String(b.expiry || "").localeCompare(String(a.expiry || "")))[0] || null : null; };
@@ -210,6 +210,17 @@
       <div class="stm-card">${list.length ? list.map(t => `<div class="stm-trip${(t.date_to || t.date_from || "") < now ? " past" : ""}">${tripLine(t)}
         <div class="stm-acts">${ce ? `<button class="stm-lnk" data-a="trip-edit" data-id="${t.id}">แก้ไข / เลือกคน</button> <button class="stm-lnk" data-a="trip-xlsx" data-id="${t.id}">⬇ รายชื่อทำประกัน (Excel)</button>` : `<button class="stm-lnk" data-a="trip-view" data-id="${t.id}">ดูรายชื่อ</button>`}</div></div>`).join("") : `<p class="muted">ยังไม่มีทริป</p>`}</div>`;
   }
+  /* jobs for trips = Site Expense projects that got the award and have a locked Budget (D.jobs from /api/site-team/data) */
+  const jobLabel = j => [j.jo, j.name, j.customer, j.country].filter(Boolean).join(" · ");
+  function jobOpts(t) {
+    const js = (D.jobs || []).slice(), has = js.some(j => j.jo === t.job_no);
+    const o = js.map(j => `<option value="${esc(j.jo)}"${j.jo === t.job_no ? " selected" : ""}>${esc(jobLabel(j))}</option>`).join("");
+    return o + (t.job_no && !has ? `<option value="${esc(t.job_no)}" selected>${esc(t.job_no + " · " + (t.title || ""))} (ไม่อยู่ในรายการ Get Award)</option>` : "");
+  }
+  function pickJob(jo) {
+    const j = (D.jobs || []).find(x => x.jo === jo); if (!j) return;
+    Object.assign(S.trip, { job_no: j.jo, title: j.name || j.jo, customer: j.customer || "", country: cKey(j.country) || j.country || "", date_from: j.start || S.trip.date_from || "", date_to: j.end || S.trip.date_to || "" });
+  }
   function tripForm() {
     const t = S.trip, ce = D.canEdit, sel = new Set((t.people || []).map(Number));
     const back = parse(t.date_to || t.date_from), need = back ? addMonths(back, TRAVEL_MONTHS) : null;
@@ -217,14 +228,16 @@
     const chk = r => { const e = parse(r.p.passport_expiry); if (!e) return ["bad", r.st === "none" ? "ไม่มี Passport" : "ไม่ทราบวันหมดอายุ"]; if (need && e < need) return ["bad", "ไม่ถึง " + TRAVEL_MONTHS + " เดือนหลังกลับ"]; if (!need) return ["", fmt(r.p.passport_expiry)]; return ["ok", "ผ่าน"]; };
     const picked = tripPeople(t);
     const dis = ce ? "" : " disabled";
+    if (!(D.jobs || []).length && !t.job_no) return `<div class="stm-card"><h3>ทริปใหม่</h3><p class="muted">ยังไม่มี Job ที่ Get Award และมี Budget ใน Site Expense — สร้างทริปได้หลัง Get Award</p><div class="stm-acts"><button class="stm-btn ghost" data-a="trip-close">กลับ</button></div></div>`;
     const vCell = r => { if (!t.country) return ""; const x = visaFor(r.p, t.country); if (!x) return `<td><span class="stm-st st-none">ไม่มีวีซ่า ${esc(cKey(t.country))}</span></td>`;
       const e = parse(x.expiry), ok = !e || !back || e >= back; return `<td><span class="stm-st ${ok ? "st-ok" : "st-bad"}">วีซ่า${x.expiry ? (ok ? " ถึง " : " หมด ") + fmt(x.expiry) : ""}</span></td>`; };
     return `<div class="stm-card"><h3>${t.id ? "แก้ไขทริป" : "ทริปใหม่"}</h3>
       <div class="stm-form">
-        <label>งาน / โปรเจค *<input id="tTitle" value="${esc(t.title || "")}"${dis}></label>
-        <label>Job no.<input id="tJob" value="${esc(t.job_no || "")}"${dis}></label>
-        <label>ลูกค้า<input id="tCus" data-customer value="${esc(t.customer || "")}"${dis}></label>
-        <label>ประเทศ<input id="tCountry" list="stCountries2" value="${esc(t.country || "")}"${dis}><datalist id="stCountries2">${COUNTRIES.map(c => `<option value="${esc(c)}">`).join("")}</datalist></label>
+        <label class="wide">Job (Get Award แล้ว มี Budget ใน Site Expense) *<select id="tJobSel"${dis}><option value="">— เลือก Job —</option>${jobOpts(t)}</select></label>
+        <label>งาน / โปรเจค<input id="tTitle" value="${esc(t.title || "")}" readonly></label>
+        <label>Job no.<input id="tJob" value="${esc(t.job_no || "")}" readonly></label>
+        <label>ลูกค้า<input id="tCus" value="${esc(t.customer || "")}" readonly></label>
+        <label>ประเทศ<input id="tCountry" value="${esc(t.country || "")}" readonly></label>
         <label>วันไป<input type="date" id="tFrom" value="${esc(t.date_from || "")}"${dis}></label>
         <label>วันกลับ<input type="date" id="tTo" value="${esc(t.date_to || "")}"${dis}></label>
         <label>ประกันเดินทาง<select id="tIns"${dis}>${INS.slice(1).map(([k, l]) => `<option value="${k}"${(t.insurance_type || "trip") === k ? " selected" : ""}>${l}</option>`).join("")}</select></label>
@@ -373,12 +386,13 @@
       c.checked ? set.add(id) : set.delete(id); S.trip.people = [...set]; draw();
     }));
     ["tFrom", "tTo"].forEach(id => on(id, "change", () => { readTrip(); draw(); }));
+    on("tJobSel", "change", e => { readTrip(); pickJob(e.target.value); draw(); });
     ROOT.querySelectorAll("[data-a]").forEach(b => b.addEventListener("click", () => act(b.dataset.a, b.dataset)));
   }
   function readTrip() {
     if (!S.trip || !ROOT.querySelector("#tTitle")) return;
     const g = id => ROOT.querySelector("#" + id).value.trim();
-    Object.assign(S.trip, { title: g("tTitle"), job_no: g("tJob"), customer: g("tCus"), country: g("tCountry"), date_from: g("tFrom"), date_to: g("tTo"), insurance_type: g("tIns"), note: g("tNote") });
+    Object.assign(S.trip, { date_from: g("tFrom"), date_to: g("tTo"), insurance_type: g("tIns"), note: g("tNote") });
   }
   async function act(a, ds) {
     const all = () => people();
@@ -390,7 +404,7 @@
     if (a === "trip-xlsx") { readTrip(); const t = S.trip && S.trip.id === +ds.id ? S.trip : D.trips.find(x => x.id === +ds.id); return tripXlsx(t); }
     if (a === "trip-save") {
       readTrip(); const t = S.trip;
-      if (!t.title) return toast("ใส่ชื่องาน / โปรเจคก่อน", 1);
+      if (!t.job_no) return toast("เลือก Job ที่ Get Award แล้วก่อน", 1);
       const bad = tripPeople(t).filter(r => !r.okTravel);
       if (bad.length && !confirm(`Passport ของ ${bad.map(label).join(", ")} ไม่ผ่านเงื่อนไข ${TRAVEL_MONTHS} เดือน — บันทึกต่อไหม?`)) return;
       try { const j = await post("trip", t); S.trip = null; toast("บันทึกทริปแล้ว"); D.trips = D.trips.filter(x => x.id !== j.trip.id).concat(j.trip); draw(); } catch (x) { toast(x.message, 1); }
