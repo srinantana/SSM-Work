@@ -1080,7 +1080,7 @@ async function readMasterProjects(cfg) {
 // added here who is not on the board. Editors = Manpower editors (SC / PC / SSM). Everyone else with the menu sees names,
 // teams and expiry dates only: national ID, passport no. and birth date are removed before the response leaves the server.
 const ST_FIELDS = ['emp_code', 'name_en', 'name_th', 'sex', 'nationality', 'national_id', 'birth_date', 'passport_no', 'passport_issue', 'passport_expiry',
-  'passport_file', 'visa_note', 'renewal_status', 'renewal_cost', 'renewal_note', 'insurance_type', 'insurance_policy', 'insurance_expiry', 'note', 'active'];
+  'passport_file', 'visa_note', 'renewal_status', 'renewal_cost', 'renewal_note', 'insurance_type', 'insurance_policy', 'insurance_expiry', 'note', 'active', 'team'];
 const ST_PRIVATE = ['national_id', 'birth_date', 'passport_no', 'passport_issue', 'insurance_policy', 'passport_file', 'sex'];
 const stDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
 function stClean(d) {
@@ -1096,7 +1096,17 @@ function stClean(d) {
   if ('insurance_type' in d) o.insurance_type = ['', 'trip', 'annual'].includes(d.insurance_type) ? d.insurance_type : '';
   if ('renewal_cost' in d) { const n = Number(String(d.renewal_cost ?? '').replace(/,/g, '')); o.renewal_cost = String(d.renewal_cost ?? '').trim() === '' ? null : (Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null); }
   if ('active' in d) o.active = d.active !== false;
+  if ('team' in d) o.team = ['EN', 'SP', 'OT'].includes(String(d.team || '').toUpperCase()) ? String(d.team).toUpperCase() : null;   // group for people not on the Manpower board
   return o;
+}
+// Writes to site_team_people; if the `team` column is not there yet (database/site_team-002.sql not run), retry without it.
+async function stWrite(u, method, H, row) {
+  let r = await fetch(u, { method, headers: H, body: JSON.stringify(row) });
+  if (!r.ok && r.status === 400 && 'team' in row) {
+    const t = await r.clone().text().catch(() => '');
+    if (/team/.test(t)) { const { team, ...rest } = row; r = await fetch(u, { method, headers: H, body: JSON.stringify(rest) }); }
+  }
+  return r;
 }
 async function siteTeamApi(cfg, req, url, prof) {
   const path = url.pathname, can = canEditManpower(prof), who = prof.username || prof.email;
@@ -1127,11 +1137,11 @@ async function siteTeamApi(cfg, req, url, prof) {
       const row = { ...stClean(d), updated_by: who, updated_at: now };
       const id = Number(d.id) || 0, worker = mpStr(d.worker_id, 20) || null;
       if (id) {
-        const r = await fetch(cfg.url + `/rest/v1/site_team_people?id=eq.${id}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) });
+        const r = await stWrite(cfg.url + `/rest/v1/site_team_people?id=eq.${id}`, 'PATCH', H, row);
         return r.ok ? json({ ok: true, person: (await r.json())[0] }) : json({ error: 'supabase' }, 502);
       }
       if (!worker && !row.name_en && !row.name_th) return json({ error: 'ใส่ชื่อก่อน' }, 400);
-      const r = await fetch(cfg.url + '/rest/v1/site_team_people', { method: 'POST', headers: H, body: JSON.stringify({ ...row, worker_id: worker }) });
+      const r = await stWrite(cfg.url + '/rest/v1/site_team_people', 'POST', H, { ...row, worker_id: worker });
       return r.ok ? json({ ok: true, person: (await r.json())[0] }) : json({ error: r.status === 409 ? 'คนนี้มีข้อมูลอยู่แล้ว' : 'supabase' }, r.status === 409 ? 409 : 502);
     }
     if (path === '/api/site-team/person-delete') {
@@ -1149,8 +1159,8 @@ async function siteTeamApi(cfg, req, url, prof) {
         const worker = mpStr(x.worker_id, 20) || null;
         const hit = existing.find((p) => (worker && p.worker_id === worker) || (row.passport_no && p.passport_no === row.passport_no) || (!worker && row.name_en && p.name_en && p.name_en.toUpperCase() === row.name_en.toUpperCase()));
         const r = hit
-          ? await fetch(cfg.url + `/rest/v1/site_team_people?id=eq.${hit.id}`, { method: 'PATCH', headers: H, body: JSON.stringify(worker ? { ...row, worker_id: worker } : row) })
-          : await fetch(cfg.url + '/rest/v1/site_team_people', { method: 'POST', headers: H, body: JSON.stringify({ ...row, worker_id: worker }) });
+          ? await stWrite(cfg.url + `/rest/v1/site_team_people?id=eq.${hit.id}`, 'PATCH', H, worker ? { ...row, worker_id: worker, team: null } : row)
+          : await stWrite(cfg.url + '/rest/v1/site_team_people', 'POST', H, { ...row, worker_id: worker });
         if (!r.ok) { out.failed.push((row.name_en || row.name_th || '?') + ' (' + r.status + ')'); continue; }
         if (hit) out.updated++; else { out.created++; const n = (await r.json())[0]; if (n) existing.push(n); }
       }
