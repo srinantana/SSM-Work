@@ -1080,7 +1080,7 @@ async function readMasterProjects(cfg) {
 // added here who is not on the board. Editors = Manpower editors (SC / PC / SSM). Everyone else with the menu sees names,
 // teams and expiry dates only: national ID, passport no. and birth date are removed before the response leaves the server.
 const ST_FIELDS = ['emp_code', 'name_en', 'name_th', 'sex', 'nationality', 'national_id', 'birth_date', 'passport_no', 'passport_issue', 'passport_expiry',
-  'passport_file', 'visa_note', 'renewal_status', 'renewal_cost', 'renewal_note', 'insurance_type', 'insurance_policy', 'insurance_expiry', 'note', 'active', 'team'];
+  'passport_file', 'visa_note', 'renewal_status', 'renewal_cost', 'renewal_note', 'insurance_type', 'insurance_policy', 'insurance_expiry', 'note', 'active', 'team', 'visas'];
 const ST_PRIVATE = ['national_id', 'birth_date', 'passport_no', 'passport_issue', 'insurance_policy', 'passport_file', 'sex'];
 const stDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
 function stClean(d) {
@@ -1096,15 +1096,22 @@ function stClean(d) {
   if ('insurance_type' in d) o.insurance_type = ['', 'trip', 'annual'].includes(d.insurance_type) ? d.insurance_type : '';
   if ('renewal_cost' in d) { const n = Number(String(d.renewal_cost ?? '').replace(/,/g, '')); o.renewal_cost = String(d.renewal_cost ?? '').trim() === '' ? null : (Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null); }
   if ('active' in d) o.active = d.active !== false;
+  if ('visas' in d) o.visas = (Array.isArray(d.visas) ? d.visas : []).slice(0, 30).map((v) => ({   // one row per country visa
+    country: mpStr(v && v.country, 60), type: mpStr(v && v.type, 60), visa_no: mpStr(v && v.visa_no, 40),
+    issue: stDate(v && v.issue) || '', expiry: stDate(v && v.expiry) || '', note: mpStr(v && v.note, 200),
+  })).filter((v) => v.country);
   if ('team' in d) o.team = ['EN', 'SP', 'OT'].includes(String(d.team || '').toUpperCase()) ? String(d.team).toUpperCase() : null;   // group for people not on the Manpower board
   return o;
 }
-// Writes to site_team_people; if the `team` column is not there yet (database/site_team-002.sql not run), retry without it.
+// Writes to site_team_people; if a newer column is not there yet (database/site_team-002 / -003.sql not run), retry without it.
 async function stWrite(u, method, H, row) {
   let r = await fetch(u, { method, headers: H, body: JSON.stringify(row) });
-  if (!r.ok && r.status === 400 && 'team' in row) {
+  for (let i = 0; i < 2 && !r.ok && r.status === 400; i++) {
     const t = await r.clone().text().catch(() => '');
-    if (/team/.test(t)) { const { team, ...rest } = row; r = await fetch(u, { method, headers: H, body: JSON.stringify(rest) }); }
+    const col = ['team', 'visas'].find((k) => k in row && new RegExp(`'${k}'|"${k}"|\\b${k}\\b`).test(t));
+    if (!col) break;
+    const { [col]: _drop, ...rest } = row; row = rest;
+    r = await fetch(u, { method, headers: H, body: JSON.stringify(row) });
   }
   return r;
 }

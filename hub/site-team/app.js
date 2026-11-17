@@ -62,6 +62,21 @@
   const fmtId = v => v && v.length === 13 ? `${v[0]}-${v.slice(1, 5)}-${v.slice(5, 10)}-${v.slice(10, 12)}-${v[12]}` : (v || "");
   const label = r => (r.name_th || r.name_en || "?") + (r.nick ? ` (${r.nick})` : "");
 
+  /* ---------- visas: site_team_people.visas = [{ country, type, visa_no, issue, expiry, note }] ---------- */
+  const COUNTRIES = ["ญี่ปุ่น", "จีน", "เกาหลีใต้", "ไต้หวัน", "เวียดนาม", "มาเลเซีย", "สิงคโปร์", "อินโดนีเซีย", "ฟิลิปปินส์", "อินเดีย", "กัมพูชา", "ลาว", "เมียนมา",
+    "สหรัฐอเมริกา", "Schengen (ยุโรป)", "สหราชอาณาจักร", "ออสเตรเลีย", "สหรัฐอาหรับเอมิเรตส์", "ซาอุดีอาระเบีย"];
+  const C_ALIAS = { japan: "ญี่ปุ่น", jp: "ญี่ปุ่น", china: "จีน", cn: "จีน", korea: "เกาหลีใต้", kr: "เกาหลีใต้", เกาหลี: "เกาหลีใต้", taiwan: "ไต้หวัน", tw: "ไต้หวัน", vietnam: "เวียดนาม", vn: "เวียดนาม",
+    malaysia: "มาเลเซีย", my: "มาเลเซีย", singapore: "สิงคโปร์", sg: "สิงคโปร์", indonesia: "อินโดนีเซีย", id: "อินโดนีเซีย", philippines: "ฟิลิปปินส์", ph: "ฟิลิปปินส์", india: "อินเดีย", in: "อินเดีย",
+    cambodia: "กัมพูชา", kh: "กัมพูชา", laos: "ลาว", la: "ลาว", myanmar: "เมียนมา", mm: "เมียนมา", usa: "สหรัฐอเมริกา", us: "สหรัฐอเมริกา", อเมริกา: "สหรัฐอเมริกา", schengen: "Schengen (ยุโรป)",
+    ยุโรป: "Schengen (ยุโรป)", uk: "สหราชอาณาจักร", อังกฤษ: "สหราชอาณาจักร", australia: "ออสเตรเลีย", au: "ออสเตรเลีย", uae: "สหรัฐอาหรับเอมิเรตส์", saudi: "ซาอุดีอาระเบีย" };
+  const cKey = c => { const k = String(c || "").trim().toLowerCase(); return C_ALIAS[k] || COUNTRIES.find(x => x.toLowerCase() === k) || String(c || "").trim(); };
+  const visas = p => (Array.isArray(p.visas) ? p.visas : []).filter(v => v && v.country);
+  const visaFor = (p, country) => { const k = cKey(country); return k ? visas(p).filter(v => cKey(v.country) === k).sort((a, b) => String(b.expiry || "").localeCompare(String(a.expiry || "")))[0] || null : null; };
+  const visaChip = v => { const e = parse(v.expiry), bad = e && e < today();
+    return `<span class="stm-vchip${bad ? " bad" : ""}" title="${esc([v.type, v.visa_no, v.note].filter(Boolean).join(" · "))}">${esc(v.country)}${v.type ? " · " + esc(v.type) : ""}${v.expiry ? " · " + (bad ? "หมด " : "ถึง ") + fmt(v.expiry) : ""}</span>`; };
+  /* old free-text note "วีซ่าญี่ปุ่น หมดอายุ 2026-09-11" → one visa row */
+  const visaFromNote = s => { const m = /วีซ่า\s*([^\s,;]+)[^0-9]*(\d{4}-\d{2}-\d{2})?/.exec(String(s || "")); return m ? [{ country: cKey(m[1]), expiry: m[2] || "" }] : []; };
+
   /* ---------- api ---------- */
   async function load(force) {
     if (D && !force) return D;
@@ -160,7 +175,7 @@
         <td class="mono">${ce ? esc(fmtId(r.p.national_id)) : (r.pid ? "•••••••••" : "")}</td>
         <td>${ce ? (r.p.birth_date ? fmt(r.p.birth_date) + ` <span class="muted">(${age(r.p.birth_date)})</span>` : "") : ""}</td>
         <td class="mono">${ce ? esc(r.p.passport_no || "") : esc(mask(r.p.passport_no || ""))}${ce && r.p.passport_file ? ` <a href="${esc(r.p.passport_file)}" target="_blank" rel="noopener" title="เปิดสแกน">📄</a>` : ""}</td>
-        <td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${ST_CLS[r.st]}">${r.stL}</span>${r.p.visa_note ? `<div class="sub">${esc(r.p.visa_note)}</div>` : ""}</td>
+        <td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${ST_CLS[r.st]}">${r.stL}</span>${visas(r.p).length ? `<div class="stm-vchips">${visas(r.p).map(visaChip).join("")}</div>` : r.p.visa_note ? `<div class="sub">${esc(r.p.visa_note)}</div>` : ""}</td>
         ${ce ? `<td><button class="stm-lnk" data-a="edit" data-k="${esc(r.key)}">แก้ไข</button></td>` : ""}</tr>`).join("") || `<tr><td colspan="9" class="muted">ไม่พบรายชื่อ</td></tr>`}
       </tbody></table></div><div class="muted stm-cnt">${rs.length} คน</div>`;
   }
@@ -202,12 +217,14 @@
     const chk = r => { const e = parse(r.p.passport_expiry); if (!e) return ["bad", r.st === "none" ? "ไม่มี Passport" : "ไม่ทราบวันหมดอายุ"]; if (need && e < need) return ["bad", "ไม่ถึง " + TRAVEL_MONTHS + " เดือนหลังกลับ"]; if (!need) return ["", fmt(r.p.passport_expiry)]; return ["ok", "ผ่าน"]; };
     const picked = tripPeople(t);
     const dis = ce ? "" : " disabled";
+    const vCell = r => { if (!t.country) return ""; const x = visaFor(r.p, t.country); if (!x) return `<td><span class="stm-st st-none">ไม่มีวีซ่า ${esc(cKey(t.country))}</span></td>`;
+      const e = parse(x.expiry), ok = !e || !back || e >= back; return `<td><span class="stm-st ${ok ? "st-ok" : "st-bad"}">วีซ่า${x.expiry ? (ok ? " ถึง " : " หมด ") + fmt(x.expiry) : ""}</span></td>`; };
     return `<div class="stm-card"><h3>${t.id ? "แก้ไขทริป" : "ทริปใหม่"}</h3>
       <div class="stm-form">
         <label>งาน / โปรเจค *<input id="tTitle" value="${esc(t.title || "")}"${dis}></label>
         <label>Job no.<input id="tJob" value="${esc(t.job_no || "")}"${dis}></label>
         <label>ลูกค้า<input id="tCus" data-customer value="${esc(t.customer || "")}"${dis}></label>
-        <label>ประเทศ<input id="tCountry" value="${esc(t.country || "")}"${dis}></label>
+        <label>ประเทศ<input id="tCountry" list="stCountries2" value="${esc(t.country || "")}"${dis}><datalist id="stCountries2">${COUNTRIES.map(c => `<option value="${esc(c)}">`).join("")}</datalist></label>
         <label>วันไป<input type="date" id="tFrom" value="${esc(t.date_from || "")}"${dis}></label>
         <label>วันกลับ<input type="date" id="tTo" value="${esc(t.date_to || "")}"${dis}></label>
         <label>ประกันเดินทาง<select id="tIns"${dis}>${INS.slice(1).map(([k, l]) => `<option value="${k}"${(t.insurance_type || "trip") === k ? " selected" : ""}>${l}</option>`).join("")}</select></label>
@@ -216,7 +233,7 @@
       <h4>เลือกคน (${sel.size}) ${need ? `<span class="muted">— Passport ต้องหมดอายุหลัง ${fmt(iso(need))}</span>` : `<span class="muted">— ใส่วันกลับเพื่อตรวจ Passport</span>`}</h4>
       ${picked.length ? `<div class="stm-chips">${picked.map(r => `<span class="stm-chip ${r.okTravel ? "" : "bad"}">${esc(label(r))}${r.okTravel ? "" : " ⚠"}</span>`).join("")}</div>` : ""}
       ${ce ? filterBar() + `<div class="stm-scroll stm-pick"><table class="stm-t"><tbody>${rs.map(r => { const [k, l] = chk(r); const can = !!r.pid;
-        return `<tr><td><label class="stm-ck"><input type="checkbox" data-pick="${r.pid}"${sel.has(r.pid) ? " checked" : ""}${can ? "" : " disabled title=\"ยังไม่มีข้อมูล Passport\""}> ${esc(label(r))}</label></td><td>${esc(r.unit)}</td><td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${k === "ok" ? "st-ok" : k === "bad" ? "st-bad" : "st-none"}">${l}</span></td></tr>`; }).join("")}</tbody></table></div>` : ""}
+        return `<tr><td><label class="stm-ck"><input type="checkbox" data-pick="${r.pid}"${sel.has(r.pid) ? " checked" : ""}${can ? "" : " disabled title=\"ยังไม่มีข้อมูล Passport\""}> ${esc(label(r))}</label></td><td>${esc(r.unit)}</td><td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${k === "ok" ? "st-ok" : k === "bad" ? "st-bad" : "st-none"}">${l}</span></td>${vCell(r)}</tr>`; }).join("")}</tbody></table></div>` : ""}
       <div class="stm-acts">${ce ? `<button class="stm-btn" data-a="trip-save">บันทึก</button>${t.id ? ` <button class="stm-btn ghost" data-a="trip-xlsx" data-id="${t.id}">⬇ รายชื่อทำประกัน</button> <button class="stm-btn danger" data-a="trip-del" data-id="${t.id}">ลบทริป</button>` : ""}` : ""} <button class="stm-btn ghost" data-a="trip-close">กลับ</button></div></div>`;
   }
   async function tripXlsx(t) {
@@ -224,10 +241,11 @@
     const ps = tripPeople(t);
     const rows = ps.map((r, i) => ({ "ลำดับ": i + 1, "ชื่อ-สกุล (EN ตาม Passport)": r.p.name_en || r.name_en, "ชื่อ-สกุล (TH)": r.name_th, "เพศ": r.p.sex || "",
       "วันเกิด": r.p.birth_date || "", "อายุ": age(r.p.birth_date), "เลขบัตรประชาชน": r.p.national_id || "", "Passport No.": r.p.passport_no || "",
-      "Passport หมดอายุ": r.p.passport_expiry || "", "ทีม": r.unit, "Passport ผ่าน 6 เดือน": r.okTravel ? "ผ่าน" : "ไม่ผ่าน" }));
+      "Passport หมดอายุ": r.p.passport_expiry || "", "ทีม": r.unit, "Passport ผ่าน 6 เดือน": r.okTravel ? "ผ่าน" : "ไม่ผ่าน",
+      ["วีซ่า " + (cKey(t.country) || "")]: t.country ? ((x => x ? (x.type || "มี") + (x.expiry ? " ถึง " + x.expiry : "") : "ไม่มี")(visaFor(r.p, t.country))) : "" }));
     const head = [["รายชื่อทำประกันเดินทาง — " + t.title], [[t.customer, t.country].filter(Boolean).join(" · ")], ["เดินทาง " + (t.date_from || "") + " ถึง " + (t.date_to || t.date_from || "") + " · ประกัน" + (INS_L[t.insurance_type] || "")], []];
     const ws = X.utils.aoa_to_sheet(head); X.utils.sheet_add_json(ws, rows, { origin: "A5" });
-    ws["!cols"] = [6, 30, 26, 6, 12, 6, 16, 14, 14, 6, 12].map(w => ({ wch: w }));
+    ws["!cols"] = [6, 30, 26, 6, 12, 6, 16, 14, 14, 6, 12, 22].map(w => ({ wch: w }));
     const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, "Insurance");
     X.writeFile(wb, `TravelInsurance_${String(t.title).replace(/[^\w฀-๿]+/g, "_").slice(0, 40)}_${(t.date_from || "").replace(/-/g, "")}.xlsx`);
   }
@@ -250,7 +268,6 @@
         ${f("pIss", "วันออก Passport", p.passport_issue, "date")}
         ${f("pExp", "วันหมดอายุ Passport", p.passport_expiry, "date")}
         ${f("pFile", "ลิงก์สแกน (Google Drive)", p.passport_file, "url")}
-        ${f("pVisa", "วีซ่า", p.visa_note)}
         ${sel("pRen", "สถานะต่ออายุ", RENEW, p.renewal_status)}
         ${f("pCost", "ค่าใช้จ่ายต่ออายุ (บาท)", p.renewal_cost, "number", ' min="0" step="1"')}
         ${f("pRenN", "หมายเหตุต่ออายุ", p.renewal_note)}
@@ -258,17 +275,30 @@
         ${f("pPol", "เลขกรมธรรม์", p.insurance_policy)}
         ${f("pInsE", "ประกันหมดอายุ", p.insurance_expiry, "date")}
         <label class="wide">หมายเหตุ<input id="pNote" value="${esc(p.note || "")}"></label>
+        <div class="wide stm-visas"><div class="stm-vh">วีซ่า (แยกตามประเทศ) <button type="button" class="stm-lnk" data-a="v-add">+ เพิ่มวีซ่า</button></div><div id="pVisas"></div>
+          ${p.visa_note ? `<div class="sub">บันทึกเดิม: ${esc(p.visa_note)}</div>` : ""}<datalist id="stCountries">${COUNTRIES.map(c => `<option value="${esc(c)}">`).join("")}</datalist></div>
         ${w ? "" : `<label class="stm-ck"><input type="checkbox" id="pAct"${p.active === false ? "" : " checked"}> ยังทำงานอยู่</label>`}
       </div><div class="stm-err" id="pErr"></div>
       <div class="stm-acts"><button class="stm-btn" data-a="p-save">บันทึก</button>${r && !w && r.pid ? ` <button class="stm-btn danger" data-a="p-del">ลบ</button>` : ""} <button class="stm-btn ghost" data-a="p-close">ยกเลิก</button></div></div>`;
     document.body.appendChild(m);
     const v = id => { const e = m.querySelector("#" + id); return e ? e.value.trim() : undefined; };
+    const vBox = m.querySelector("#pVisas");
+    const vRow = (x = {}) => { const d = document.createElement("div"); d.className = "stm-vrow";
+      d.innerHTML = `<input data-v="country" list="stCountries" placeholder="ประเทศ" value="${esc(x.country || "")}"><input data-v="type" placeholder="ประเภท เช่น Business / Work" value="${esc(x.type || "")}">
+        <input data-v="visa_no" placeholder="เลขวีซ่า" value="${esc(x.visa_no || "")}"><label>ออก<input data-v="issue" type="date" value="${esc(x.issue || "")}"></label><label>หมดอายุ<input data-v="expiry" type="date" value="${esc(x.expiry || "")}"></label>
+        <input data-v="note" placeholder="หมายเหตุ เช่น Multiple entry" value="${esc(x.note || "")}"><button type="button" class="stm-lnk bad" data-a="v-del" title="ลบ">✕</button>`;
+      vBox.appendChild(d); };
+    (visas(p).length ? visas(p) : visaFromNote(p.visa_note)).forEach(vRow);
+    const readVisas = () => [...vBox.querySelectorAll(".stm-vrow")].map(d => Object.fromEntries([...d.querySelectorAll("[data-v]")].map(i => [i.dataset.v, i.value.trim()])))
+      .filter(x => x.country).map(x => Object.assign(x, { country: cKey(x.country) }));
     m.addEventListener("click", async e => {
       const a = e.target.closest("[data-a]")?.dataset.a; if (e.target === m || a === "p-close") return m.remove();
+      if (a === "v-add") return vRow();
+      if (a === "v-del") return e.target.closest(".stm-vrow").remove();
       if (a === "p-del") { if (!confirm("ลบข้อมูลคนนี้?")) return; try { await post("person-delete", { id: r.pid }); m.remove(); toast("ลบแล้ว"); load(true); } catch (x) { m.querySelector("#pErr").textContent = x.message; } return; }
       if (a !== "p-save") return;
       const body = { id: r ? r.pid : 0, worker_id: w ? w.id : null, name_en: v("pEn").toUpperCase(), sex: v("pSex"), national_id: v("pId"), birth_date: v("pDob"), nationality: v("pNat"),
-        passport_no: v("pNo"), passport_issue: v("pIss"), passport_expiry: v("pExp"), passport_file: v("pFile"), visa_note: v("pVisa"), renewal_status: v("pRen"),
+        passport_no: v("pNo"), passport_issue: v("pIss"), passport_expiry: v("pExp"), passport_file: v("pFile"), visas: readVisas(), renewal_status: v("pRen"),
         renewal_cost: v("pCost"), renewal_note: v("pRenN"), insurance_type: v("pIns"), insurance_policy: v("pPol"), insurance_expiry: v("pInsE"), note: v("pNote") };
       if (!w) Object.assign(body, { name_th: v("pTh"), emp_code: v("pCode"), team: v("pTeam"), active: m.querySelector("#pAct").checked });
       if (body.national_id && !thaiIdOk(body.national_id.replace(/\D/g, "")) && !confirm("เลขบัตรประชาชนไม่ผ่านการตรวจหลักสุดท้าย — บันทึกต่อไหม?")) return;
@@ -308,6 +338,7 @@
         if (o.national_id) o.national_id = (typeof o.national_id === "number" ? o.national_id.toFixed(0) : String(o.national_id)).replace(/\D/g, "");
         if (o.sex) o.sex = /^(f|ห|หญิง)/i.test(String(o.sex)) ? "F" : "M";
         if ("active" in o) o.active = !/ลาออก|resign|inactive/i.test(String(o.active));
+        if (o.visa_note) { const vs = visaFromNote(o.visa_note); if (vs.length) o.visas = vs; }
         if (o.team) { const t = String(o.team).trim().toUpperCase(); o.team = GROUP_OK.has(t) ? t : (GROUPS.find(g => g[1].toUpperCase() === t) || [""])[0]; }
         const g = o.worker_id ? D.workers.find(w => w.id === String(o.worker_id)) : guessWorker(o);
         o.worker_id = g ? g.id : ""; if (g) o.team = ""; return o;
@@ -390,6 +421,8 @@
 .stm-btn{padding:7px 14px;border-radius:8px;border:1px solid #111;background:#111;color:#fff;font:inherit;font-size:13px;cursor:pointer}.stm-btn.ghost{background:#fff;color:#111;border-color:#d6dae0}.stm-btn.danger{background:#fff;color:#c92a2a;border-color:#f1aeb5}
 .stm-lnk{background:none;border:0;color:#1c7ed6;cursor:pointer;font:inherit;font-size:12.5px;padding:0}.stm-acts{margin-top:10px}.stm-cnt{font-size:12px;margin-top:-6px}
 .stm-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}.stm-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#6b7280}.stm-form .wide{grid-column:1/-1}.stm-ck{flex-direction:row!important;align-items:center;gap:6px!important;color:inherit!important;font-size:13px!important}
+.stm-vchips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}.stm-vchip{background:#e7f5ff;color:#1864ab;border-radius:999px;padding:2px 8px;font-size:11.5px;white-space:nowrap}.stm-vchip.bad{background:#fff5f5;color:#c92a2a}
+.stm-visas{border-top:1px solid #f0f1f3;padding-top:8px}.stm-vh{font-size:12px;color:#6b7280;margin-bottom:6px;display:flex;gap:10px;align-items:center}.stm-vrow{display:grid;grid-template-columns:1.2fr 1.2fr 1fr auto auto 1.4fr auto;gap:6px;align-items:end;margin-bottom:6px}.stm-vrow input{padding:6px 8px;border:1px solid #d6dae0;border-radius:8px;font:inherit;font-size:12.5px;min-width:0}.stm-vrow label{display:flex;flex-direction:column;font-size:11px;color:#8a9099;gap:2px}
 .stm-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.stm-chip{background:#ebfbee;color:#2b8a3e;border-radius:999px;padding:3px 10px;font-size:12.5px}.stm-chip.bad{background:#fff5f5;color:#c92a2a}
 select.warn{border-color:#fab005}select.bad{border-color:#fa5252}
 .stm-modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;z-index:200;overflow:auto;padding:40px 12px}.stm-dlg{background:#fff;border-radius:14px;padding:18px 20px;max-width:860px;width:100%}.stm-dlg h3{margin:0 0 12px}
