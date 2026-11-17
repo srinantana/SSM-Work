@@ -1190,7 +1190,10 @@ async function siteTeamApi(cfg, req, url, prof) {
         date_from: from, date_to: to, insurance_type: d.insurance_type === 'annual' ? 'annual' : 'trip', note: mpStr(d.note, 500) || null,
         people: (Array.isArray(d.people) ? d.people : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 200), updated_at: now };
       const id = Number(d.id) || 0;
-      if (!id || row.job_no) {   // new trips (and any Job change) must use a Job that got the award with a Budget
+      if (row.job_no) row.job_no = row.job_no.toUpperCase().replace(/\s+/g, '');
+      const manual = /^(IJ|IS|IN|SO|WR)/.test(row.job_no || '');   // Site survey (IJ) / Service (IS, IN, SO, WR): number typed in
+      if (manual && !/^(IJ|IS|IN|SO|WR)[A-Z0-9-]{2,30}$/.test(row.job_no)) return json({ error: 'เลข IJ / IS / IN / SO / WR ไม่ถูกต้อง' }, 400);
+      if (!manual && (!id || row.job_no)) {   // Job installation: only a Job that got the award with a Budget (Site Expense)
         const job = (await stAwardedJobs(cfg)).find((j) => j.jo === row.job_no);
         const old = id ? ((await restAll(cfg, `/rest/v1/site_team_trips?select=job_no&id=eq.${id}`)) || [])[0] : null;
         if (!job && !(old && old.job_no === row.job_no)) return json({ error: 'เลือก Job ที่ Get Award และมี Budget ใน Site Expense แล้วเท่านั้น' }, 400);
