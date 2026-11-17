@@ -18,12 +18,13 @@
   const RENEW_L = Object.fromEntries(RENEW);
   const INS = [["", "—"], ["trip", "รายเที่ยว"], ["annual", "รายปี"]];
   const INS_L = Object.fromEntries(INS);
-  const TABS = [["", "ภาพรวม"], ["people", "รายชื่อทีม"], ["renew", "ต่ออายุ Passport"], ["trips", "เดินทางต่างประเทศ"]];
+  const TABS = [["", "ภาพรวม"], ["people", "รายชื่อทีม"], ["renew", "ต่ออายุ Passport"], ["visas", "วีซ่า"], ["trips", "เดินทางต่างประเทศ"]];
   const TRAVEL_MONTHS = 6;   // most countries need the passport valid ≥ 6 months after the return date
   const RENEW_MONTHS = 9;    // flag for renewal this early: a Thai passport takes ~1–2 weeks plus the trip to an office
 
   let ROOT = null, D = null, ERR = "", LOADING = null;
-  const S = { page: "", unit: "", st: "", q: "", trip: null, imp: null };
+  const S = { page: "", unit: "", st: "", q: "", trip: null, imp: null, vc: "" };
+  const VISA_SOON = 3;   // months — a visa expiring sooner is flagged ใกล้หมด
 
   /* ---------- dates ---------- */
   const pad = n => String(n).padStart(2, "0");
@@ -75,6 +76,16 @@
   const visaChip = v => { const e = parse(v.expiry), bad = e && e < today();
     return `<span class="stm-vchip${bad ? " bad" : ""}" title="${esc([v.type, v.visa_no, v.note].filter(Boolean).join(" · "))}">${esc(v.country)}${v.type ? " · " + esc(v.type) : ""}${v.expiry ? " · " + (bad ? "หมด " : "ถึง ") + fmt(v.expiry) : ""}</span>`; };
   /* old free-text note "วีซ่าญี่ปุ่น หมดอายุ 2026-09-11" → one visa row */
+  const visaSt = v => { const m = monthsLeft(v.expiry); return m == null ? ["unk", "ไม่ระบุวันหมดอายุ", "st-none"] : m < 0 ? ["exp", "หมดอายุแล้ว", "st-bad"] : m < VISA_SOON ? ["soon", "เหลือ < " + VISA_SOON + " เดือน", "st-warn"] : ["ok", "ใช้ได้", "st-ok"]; };
+  /* one row per (active person × visa) — latest visa per country per person */
+  function visaRows() {
+    const out = [];
+    for (const r of people().filter(x => x.active)) {
+      const by = new Map(); for (const v of visas(r.p)) { const k = cKey(v.country), o = by.get(k); if (!o || String(v.expiry || "") > String(o.expiry || "")) by.set(k, v); }
+      for (const [k, v] of by) { const [st, stL, cls] = visaSt(v); out.push({ r, v, country: k, st, stL, cls }); }
+    }
+    return out;
+  }
   const visaFromNote = s => { const m = /วีซ่า\s*([^\s,;]+)[^0-9]*(\d{4}-\d{2}-\d{2})?/.exec(String(s || "")); return m ? [{ country: cKey(m[1]), expiry: m[2] || "" }] : []; };
 
   /* ---------- api ---------- */
@@ -121,7 +132,7 @@
     if (ERR) { ROOT.innerHTML = `<div class="stm-card stm-err">${esc(ERR)}</div>`; return; }
     if (!D) { ROOT.innerHTML = `<div class="stm-card">กำลังโหลด…</div>`; return; }
     const note = D.canEdit ? "" : `<div class="stm-note">คุณเห็นชื่อ ทีม และวันหมดอายุเท่านั้น — เลขบัตรประชาชน เลข Passport และวันเกิด ดูได้เฉพาะ SC / PC / SSM</div>`;
-    const page = { "": vDash, people: vPeople, renew: vRenew, trips: vTrips, import: vImport }[S.page] || vDash;
+    const page = { "": vDash, people: vPeople, renew: vRenew, visas: vVisas, trips: vTrips, import: vImport }[S.page] || vDash;
     ROOT.innerHTML = tabs() + note + page();
     bind();
   }
@@ -146,8 +157,32 @@
         <div class="stm-card"><h3>แยกตามทีม</h3><table class="stm-t"><thead><tr><th>ทีม</th><th class="n">คน</th><th class="n">ใช้ได้</th><th class="n" title="เหลือ &lt; 6 เดือน หรือหมดอายุแล้ว">ใกล้หมด</th><th class="n">ไม่มี</th></tr></thead><tbody>${units}</tbody></table></div>
         <div class="stm-card"><h3>Passport ใกล้หมดอายุ</h3>${soon.length ? `<table class="stm-t"><tbody>${soon.map(r => `<tr><td>${esc(label(r))}<div class="sub">${esc(UNIT_L[r.unit] || r.unit)}</div></td><td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${ST_CLS[r.st]}">${r.stL}</span></td><td>${esc(RENEW_L[r.p.renewal_status || ""] || "")}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">ไม่มีใครหมดอายุภายใน 1 ปี</p>`}
           <a class="stm-more" href="#site-team/renew">ดูรายการต่ออายุทั้งหมด →</a></div>
+        ${visaCard()}
         <div class="stm-card"><h3>ทริปต่างประเทศที่กำลังจะถึง</h3>${trips.length ? trips.map(tripLine).join("") : `<p class="muted">ยังไม่มีทริป</p>`}<a class="stm-more" href="#site-team/trips">วางแผนทริป →</a></div>
       </div>`;
+  }
+  function visaCard() {
+    const vr = visaRows(), cs = [...new Set(vr.map(x => x.country))].sort((a, b) => vr.filter(x => x.country === b).length - vr.filter(x => x.country === a).length || a.localeCompare(b));
+    const rows = cs.map(c => { const rs = vr.filter(x => x.country === c), n = k => rs.filter(x => x.st === k).length;
+      return `<tr class="stm-click" data-href="#site-team/visas/${encodeURIComponent(c)}"><th><a href="#site-team/visas/${encodeURIComponent(c)}">${esc(c)}</a></th><td class="n">${rs.length}</td><td class="n ok">${n("ok") + n("unk") || ""}</td><td class="n warn">${n("soon") || ""}</td><td class="n bad">${n("exp") || ""}</td></tr>`; }).join("");
+    const soon = vr.filter(x => x.st === "soon" || x.st === "exp").length;
+    return `<div class="stm-card"><h3>วีซ่า</h3>${rows ? `<table class="stm-t"><thead><tr><th>ประเทศ</th><th class="n">คน</th><th class="n">ใช้ได้</th><th class="n" title="เหลือ &lt; ${VISA_SOON} เดือน">ใกล้หมด</th><th class="n">หมดแล้ว</th></tr></thead><tbody>${rows}</tbody></table>
+      ${soon ? `<p class="bad sub">ใกล้หมด / หมดแล้ว ${soon} รายการ</p>` : ""}` : `<p class="muted">ยังไม่มีข้อมูลวีซ่า</p>`}<a class="stm-more" href="#site-team/visas">ดูวีซ่าทั้งหมด →</a></div>`;
+  }
+  function vVisas() {
+    const ce = D.canEdit, all = visaRows(), cs = [...new Set(all.map(x => x.country))].sort();
+    const q = S.q.toLowerCase();
+    const rs = all.filter(x => (!S.vc || x.country === S.vc) && (!q || [x.r.name_th, x.r.name_en, x.r.nick, x.r.code].some(v => String(v || "").toLowerCase().includes(q))))
+      .sort((a, b) => a.country.localeCompare(b.country) || String(a.v.expiry || "9").localeCompare(String(b.v.expiry || "9")));
+    const n = k => rs.filter(x => x.st === k).length;
+    return `<div class="stm-bar2"><input type="search" id="stQ" placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัส" value="${esc(S.q)}">
+      <select id="stVc"><option value="">ทุกประเทศ</option>${cs.map(c => `<option${S.vc === c ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>
+      <span class="muted">${rs.length} รายการ · ใช้ได้ ${n("ok") + n("unk")} · ใกล้หมด ${n("soon")} · หมดแล้ว ${n("exp")}</span></div>
+      <div class="stm-card stm-scroll"><table class="stm-t"><thead><tr><th>ชื่อ</th><th>ทีม</th><th>ประเทศ</th><th>ประเภท</th>${ce ? "<th>เลขวีซ่า</th>" : ""}<th>วันออก</th><th>หมดอายุ</th><th>สถานะ</th><th>หมายเหตุ</th>${ce ? "<th></th>" : ""}</tr></thead><tbody>
+      ${rs.map(x => `<tr><td>${esc(label(x.r))}<div class="sub">${esc(x.r.code)}</div></td><td>${esc(x.r.unit)}</td><td>${esc(x.country)}</td><td>${esc(x.v.type || "")}</td>${ce ? `<td class="mono">${esc(x.v.visa_no || "")}</td>` : ""}
+        <td>${fmt(x.v.issue)}</td><td>${fmt(x.v.expiry)}</td><td><span class="stm-st ${x.cls}">${x.st === "soon" ? Math.max(0, Math.floor(monthsLeft(x.v.expiry))) + " เดือน" : x.stL}</span></td><td>${esc(x.v.note || "")}</td>
+        ${ce ? `<td><button class="stm-lnk" data-a="edit" data-k="${esc(x.r.key)}">แก้ไข</button></td>` : ""}</tr>`).join("") || `<tr><td colspan="10" class="muted">ไม่มีข้อมูลวีซ่า${S.vc ? " " + esc(S.vc) : ""} — ใส่ได้ที่ รายชื่อทีม → แก้ไข → + เพิ่มวีซ่า</td></tr>`}
+      </tbody></table></div>`;
   }
   function tripLine(t) {
     const ps = tripPeople(t), bad = ps.filter(x => !x.okTravel).length;
@@ -378,6 +413,8 @@
     const keepFocus = (id) => { const e = ROOT.querySelector("#" + id); if (e) { e.focus(); e.setSelectionRange?.(e.value.length, e.value.length); } };
     on("stQ", "input", e => { S.q = e.target.value; readTrip(); draw(); keepFocus("stQ"); });
     on("stU", "change", e => { S.unit = e.target.value; readTrip(); draw(); });
+    on("stVc", "change", e => { location.hash = "#site-team/visas" + (e.target.value ? "/" + encodeURIComponent(e.target.value) : ""); });
+    ROOT.querySelectorAll("tr[data-href]").forEach(tr => tr.addEventListener("click", e => { if (!e.target.closest("a")) location.hash = tr.dataset.href; }));
     on("stS", "change", e => { S.st = e.target.value; readTrip(); draw(); });
     on("impFile", "change", e => e.target.files[0] && readImport(e.target.files[0]));
     ROOT.querySelectorAll("[data-imp]").forEach(s => s.addEventListener("change", () => { const r = S.imp[+s.dataset.imp]; if (s.value.startsWith("+")) { r.worker_id = ""; r.team = s.value.slice(1); } else { r.worker_id = s.value; r.team = ""; } draw(); }));
@@ -437,6 +474,7 @@
 .stm-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}.stm-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#6b7280}.stm-form .wide{grid-column:1/-1}.stm-ck{flex-direction:row!important;align-items:center;gap:6px!important;color:inherit!important;font-size:13px!important}
 .stm-vchips{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}.stm-vchip{background:#e7f5ff;color:#1864ab;border-radius:999px;padding:2px 8px;font-size:11.5px;white-space:nowrap}.stm-vchip.bad{background:#fff5f5;color:#c92a2a}
 .stm-visas{border-top:1px solid #f0f1f3;padding-top:8px}.stm-vh{font-size:12px;color:#6b7280;margin-bottom:6px;display:flex;gap:10px;align-items:center}.stm-vrow{display:grid;grid-template-columns:1.2fr 1.2fr 1fr auto auto 1.4fr auto;gap:6px;align-items:end;margin-bottom:6px}.stm-vrow input{padding:6px 8px;border:1px solid #d6dae0;border-radius:8px;font:inherit;font-size:12.5px;min-width:0}.stm-vrow label{display:flex;flex-direction:column;font-size:11px;color:#8a9099;gap:2px}
+.stm-click{cursor:pointer}.stm-click:hover{background:#f8f9fb}.stm-click a{color:inherit;text-decoration:none}.stm-t td.n.warn{color:#d9480f;font-weight:600}
 .stm-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.stm-chip{background:#ebfbee;color:#2b8a3e;border-radius:999px;padding:3px 10px;font-size:12.5px}.stm-chip.bad{background:#fff5f5;color:#c92a2a}
 select.warn{border-color:#fab005}select.bad{border-color:#fa5252}
 .stm-modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;z-index:200;overflow:auto;padding:40px 12px}.stm-dlg{background:#fff;border-radius:14px;padding:18px 20px;max-width:860px;width:100%}.stm-dlg h3{margin:0 0 12px}
@@ -446,7 +484,8 @@ select.warn{border-color:#fab005}select.bad{border-color:#fa5252}
   window.SiteTeam = {
     mount(el, sub) {
       if (!document.getElementById("stmCss")) { const s = document.createElement("style"); s.id = "stmCss"; s.textContent = CSS; document.head.appendChild(s); }
-      ROOT = el; const pg = String(sub || "").split("/")[0];
+      ROOT = el; const parts = String(sub || "").split("/"), pg = parts[0];
+      S.vc = pg === "visas" && parts[1] ? decodeURIComponent(parts.slice(1).join("/")) : "";
       if (pg !== S.page) { S.trip = null; if (pg !== "import") S.imp = null; }
       S.page = TABS.some(t => t[0] === pg) || pg === "import" ? pg : "";
       draw(); load();
