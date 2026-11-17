@@ -266,7 +266,7 @@
 .mn{display:grid;gap:18px}
 .mn-chips{display:flex;flex-wrap:wrap;gap:8px}
 .mn-chip{display:inline-flex;align-items:center;gap:6px;text-decoration:none;border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 14px;font-size:13px;color:#4a5260}
-.mn-chip:hover{border-color:#f0b9b9;color:var(--rak)}
+.mn-chip:hover{border-color:var(--rak-line,#f0b9b9);color:var(--rak)}
 .mn-chip[aria-current="true"]{background:var(--blush);border-color:#f3c2c2;color:var(--rak);font-weight:600}
 .mn-chip .lk{font-size:10.5px;color:var(--muted)}
 .mn-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:22px 24px;display:grid;gap:14px;scroll-margin-top:90px}
