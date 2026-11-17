@@ -126,6 +126,7 @@ const MENUS = [
   { id: 'punch-list', name: 'Punch List' },
   { id: 'service-plan', name: 'Service Plan' },
   { id: 'manpower', name: 'Manpower' },
+  { id: 'site-team', name: 'Site Team' },
 ];
 const MENU_IDS = MENUS.map((m) => m.id);
 function menuOfPath(path) {
@@ -134,6 +135,7 @@ function menuOfPath(path) {
   if (path.startsWith('/punch-list/') || path.startsWith('/api/punch-list/')) return 'punch-list';
   if (path.startsWith('/service-plan/') || path.startsWith('/api/service-plan/')) return 'service-plan';
   if (path.startsWith('/manpower/') || path.startsWith('/api/manpower/')) return 'manpower';
+  if (path.startsWith('/site-team/') || path.startsWith('/api/site-team/')) return 'site-team';
   const m = path.match(/^\/customers\/[^/]+\/[^/]+\/([^/]+)/);
   if (!m) return null; // not a tool page
   return MENU_IDS.find((id) => m[1].startsWith(id)) || '__admin';
@@ -1073,6 +1075,108 @@ async function readMasterProjects(cfg) {
   return { table: null, rows: [] };
 }
 
+// ---------- Site Team (ทีมหน้างาน): team list + passport / ID / birth date, renewals, overseas trips ----------
+// Tables: site_team_people, site_team_trips (database/site_team.sql). Roster = active mp_workers (Manpower) plus anyone
+// added here who is not on the board. Editors = Manpower editors (SC / PC / SSM). Everyone else with the menu sees names,
+// teams and expiry dates only: national ID, passport no. and birth date are removed before the response leaves the server.
+const ST_FIELDS = ['emp_code', 'name_en', 'name_th', 'sex', 'nationality', 'national_id', 'birth_date', 'passport_no', 'passport_issue', 'passport_expiry',
+  'passport_file', 'visa_note', 'renewal_status', 'renewal_cost', 'renewal_note', 'insurance_type', 'insurance_policy', 'insurance_expiry', 'note', 'active'];
+const ST_PRIVATE = ['national_id', 'birth_date', 'passport_no', 'passport_issue', 'insurance_policy', 'passport_file', 'sex'];
+const stDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
+function stClean(d) {
+  const o = {};
+  const str = (k, n) => { if (k in d) o[k] = mpStr(d[k], n) || null; };
+  str('emp_code', 20); str('name_en', 120); str('name_th', 120); str('passport_file', 400); str('visa_note', 300); str('renewal_note', 300); str('insurance_policy', 80); str('note', 500);
+  if ('sex' in d) o.sex = ['M', 'F'].includes(String(d.sex || '').toUpperCase()) ? String(d.sex).toUpperCase() : null;
+  if ('nationality' in d) o.nationality = mpStr(d.nationality, 3).toUpperCase() || 'THA';
+  if ('national_id' in d) { const v = String(d.national_id || '').replace(/\D/g, ''); if (v && v.length !== 13) throw new Error('เลขบัตรประชาชนต้องมี 13 หลัก'); o.national_id = v || null; }
+  if ('passport_no' in d) { const v = String(d.passport_no || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (v && !/^[A-Z0-9]{6,12}$/.test(v)) throw new Error('เลข Passport ไม่ถูกต้อง'); o.passport_no = v || null; }
+  for (const k of ['birth_date', 'passport_issue', 'passport_expiry', 'insurance_expiry']) if (k in d) o[k] = stDate(d[k]);
+  if ('renewal_status' in d) o.renewal_status = ['', 'needed', 'in_progress', 'done'].includes(d.renewal_status) ? d.renewal_status : '';
+  if ('insurance_type' in d) o.insurance_type = ['', 'trip', 'annual'].includes(d.insurance_type) ? d.insurance_type : '';
+  if ('renewal_cost' in d) { const n = Number(String(d.renewal_cost ?? '').replace(/,/g, '')); o.renewal_cost = String(d.renewal_cost ?? '').trim() === '' ? null : (Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null); }
+  if ('active' in d) o.active = d.active !== false;
+  return o;
+}
+async function siteTeamApi(cfg, req, url, prof) {
+  const path = url.pathname, can = canEditManpower(prof), who = prof.username || prof.email;
+  const H = { ...authHeaders(cfg.service), prefer: 'return=representation' };
+  if (path === '/api/site-team/data' && req.method === 'GET') {
+    const [workers, people, trips] = await Promise.all([
+      restAll(cfg, '/rest/v1/mp_workers?select=id,emp_code,name_th,nickname,unit,trade,active,sort&order=sort.asc'),
+      restAll(cfg, '/rest/v1/site_team_people?select=*&order=id.asc'),
+      restAll(cfg, '/rest/v1/site_team_trips?select=*&order=date_from.desc.nullslast'),
+    ]);
+    if (!people || !trips) return json({ error: 'no_table' }, 503);
+    let names = new Map();
+    if (can) { const emp = await readEmployeeTable(cfg).catch(() => null); if (emp) names = new Map(emp.rows.filter((r) => r.code).map((r) => [String(r.code).toUpperCase(), [r.first, r.last].filter(Boolean).join(' ')])); }
+    const strip = (p) => { if (can) return p; const o = { ...p }; for (const k of ST_PRIVATE) delete o[k]; o.has_passport = !!p.passport_no || !!p.passport_expiry; return o; };
+    return json({
+      canEdit: can,
+      workers: (workers || []).map((w) => ({ ...w, name_en_hr: can ? names.get(String(w.emp_code || w.id).toUpperCase()) || '' : '' })),
+      people: people.map(strip),
+      trips,
+    });
+  }
+  if (req.method !== 'POST') return json({ error: 'method' }, 405);
+  if (!can) return json({ error: 'แก้ไขได้เฉพาะ SC / PC / SSM' }, 403);
+  const d = await req.json().catch(() => ({}));
+  const now = new Date().toISOString();
+  try {
+    if (path === '/api/site-team/person') {
+      const row = { ...stClean(d), updated_by: who, updated_at: now };
+      const id = Number(d.id) || 0, worker = mpStr(d.worker_id, 20) || null;
+      if (id) {
+        const r = await fetch(cfg.url + `/rest/v1/site_team_people?id=eq.${id}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) });
+        return r.ok ? json({ ok: true, person: (await r.json())[0] }) : json({ error: 'supabase' }, 502);
+      }
+      if (!worker && !row.name_en && !row.name_th) return json({ error: 'ใส่ชื่อก่อน' }, 400);
+      const r = await fetch(cfg.url + '/rest/v1/site_team_people', { method: 'POST', headers: H, body: JSON.stringify({ ...row, worker_id: worker }) });
+      return r.ok ? json({ ok: true, person: (await r.json())[0] }) : json({ error: r.status === 409 ? 'คนนี้มีข้อมูลอยู่แล้ว' : 'supabase' }, r.status === 409 ? 409 : 502);
+    }
+    if (path === '/api/site-team/person-delete') {
+      const id = Number(d.id) || 0; if (!id) return json({ error: 'input' }, 400);
+      const r = await fetch(cfg.url + `/rest/v1/site_team_people?id=eq.${id}&worker_id=is.null`, { method: 'DELETE', headers: H });
+      return r.ok ? json({ ok: true }) : json({ error: 'supabase' }, 502);
+    }
+    if (path === '/api/site-team/import') {   // rows already matched on the client: [{ worker_id|null, ...fields }]
+      const rows = (Array.isArray(d.rows) ? d.rows : []).slice(0, 500);
+      const existing = await restAll(cfg, '/rest/v1/site_team_people?select=id,worker_id,passport_no,name_en') || [];
+      const out = { created: 0, updated: 0, failed: [] };
+      for (const x of rows) {
+        let row;
+        try { row = { ...stClean(x), updated_by: who, updated_at: now }; } catch (e) { out.failed.push((x.name_en || x.name_th || '?') + ': ' + e.message); continue; }
+        const worker = mpStr(x.worker_id, 20) || null;
+        const hit = existing.find((p) => (worker && p.worker_id === worker) || (row.passport_no && p.passport_no === row.passport_no) || (!worker && row.name_en && p.name_en && p.name_en.toUpperCase() === row.name_en.toUpperCase()));
+        const r = hit
+          ? await fetch(cfg.url + `/rest/v1/site_team_people?id=eq.${hit.id}`, { method: 'PATCH', headers: H, body: JSON.stringify(worker ? { ...row, worker_id: worker } : row) })
+          : await fetch(cfg.url + '/rest/v1/site_team_people', { method: 'POST', headers: H, body: JSON.stringify({ ...row, worker_id: worker }) });
+        if (!r.ok) { out.failed.push((row.name_en || row.name_th || '?') + ' (' + r.status + ')'); continue; }
+        if (hit) out.updated++; else { out.created++; const n = (await r.json())[0]; if (n) existing.push(n); }
+      }
+      return json(out);
+    }
+    if (path === '/api/site-team/trip') {
+      const title = mpStr(d.title, 160); if (!title) return json({ error: 'ใส่ชื่องาน / โปรเจคก่อน' }, 400);
+      const from = stDate(d.date_from), to = stDate(d.date_to) || from;
+      if (from && to && to < from) return json({ error: 'วันกลับต้องไม่ก่อนวันไป' }, 400);
+      const row = { title, job_no: mpStr(d.job_no, 40) || null, customer: mpStr(d.customer, 120) || null, country: mpStr(d.country, 80) || null,
+        date_from: from, date_to: to, insurance_type: d.insurance_type === 'annual' ? 'annual' : 'trip', note: mpStr(d.note, 500) || null,
+        people: (Array.isArray(d.people) ? d.people : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 200), updated_at: now };
+      const id = Number(d.id) || 0;
+      const r = id
+        ? await fetch(cfg.url + `/rest/v1/site_team_trips?id=eq.${id}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) })
+        : await fetch(cfg.url + '/rest/v1/site_team_trips', { method: 'POST', headers: H, body: JSON.stringify({ ...row, created_by: who }) });
+      return r.ok ? json({ ok: true, trip: (await r.json())[0] }) : json({ error: 'supabase' }, 502);
+    }
+    if (path === '/api/site-team/trip-delete') {
+      const id = Number(d.id) || 0; if (!id) return json({ error: 'input' }, 400);
+      const r = await fetch(cfg.url + `/rest/v1/site_team_trips?id=eq.${id}`, { method: 'DELETE', headers: H });
+      return r.ok ? json({ ok: true }) : json({ error: 'supabase' }, 502);
+    }
+  } catch (e) { return json({ error: e.message || 'input' }, 400); }
+  return json({ error: 'not found' }, 404);
+}
 async function manpowerApi(cfg, req, url, prof) {
   const writes = { '/api/manpower/confirm': manpowerConfirm, '/api/manpower/assign': manpowerAssign, '/api/manpower/clear': manpowerClear,
     '/api/manpower/leave': manpowerLeave, '/api/manpower/leave-clear': manpowerLeaveClear };
@@ -2112,6 +2216,14 @@ export default async function middleware(req) {
     if (!live) return json({ error: 'login required' }, 401);
     if (!canOpen(live, 'punch-list')) return json({ error: 'no access' }, 403);
     try { return await punchApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
+  }
+
+  if (path.startsWith('/api/site-team/')) {
+    if (!signedIn) return json({ error: 'login required' }, 401);
+    const live = await liveProfile(cfg, user);
+    if (!live) return json({ error: 'login required' }, 401);
+    if (!canOpen(live, 'site-team')) return json({ error: 'no access' }, 403);
+    try { return await siteTeamApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
   }
 
   if (path.startsWith('/api/manpower/')) {
