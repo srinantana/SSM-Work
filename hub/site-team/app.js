@@ -9,7 +9,9 @@
 (function () {
   "use strict";
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const UNITS = [["ME", "ME · งานโลหะ"], ["PP", "PP · งานพลาสติก"], ["EE", "EE · ไฟฟ้า"], ["PC", "PC · วางแผนผลิต"], ["SC", "SC / SSM"], ["-", "ไม่อยู่ใน Manpower"]];
+  const UNITS = [["ME", "ME · งานโลหะ"], ["PP", "PP · งานพลาสติก"], ["EE", "EE · ไฟฟ้า"], ["PC", "PC · วางแผนผลิต"], ["SC", "SC / SSM"], ["EN", "Engineer"], ["SP", "Support"], ["OT", "Other"], ["-", "ไม่อยู่ใน Manpower"]];
+  const GROUPS = [["EN", "Engineer"], ["SP", "Support"], ["OT", "Other"]];   // for people who are not on the Manpower board (site_team_people.team)
+  const GROUP_OK = new Set(GROUPS.map(g => g[0]));
   const UNIT_L = Object.fromEntries(UNITS);
   const MS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
   const RENEW = [["", "—"], ["needed", "ต้องต่ออายุ"], ["in_progress", "กำลังดำเนินการ"], ["done", "ต่อแล้ว"]];
@@ -41,7 +43,7 @@
       return { key: "w:" + w.id, worker: w, p, pid: p.id || 0, unit: w.unit || "-", name_th: w.name_th || p.name_th || "", nick: w.nickname || "",
         name_en: p.name_en || w.name_en_hr || "", code: w.emp_code || w.id, active: w.active !== false && p.active !== false };
     });
-    for (const p of D.people) if (!p.worker_id) out.push({ key: "p:" + p.id, worker: null, p, pid: p.id, unit: "-", name_th: p.name_th || "", nick: "", name_en: p.name_en || "", code: p.emp_code || "", active: p.active !== false });
+    for (const p of D.people) if (!p.worker_id) out.push({ key: "p:" + p.id, worker: null, p, pid: p.id, unit: GROUP_OK.has(p.team) ? p.team : "-", name_th: p.name_th || "", nick: "", name_en: p.name_en || "", code: p.emp_code || "", active: p.active !== false });
     return out.map(r => Object.assign(r, status(r.p)));
   }
   function status(p) {
@@ -238,7 +240,7 @@
     const m = document.createElement("div"); m.className = "stm-modal";
     m.innerHTML = `<div class="stm-dlg"><h3>${w ? esc(label(r)) + ` <span class="muted">${esc(w.unit)} · ${esc(w.emp_code || w.id)}</span>` : (r ? "แก้ไข" : "เพิ่มคน (ไม่อยู่ใน Manpower)")}</h3>
       <div class="stm-form">
-        ${w ? "" : f("pTh", "ชื่อ-สกุล (TH)", p.name_th) + f("pCode", "รหัสพนักงาน", p.emp_code)}
+        ${w ? "" : f("pTh", "ชื่อ-สกุล (TH)", p.name_th) + f("pCode", "รหัสพนักงาน", p.emp_code) + sel("pTeam", "กลุ่ม", [["", "—"], ...GROUPS], p.team)}
         ${f("pEn", "ชื่อ-สกุล EN (ตาม Passport)", p.name_en || (r && r.name_en))}
         ${sel("pSex", "เพศ", [["", "—"], ["M", "ชาย"], ["F", "หญิง"]], p.sex)}
         ${f("pId", "เลขบัตรประชาชน (13 หลัก)", p.national_id, "text", ' inputmode="numeric" maxlength="17"')}
@@ -268,7 +270,7 @@
       const body = { id: r ? r.pid : 0, worker_id: w ? w.id : null, name_en: v("pEn").toUpperCase(), sex: v("pSex"), national_id: v("pId"), birth_date: v("pDob"), nationality: v("pNat"),
         passport_no: v("pNo"), passport_issue: v("pIss"), passport_expiry: v("pExp"), passport_file: v("pFile"), visa_note: v("pVisa"), renewal_status: v("pRen"),
         renewal_cost: v("pCost"), renewal_note: v("pRenN"), insurance_type: v("pIns"), insurance_policy: v("pPol"), insurance_expiry: v("pInsE"), note: v("pNote") };
-      if (!w) Object.assign(body, { name_th: v("pTh"), emp_code: v("pCode"), active: m.querySelector("#pAct").checked });
+      if (!w) Object.assign(body, { name_th: v("pTh"), emp_code: v("pCode"), team: v("pTeam"), active: m.querySelector("#pAct").checked });
       if (body.national_id && !thaiIdOk(body.national_id.replace(/\D/g, "")) && !confirm("เลขบัตรประชาชนไม่ผ่านการตรวจหลักสุดท้าย — บันทึกต่อไหม?")) return;
       try { await post("person", body); m.remove(); toast("บันทึกแล้ว"); load(true); } catch (x) { m.querySelector("#pErr").textContent = x.message; }
     });
@@ -289,7 +291,7 @@
   const COLMAP = { "worker id": "worker_id", "รหัสพนักงาน": "emp_code", "emp code": "emp_code", "ชื่อ en (ตาม passport)": "name_en", "name (passport)": "name_en", "ชื่อ-สกุล en": "name_en",
     "ชื่อ th": "name_th", "ชื่อ-สกุล th": "name_th", "ชื่อ th (ตาม passport)": "name_th", "เพศ": "sex", "sex": "sex", "สัญชาติ": "nationality", "เลขบัตรประชาชน": "national_id",
     "วันเกิด": "birth_date", "วันเกิด (yyyy-mm-dd)": "birth_date", "passport no.": "passport_no", "เลข passport": "passport_no", "วันออก": "passport_issue", "passport ออก": "passport_issue",
-    "วันหมดอายุ": "passport_expiry", "passport หมดอายุ": "passport_expiry", "วีซ่า": "visa_note", "ลิงก์สแกน": "passport_file", "หมายเหตุ": "note", "สถานะ": "active" };
+    "วันหมดอายุ": "passport_expiry", "passport หมดอายุ": "passport_expiry", "วีซ่า": "visa_note", "ลิงก์สแกน": "passport_file", "หมายเหตุ": "note", "สถานะ": "active", "กลุ่ม": "team", "group": "team" };
   const toIso = v => { if (typeof v === "number" && v > 1000 && v < 80000) { const d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 864e5); return d.getUTCFullYear() + "-" + pad(d.getUTCMonth() + 1) + "-" + pad(d.getUTCDate()); }   // Excel serial date — no time-zone drift
     if (v instanceof Date) return iso(v); const s = String(v || "").trim(); if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10); const m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(s); if (m) { let y = +m[3]; if (y > 2400) y -= 543; return y + "-" + pad(m[2]) + "-" + pad(m[1]); } return s; };
   async function readImport(file) {
@@ -306,8 +308,9 @@
         if (o.national_id) o.national_id = (typeof o.national_id === "number" ? o.national_id.toFixed(0) : String(o.national_id)).replace(/\D/g, "");
         if (o.sex) o.sex = /^(f|ห|หญิง)/i.test(String(o.sex)) ? "F" : "M";
         if ("active" in o) o.active = !/ลาออก|resign|inactive/i.test(String(o.active));
+        if (o.team) { const t = String(o.team).trim().toUpperCase(); o.team = GROUP_OK.has(t) ? t : (GROUPS.find(g => g[1].toUpperCase() === t) || [""])[0]; }
         const g = o.worker_id ? D.workers.find(w => w.id === String(o.worker_id)) : guessWorker(o);
-        o.worker_id = g ? g.id : ""; return o;
+        o.worker_id = g ? g.id : ""; if (g) o.team = ""; return o;
       });
     S.imp = rows; draw();
   }
@@ -316,12 +319,12 @@
       <p>ไฟล์ต้องมีแถวหัวตาราง เช่น <code>ชื่อ EN (ตาม Passport)</code> <code>ชื่อ TH</code> <code>เพศ</code> <code>เลขบัตรประชาชน</code> <code>วันเกิด</code> <code>Passport No.</code> <code>วันออก</code> <code>วันหมดอายุ</code> <code>ลิงก์สแกน</code> (ใช้ไฟล์ตรวจทานที่ส่งให้ SC / PC ได้เลย)</p>
       <p class="muted">ระบบจับคู่กับรายชื่อใน Manpower ให้อัตโนมัติ — ตรวจและเลือกเองได้ก่อนกดนำเข้า ถ้ามีข้อมูลอยู่แล้วจะอัปเดตทับ (จับคู่จากคน หรือเลข Passport)</p>
       <input type="file" id="impFile" accept=".xlsx,.xls,.csv"></div>`;
-    const opts = `<option value="">— ไม่อยู่ใน Manpower (เพิ่มเป็นคนใหม่) —</option>` + D.workers.filter(w => w.active !== false).map(w => `<option value="${esc(w.id)}">${esc(w.unit + " · " + w.name_th + (w.nickname ? " (" + w.nickname + ")" : ""))}</option>`).join("");
+    const opts = `<option value="">— ไม่อยู่ใน Manpower (เพิ่มเป็นคนใหม่) —</option>` + GROUPS.map(([k, l]) => `<option value="+${k}">+ เพิ่มเป็นคนใหม่ · ${l}</option>`).join("") + D.workers.filter(w => w.active !== false).map(w => `<option value="${esc(w.id)}">${esc(w.unit + " · " + w.name_th + (w.nickname ? " (" + w.nickname + ")" : ""))}</option>`).join("");
     const used = new Map(); S.imp.forEach(r => r.worker_id && used.set(r.worker_id, (used.get(r.worker_id) || 0) + 1));
     return `<div class="stm-card stm-scroll"><h3>ตรวจก่อนนำเข้า — ${S.imp.length} แถว</h3><table class="stm-t"><thead><tr><th>ชื่อใน Passport</th><th>ชื่อ TH</th><th>Passport</th><th>หมดอายุ</th><th>เลขบัตร</th><th>จับคู่กับ Manpower</th></tr></thead><tbody>
       ${S.imp.map((r, i) => `<tr><td>${esc(r.name_en || "")}${r.active === false ? ' <span class="stm-st st-none">ลาออก</span>' : ""}</td><td>${esc(r.name_th || "")}</td><td class="mono">${esc(r.passport_no || "")}</td><td>${fmt(r.passport_expiry)}</td>
         <td class="mono">${esc(fmtId(r.national_id))}${r.national_id && !thaiIdOk(r.national_id) ? ' <span class="bad" title="ไม่ผ่านการตรวจหลักสุดท้าย">⚠</span>' : ""}</td>
-        <td><select data-imp="${i}" class="${!r.worker_id ? "warn" : used.get(r.worker_id) > 1 ? "bad" : ""}">${opts.replace(`value="${esc(r.worker_id)}"`, `value="${esc(r.worker_id)}" selected`)}</select>${used.get(r.worker_id) > 1 ? '<div class="bad sub">จับคู่ซ้ำ</div>' : ""}</td></tr>`).join("")}
+        <td><select data-imp="${i}" class="${!r.worker_id && !r.team ? "warn" : used.get(r.worker_id) > 1 ? "bad" : ""}">${(k => opts.replace(`value="${esc(k)}"`, `value="${esc(k)}" selected`))(r.worker_id || (r.team ? "+" + r.team : ""))}</select>${used.get(r.worker_id) > 1 ? '<div class="bad sub">จับคู่ซ้ำ</div>' : ""}</td></tr>`).join("")}
       </tbody></table><div class="stm-acts"><button class="stm-btn" data-a="imp-go">นำเข้า ${S.imp.length} แถว</button> <button class="stm-btn ghost" data-a="imp-cancel">ยกเลิก</button></div></div>`;
   }
 
@@ -333,7 +336,7 @@
     on("stU", "change", e => { S.unit = e.target.value; readTrip(); draw(); });
     on("stS", "change", e => { S.st = e.target.value; readTrip(); draw(); });
     on("impFile", "change", e => e.target.files[0] && readImport(e.target.files[0]));
-    ROOT.querySelectorAll("[data-imp]").forEach(s => s.addEventListener("change", () => { S.imp[+s.dataset.imp].worker_id = s.value; draw(); }));
+    ROOT.querySelectorAll("[data-imp]").forEach(s => s.addEventListener("change", () => { const r = S.imp[+s.dataset.imp]; if (s.value.startsWith("+")) { r.worker_id = ""; r.team = s.value.slice(1); } else { r.worker_id = s.value; r.team = ""; } draw(); }));
     ROOT.querySelectorAll("[data-pick]").forEach(c => c.addEventListener("change", () => {
       readTrip(); const id = +c.dataset.pick, set = new Set((S.trip.people || []).map(Number));
       c.checked ? set.add(id) : set.delete(id); S.trip.people = [...set]; draw();
