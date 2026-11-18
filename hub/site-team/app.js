@@ -31,7 +31,7 @@
   const RENEW_MONTHS = 9;    // flag for renewal this early: a Thai passport takes ~1–2 weeks plus the trip to an office
 
   let ROOT = null, D = null, ERR = "", LOADING = null;
-  const S = { page: "", unit: "", st: "", q: "", trip: null, imp: null, vc: "", cc: "", cst: "", cOnly: true, tCert: "" };
+  const S = { page: "", unit: "", st: "", q: "", trip: null, imp: null, vc: "", cc: "", cst: "", cOnly: true, tCert: "", cFull: false };
   const VISA_SOON = 3;   // months — a visa expiring sooner is flagged ใกล้หมด
 
   /* ---------- dates ---------- */
@@ -267,9 +267,10 @@
           <td>${ce ? `<select data-crs="${c.id}">${CERT_RENEW.map(([k, t2]) => `<option value="${k}"${(c.renew_status || "") === k ? " selected" : ""}>${t2}</option>`).join("")}</select>` : esc(CERT_RENEW_L[c.renew_status || ""] || "")}</td>
           <td>${ce ? `<input type="date" data-crd="${c.id}" value="${esc(c.renew_date || "")}">` : fmt(c.renew_date)}</td><td>${esc(c.renew_note || c.note || "")}</td>${ce ? `<td><button class="stm-lnk" data-a="cert-edit" data-id="${c.id}">แก้ไข</button></td>` : ""}</tr>`; }).join("")}
         </tbody></table></div>` : `<p class="stm-empty">🎉 ไม่มี Certificate ที่ต้องต่ออายุตอนนี้</p>`}</div>
-      <div class="stm-card stm-scroll"><h3>ตารางทักษะ — ใครมี Certificate อะไร <span class="muted">(${ppl.length + outsiders.length} คน)</span></h3>
+      <div class="stm-card stm-cmatcard${S.cFull ? " stm-full" : ""}"><h3>ตารางทักษะ — ใครมี Certificate อะไร <span class="muted">(${ppl.length + outsiders.length} คน)</span>
+          <button class="stm-btn ghost stm-fullbtn" data-a="cmat-full">${S.cFull ? "✕ ออกจากเต็มจอ" : "⛶ ขยายเต็มจอ"}</button></h3>
         <p class="sub">✓ เขียว ใช้ได้ · ✓ เทา ไม่ระบุวันหมดอายุ · ⏰ ถึงเวลาต่อ · ✕ หมดอายุ — ${ce ? "กดที่ช่องเพื่อแก้ไข" : "เลือกหลักสูตรด้านบนเพื่อดูเฉพาะคนที่มี"}</p>
-        <table class="stm-t stm-cmat"><thead>${head}</thead><tbody>${body || `<tr><td colspan="20" class="muted">ไม่มีข้อมูล</td></tr>`}</tbody></table></div>`;
+        <div class="stm-cmatwrap"><table class="stm-t stm-cmat"><thead>${head}</thead><tbody>${body || `<tr><td colspan="20" class="muted">ไม่มีข้อมูล</td></tr>`}</tbody></table></div></div>`;
   }
   function certForm(c) {
     c = c || { course: S.cc || "SAFE6", status: "active" };
@@ -600,6 +601,7 @@
       return;
     }
     if (a === "trip-del") { if (!confirm("ลบทริปนี้?")) return; try { await post("trip-delete", { id: +ds.id }); S.trip = null; D.trips = D.trips.filter(x => x.id !== +ds.id); draw(); } catch (x) { toast(x.message, 1); } return; }
+    if (a === "cmat-full") { S.cFull = !S.cFull; document.body.classList.toggle("stm-noscroll", S.cFull); return draw(); }
     if (a === "cert-new") return certForm(null);
     if (a === "cert-edit") return certForm((D.certs || []).find(c => c.id === +ds.id));
     if (a === "imp-cancel") { S.imp = null; return draw(); }
@@ -638,6 +640,13 @@ select.warn{border-color:#fab005}select.bad{border-color:#fa5252}
 .stm-cmat th.stm-ch{text-align:center;vertical-align:bottom;min-width:58px}.stm-cmat th.stm-ch span{display:block;font-size:17px}.stm-cmat th.stm-ch small{display:block;font-size:10.5px;font-weight:500;line-height:1.2;color:#6b7280}
 .stm-cx{text-align:center}.stm-cdot{width:28px;height:28px;border-radius:9px;border:0;font-weight:700;cursor:pointer;font-size:13px}.stm-cdot:disabled{cursor:default}
 .muted-row td{color:#868e96}
+.stm-cmatcard h3{flex-wrap:wrap}.stm-fullbtn{margin-left:auto;font-size:12.5px;padding:6px 12px}
+.stm-cmatwrap{overflow:auto;max-height:72vh;border-radius:10px}
+.stm-cmat thead th{position:sticky;top:0;z-index:2;background:#fdf2f8;box-shadow:0 1px 0 #f1d5e3}
+.stm-cmat th:first-child,.stm-cmat td:first-child{position:sticky;left:0;z-index:1;background:#fff;min-width:190px}.stm-cmat thead th:first-child{z-index:3;background:#fdf2f8}
+.stm-full{position:fixed!important;inset:0;z-index:180;margin:0!important;border-radius:0!important;display:flex;flex-direction:column;padding:16px 20px!important;background:#fff}
+.stm-full .stm-cmatwrap{flex:1;max-height:none}
+body.stm-noscroll{overflow:hidden}
 /* friendly look (Dew, 17 Nov 2026) */
 .stm-tabs a{transition:.15s}.stm-tabs a:hover{background:#fff5f5;border-color:#ffc9c9}
 .stm-tile{display:flex!important;align-items:center;gap:12px;text-decoration:none;color:inherit;border:0!important;border-radius:16px!important;box-shadow:0 1px 2px rgba(16,24,40,.06);transition:transform .15s,box-shadow .15s}
@@ -657,13 +666,14 @@ select.warn{border-color:#fab005}select.bad{border-color:#fa5252}
 .stm-toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:10px 16px;border-radius:10px;z-index:300;font-size:13px}.stm-toast.bad{background:#c92a2a}
 `;
 
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && S.cFull) { S.cFull = false; document.body.classList.remove("stm-noscroll"); if (ROOT) draw(); } });
   window.SiteTeam = {
     mount(el, sub) {
       if (!document.getElementById("stmCss")) { const s = document.createElement("style"); s.id = "stmCss"; s.textContent = CSS; document.head.appendChild(s); }
       ROOT = el; const parts = String(sub || "").split("/"), pg = parts[0];
       S.vc = pg === "visas" && parts[1] ? decodeURIComponent(parts.slice(1).join("/")) : "";
       if (pg === "certs") S.cc = COURSE[parts[1]] ? parts[1] : "";
-      if (pg !== S.page) { S.trip = null; if (pg !== "import") S.imp = null; }
+      if (pg !== S.page) { S.cFull = false; document.body.classList.remove("stm-noscroll"); S.trip = null; if (pg !== "import") S.imp = null; }
       S.page = TABS.some(t => t[0] === pg) || pg === "import" ? pg : "";
       draw(); load();
     },
