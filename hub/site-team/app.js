@@ -255,11 +255,12 @@
     const ren = rows.filter(x => x.c.status !== "resign" && ["due", "exp"].includes(certSt(x.c)[0]) && (!S.cc || x.c.course === S.cc) && match(x.c.holder_name, x.r))
       .sort((a, b) => String(certDue(a.c) || a.c.expiry || "").localeCompare(String(certDue(b.c) || b.c.expiry || "")));
     const soon = rows.filter(x => x.c.status !== "resign" && certSt(x.c)[0] === "ok" && x.c.expiry && (!S.cc || x.c.course === S.cc) && parse(certDue(x.c)) <= addMonths(t, 6)).length;
-    return `<div class="stm-bar2"><input type="search" id="stQ" placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัส" value="${esc(S.q)}">
+    const bar = `<div class="stm-bar2"><input type="search" id="stQ" placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัส" value="${esc(S.q)}">
         <select id="stCc"><option value="">ทุกหลักสูตร</option>${COURSES.map(([k, l, ic]) => `<option value="${k}"${S.cc === k ? " selected" : ""}>${ic} ${esc(l)}</option>`).join("")}</select>
         <select id="stU"><option value="">ทุกทีม</option>${UNITS.map(([u, l]) => `<option value="${u}"${S.unit === u ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
         <label class="stm-ck"><input type="checkbox" id="stCOnly"${S.cOnly ? " checked" : ""}> เฉพาะคนใน Site Team</label>
-        ${ce ? `<button class="stm-btn" data-a="cert-new">+ เพิ่ม Certificate</button>` : ""}</div>
+        ${ce ? `<button class="stm-btn" data-a="cert-new">+ เพิ่ม Certificate</button>` : ""}</div>`;
+    return `${S.cFull ? "" : bar}
       <div class="stm-card c-cert"><h3><i>⏰</i>ต้องต่ออายุ / หมดอายุ <span class="muted">(${ren.length})</span>${soon ? ` <span class="sub">· ถึงรอบต่อใน 6 เดือน ${soon} ใบ</span>` : ""}</h3>
         ${ren.length ? `<div class="stm-scroll"><table class="stm-t"><thead><tr><th>ชื่อ</th><th>หลักสูตร</th><th>เลขที่</th><th>หมดอายุ</th><th>ต้องต่อ</th><th>สถานะ</th><th>การต่ออายุ (จป.)</th><th>วันนัด</th><th>หมายเหตุ</th>${ce ? "<th></th>" : ""}</tr></thead><tbody>
         ${ren.map(({ c, r }) => { const [, l, cls] = certSt(c); return `<tr><td>${esc(r ? label(r) : thNorm(c.holder_name))}${r ? "" : `<div class="sub">ไม่อยู่ใน Site Team</div>`}</td><td>${courseI(c)} ${esc(courseL(c))}</td><td class="mono">${esc(c.cert_no || "")}</td>
@@ -268,7 +269,7 @@
           <td>${ce ? `<input type="date" data-crd="${c.id}" value="${esc(c.renew_date || "")}">` : fmt(c.renew_date)}</td><td>${esc(c.renew_note || c.note || "")}</td>${ce ? `<td><button class="stm-lnk" data-a="cert-edit" data-id="${c.id}">แก้ไข</button></td>` : ""}</tr>`; }).join("")}
         </tbody></table></div>` : `<p class="stm-empty">🎉 ไม่มี Certificate ที่ต้องต่ออายุตอนนี้</p>`}</div>
       <div class="stm-card stm-cmatcard${S.cFull ? " stm-full" : ""}"><h3>ตารางทักษะ — ใครมี Certificate อะไร <span class="muted">(${ppl.length + outsiders.length} คน)</span>
-          <button class="stm-btn ghost stm-fullbtn" data-a="cmat-full">${S.cFull ? "✕ ออกจากเต็มจอ" : "⛶ ขยายเต็มจอ"}</button></h3>
+          <button class="stm-btn ghost stm-fullbtn" data-a="cmat-full">${S.cFull ? "✕ ออกจากเต็มจอ" : "⛶ ขยายเต็มจอ"}</button></h3>${S.cFull ? bar : ""}
         <p class="sub">✓ เขียว ใช้ได้ · ✓ เทา ไม่ระบุวันหมดอายุ · ⏰ ถึงเวลาต่อ · ✕ หมดอายุ — ${ce ? "กดที่ช่องเพื่อแก้ไข" : "เลือกหลักสูตรด้านบนเพื่อดูเฉพาะคนที่มี"}</p>
         <div class="stm-cmatwrap"><table class="stm-t stm-cmat"><thead>${head}</thead><tbody>${body || `<tr><td colspan="20" class="muted">ไม่มีข้อมูล</td></tr>`}</tbody></table></div></div>`;
   }
@@ -645,7 +646,7 @@ select.warn{border-color:#fab005}select.bad{border-color:#fa5252}
 .stm-cmat thead th{position:sticky;top:0;z-index:2;background:#fdf2f8;box-shadow:0 1px 0 #f1d5e3}
 .stm-cmat th:first-child,.stm-cmat td:first-child{position:sticky;left:0;z-index:1;background:#fff;min-width:190px}.stm-cmat thead th:first-child{z-index:3;background:#fdf2f8}
 .stm-full{position:fixed!important;inset:0;z-index:180;margin:0!important;border-radius:0!important;display:flex;flex-direction:column;padding:16px 20px!important;background:#fff}
-.stm-full .stm-cmatwrap{flex:1;max-height:none}
+.stm-full .stm-cmatwrap{flex:1;max-height:none}.stm-full .stm-bar2{margin:4px 0 6px}
 body.stm-noscroll{overflow:hidden}
 /* friendly look (Dew, 17 Nov 2026) */
 .stm-tabs a{transition:.15s}.stm-tabs a:hover{background:#fff5f5;border-color:#ffc9c9}
