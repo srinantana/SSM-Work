@@ -1122,15 +1122,33 @@ async function stAwardedJobs(cfg) {
     .map((p) => ({ jo: String(p.jo), name: p.name || '', customer: p.customer || '', country: p.country || '', start: p.start || '', end: p.end || '', ij: p.ij || '' }))
     .sort((a, b) => String(b.start).localeCompare(String(a.start)));
 }
+// Certificates (site_team_certs, database/site_team-004.sql): SC / PC / SSM plus จป อิ๋ม (นิภาพร ฝางคนรัก) may edit (Dew, 18 Nov 2026)
+const CERT_EDIT = { usernames: ['nipaporn.f'], namesTh: ['นิภาพร ฝางคนรัก'] };
+const canEditCert = (prof) => canEditManpower(prof) || CERT_EDIT.usernames.includes(String(prof.username || '').toLowerCase()) || CERT_EDIT.namesTh.includes(thKey(prof.nameTh));
+const CERT_COURSES = ['SO_PRO', 'SO_MGR', 'SO_SUP', 'SAFE6', 'CONFINED', 'CRANE_FIXED', 'CRANE_MOBILE', 'SCAFFOLD', 'HEIGHT', 'ELECTRIC', 'FORKLIFT', 'OTHER'];
+function certClean(d) {
+  const o = {
+    course: CERT_COURSES.includes(String(d.course || '')) ? String(d.course) : 'OTHER', course_name: mpStr(d.course_name, 120) || null,
+    holder_name: mpStr(d.holder_name, 120), worker_id: mpStr(d.worker_id, 20) || null, person_id: Number(d.person_id) || null,
+    cert_no: mpStr(d.cert_no, 80) || null, issue: stDate(d.issue), expiry: stDate(d.expiry), no_expiry: !!d.no_expiry,
+    renew_due: stDate(d.renew_due), review_date: stDate(d.review_date),
+    status: ['active', 'registered', 'expired', 'resign'].includes(d.status) ? d.status : 'active',
+    link: /^https?:\/\//.test(String(d.link || '')) ? mpStr(d.link, 500) : null, note: mpStr(d.note, 300) || null,
+    renew_status: ['planned', 'booked', 'done'].includes(d.renew_status) ? d.renew_status : null, renew_date: stDate(d.renew_date), renew_note: mpStr(d.renew_note, 300) || null,
+  };
+  if (o.no_expiry) o.expiry = null;
+  return o;
+}
 async function siteTeamApi(cfg, req, url, prof) {
   const path = url.pathname, can = canEditManpower(prof), who = prof.username || prof.email;
   const H = { ...authHeaders(cfg.service), prefer: 'return=representation' };
   if (path === '/api/site-team/data' && req.method === 'GET') {
-    const [workers, people, trips, jobs] = await Promise.all([
+    const [workers, people, trips, jobs, certs] = await Promise.all([
       restAll(cfg, '/rest/v1/mp_workers?select=id,emp_code,name_th,nickname,unit,trade,active,sort&order=sort.asc'),
       restAll(cfg, '/rest/v1/site_team_people?select=*&order=id.asc'),
       restAll(cfg, '/rest/v1/site_team_trips?select=*&order=date_from.desc.nullslast'),
       stAwardedJobs(cfg),
+      restAll(cfg, '/rest/v1/site_team_certs?select=*&order=course.asc,holder_name.asc').catch(() => null),
     ]);
     if (!people || !trips) return json({ error: 'no_table' }, 503);
     let names = new Map();
@@ -1138,6 +1156,9 @@ async function siteTeamApi(cfg, req, url, prof) {
     const strip = (p) => { if (can) return p; const o = { ...p }; for (const k of ST_PRIVATE) delete o[k]; o.has_passport = !!p.passport_no || !!p.passport_expiry; return o; };
     return json({
       canEdit: can,
+      canCert: canEditCert(prof),
+      certs: certs || [],
+      certsReady: !!certs,
       workers: (workers || []).map((w) => ({ ...w, name_en_hr: can ? names.get(String(w.emp_code || w.id).toUpperCase()) || '' : '' })),
       people: people.map(strip),
       trips,
@@ -1145,6 +1166,23 @@ async function siteTeamApi(cfg, req, url, prof) {
     });
   }
   if (req.method !== 'POST') return json({ error: 'method' }, 405);
+  if (path === '/api/site-team/cert' || path === '/api/site-team/cert-delete') {
+    if (!canEditCert(prof)) return json({ error: 'แก้ไข Certificate ได้เฉพาะ จป. / SC / PC / SSM' }, 403);
+    const d = await req.json().catch(() => ({})), id = Number(d.id) || 0;
+    if (path === '/api/site-team/cert-delete') {
+      if (!id) return json({ error: 'input' }, 400);
+      const r = await fetch(cfg.url + `/rest/v1/site_team_certs?id=eq.${id}`, { method: 'DELETE', headers: H });
+      return r.ok ? json({ ok: true }) : json({ error: 'supabase' }, 502);
+    }
+    const row = { ...certClean(d), updated_by: who, updated_at: new Date().toISOString() };
+    if (!row.holder_name) return json({ error: 'ใส่ชื่อผู้ถือ Certificate' }, 400);
+    if (row.course === 'OTHER' && !row.course_name) return json({ error: 'ใส่ชื่อหลักสูตร' }, 400);
+    const r = id
+      ? await fetch(cfg.url + `/rest/v1/site_team_certs?id=eq.${id}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) })
+      : await fetch(cfg.url + '/rest/v1/site_team_certs', { method: 'POST', headers: H, body: JSON.stringify(row) });
+    if (!r.ok) return json({ error: r.status === 404 ? 'ยังไม่ได้สร้างตาราง — รัน database/site_team-004.sql' : 'supabase' }, 502);
+    return json({ ok: true, cert: (await r.json())[0] });
+  }
   if (!can) return json({ error: 'แก้ไขได้เฉพาะ SC / PC / SSM' }, 403);
   const d = await req.json().catch(() => ({}));
   const now = new Date().toISOString();

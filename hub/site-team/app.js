@@ -1,5 +1,6 @@
 /* SSM Work · Site Team (ทีมหน้างาน) — team list with passport / ID card / birth date, passport renewals, overseas trips.
    Routes (inside the hub): #site-team            → ภาพรวม (dashboard)
+                            #site-team/certs[/<course>] → Certificate (skills matrix + renewals with จป)
                             #site-team/people     → รายชื่อทีม
                             #site-team/renew      → ต่ออายุ Passport
                             #site-team/trips      → เดินทางต่างประเทศ
@@ -25,12 +26,12 @@
   const RENEW_L = Object.fromEntries(RENEW);
   const INS = [["", "—"], ["trip", "รายเที่ยว"], ["annual", "รายปี"]];
   const INS_L = Object.fromEntries(INS);
-  const TABS = [["", "🏠 ภาพรวม"], ["people", "👷 รายชื่อทีม"], ["renew", "🔄 ต่ออายุ Passport"], ["visas", "🛂 วีซ่า"], ["trips", "✈️ เดินทางต่างประเทศ"]];
+  const TABS = [["", "🏠 ภาพรวม"], ["people", "👷 รายชื่อทีม"], ["renew", "🔄 ต่ออายุ Passport"], ["visas", "🛂 วีซ่า"], ["certs", "🎓 Certificate"], ["trips", "✈️ เดินทางต่างประเทศ"]];
   const TRAVEL_MONTHS = 6;   // most countries need the passport valid ≥ 6 months after the return date
   const RENEW_MONTHS = 9;    // flag for renewal this early: a Thai passport takes ~1–2 weeks plus the trip to an office
 
   let ROOT = null, D = null, ERR = "", LOADING = null;
-  const S = { page: "", unit: "", st: "", q: "", trip: null, imp: null, vc: "" };
+  const S = { page: "", unit: "", st: "", q: "", trip: null, imp: null, vc: "", cc: "", cst: "", cOnly: true, tCert: "" };
   const VISA_SOON = 3;   // months — a visa expiring sooner is flagged ใกล้หมด
 
   /* ---------- dates ---------- */
@@ -139,7 +140,7 @@
     if (ERR) { ROOT.innerHTML = `<div class="stm-card stm-err">${esc(ERR)}</div>`; return; }
     if (!D) { ROOT.innerHTML = `<div class="stm-card">กำลังโหลด…</div>`; return; }
     const note = D.canEdit ? "" : `<div class="stm-note">คุณเห็นชื่อ ทีม และวันหมดอายุเท่านั้น — เลขบัตรประชาชน เลข Passport และวันเกิด ดูได้เฉพาะ SC / PC / SSM</div>`;
-    const page = { "": vDash, people: vPeople, renew: vRenew, visas: vVisas, trips: vTrips, import: vImport }[S.page] || vDash;
+    const page = { "": vDash, people: vPeople, renew: vRenew, visas: vVisas, certs: vCerts, trips: vTrips, import: vImport }[S.page] || vDash;
     ROOT.innerHTML = tabs() + note + page();
     bind();
   }
@@ -166,6 +167,7 @@
         <div class="stm-card c-pass"><h3><i>⏳</i>Passport ใกล้หมดอายุ</h3>${soon.length ? `<table class="stm-t"><tbody>${soon.map(r => `<tr><td>${esc(label(r))}<div class="sub">${unitBadge(r.unit)}</div></td><td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${ST_CLS[r.st]}">${r.stL}</span></td><td>${esc(RENEW_L[r.p.renewal_status || ""] || "")}</td></tr>`).join("")}</tbody></table>` : `<p class="stm-empty">🎉 ไม่มีใครหมดอายุภายใน 1 ปี</p>`}
           <a class="stm-more" href="#site-team/renew">ดูรายการต่ออายุทั้งหมด →</a></div>
         ${visaCard()}
+        ${certCard()}
         <div class="stm-card c-trip"><h3><i>✈️</i>ทริปต่างประเทศที่กำลังจะถึง</h3>${trips.length ? trips.map(tripLine).join("") : `<p class="stm-empty">🧳 ยังไม่มีทริป</p>`}<a class="stm-more" href="#site-team/trips">วางแผนทริป →</a></div>
       </div>`;
   }
@@ -192,6 +194,120 @@
         ${ce ? `<td><button class="stm-lnk" data-a="edit" data-k="${esc(x.r.key)}">แก้ไข</button></td>` : ""}</tr>`).join("") || `<tr><td colspan="10" class="muted">ไม่มีข้อมูลวีซ่า${S.vc ? " " + esc(S.vc) : ""} — ใส่ได้ที่ รายชื่อทีม → แก้ไข → + เพิ่มวีซ่า</td></tr>`}
       </tbody></table></div>`;
   }
+  /* ---------- certificates (site_team_certs) — kept with จป อิ๋ม; editors: SC / PC / SSM + จป (D.canCert) ---------- */
+  const COURSES = [["SO_PRO", "จป.วิชาชีพ", "🦺"], ["SO_MGR", "จป.บริหาร", "🦺"], ["SO_SUP", "จป.หัวหน้างาน", "🦺"], ["SAFE6", "ความปลอดภัย 6 ชม.", "⛑️"],
+    ["CONFINED", "งานอับอากาศ", "🕳️"], ["CRANE_FIXED", "ปั้นจั่นอยู่กับที่", "🏗️"], ["CRANE_MOBILE", "ปั้นจั่นเคลื่อนที่", "🚧"], ["SCAFFOLD", "นั่งร้าน", "🪜"],
+    ["HEIGHT", "ทำงานที่สูง", "🧗"], ["ELECTRIC", "งานไฟฟ้า", "⚡"], ["FORKLIFT", "โฟล์คลิฟท์", "🚜"], ["OTHER", "อื่นๆ", "📜"]];
+  const COURSE = Object.fromEntries(COURSES.map(c => [c[0], c]));
+  const courseL = c => c.course === "OTHER" ? (c.course_name || "อื่นๆ") : (COURSE[c.course] || [, c.course])[1];
+  const courseI = c => (COURSE[c.course] || COURSE.OTHER)[2];
+  const CERT_RENEW = [["", "—"], ["planned", "ต้องต่อ · รอนัด"], ["booked", "นัดอบรมแล้ว"], ["done", "ต่ออายุแล้ว"]];
+  const CERT_RENEW_L = Object.fromEntries(CERT_RENEW);
+  const CERT_LEAD_DAYS = 90;   // renew this many days before expiry when the sheet has no วันที่ต้องต่อ
+  const thNorm = s => String(s || "").normalize("NFC").replace(/^\s*(นางสาว|น\.ส\.|นาย|นาง|Mr\.?|Ms\.?|Mrs\.?)\s*/i, "").replace(/([ั-ฺ็-๎])\1+/g, "$1").replace(/\s+/g, " ").trim();
+  function certDue(c) { if (c.no_expiry || !c.expiry) return null; if (c.renew_due) return c.renew_due; const e = parse(c.expiry); e.setDate(e.getDate() - CERT_LEAD_DAYS); return iso(e); }
+  function certSt(c) {   // → [key, label, css]
+    if (c.status === "resign") return ["resign", "ลาออก", "st-none"];
+    const e = parse(c.expiry), t = today();
+    if (c.status === "expired" || (e && e < t)) return ["exp", "หมดอายุ", "st-bad"];
+    if (c.no_expiry || c.status === "registered") return ["ok", c.status === "registered" ? "ขึ้นทะเบียน" : "ไม่มีหมดอายุ", "st-ok"];
+    if (!e) return ["unk", "ไม่ระบุวันหมดอายุ", "st-none"];
+    const due = parse(certDue(c)); if (due && due <= t) return ["due", "ถึงเวลาต่ออายุ", "st-warn"];
+    return ["ok", "ใช้ได้ถึง " + fmt(c.expiry), "st-ok"];
+  }
+  /* link each cert to a Site Team person: worker_id / person_id first, then the Thai name */
+  function certIndex() {
+    const ps = people(), byName = new Map(), byW = new Map(), byP = new Map();
+    for (const r of ps) { if (r.worker) byW.set(r.worker.id, r); if (r.pid && !r.worker) byP.set(r.pid, r); const k = thNorm(r.name_th); if (k && !byName.has(k)) byName.set(k, r); }
+    const rows = (D.certs || []).map(c => ({ c, r: (c.worker_id && byW.get(c.worker_id)) || (c.person_id && byP.get(c.person_id)) || byName.get(thNorm(c.holder_name)) || null }));
+    const byKey = new Map(); for (const x of rows) if (x.r) { if (!byKey.has(x.r.key)) byKey.set(x.r.key, []); byKey.get(x.r.key).push(x.c); }
+    return { rows, byKey };
+  }
+  const hasCert = (list, course) => (list || []).some(c => c.course === course && ["ok", "due", "unk"].includes(certSt(c)[0]));
+  const certChip = c => { const [k, , cls] = certSt(c); return `<span class="stm-cchip ${cls}" title="${esc(courseL(c) + (c.expiry ? " · หมด " + fmt(c.expiry) : "") + (c.cert_no ? " · " + c.cert_no : ""))}">${courseI(c)} ${esc(courseL(c))}${k === "due" ? " ⏰" : k === "exp" ? " ✕" : ""}</span>`; };
+  function certCard() {
+    if (!D.certsReady) return `<div class="stm-card c-cert"><h3><i>🎓</i>Certificate</h3><p class="stm-empty">🛠️ ยังไม่ได้สร้างตาราง Certificate<br><span class="sub">รัน database/site_team-004.sql ใน Supabase</span></p></div>`;
+    const live = (D.certs || []).filter(c => c.status !== "resign");
+    const rows = COURSES.map(([k, l, ic]) => { const cs = live.filter(c => c.course === k); if (!cs.length) return "";
+      const n = s => cs.filter(c => certSt(c)[0] === s).length;
+      return `<tr class="stm-click" data-href="#site-team/certs/${k}"><th><a href="#site-team/certs/${k}">${ic} ${esc(l)}</a></th><td class="n">${cs.length}</td><td class="n ok">${n("ok") + n("unk") || ""}</td><td class="n warn">${n("due") || ""}</td><td class="n bad">${n("exp") || ""}</td></tr>`; }).join("");
+    const due = live.filter(c => ["due", "exp"].includes(certSt(c)[0]) && c.renew_status !== "done").length;
+    return `<div class="stm-card c-cert"><h3><i>🎓</i>Certificate</h3>${rows ? `<table class="stm-t"><thead><tr><th>หลักสูตร</th><th class="n">ใบ</th><th class="n">ใช้ได้</th><th class="n" title="ถึงวันที่ต้องต่อ (${CERT_LEAD_DAYS} วันก่อนหมดอายุ)">ต้องต่อ</th><th class="n">หมดแล้ว</th></tr></thead><tbody>${rows}</tbody></table>
+      ${due ? `<p class="bad sub">⚠️ ต้องต่ออายุ / หมดแล้ว ${due} ใบ — ติดตามกับ จป.</p>` : ""}` : `<p class="stm-empty">📜 ยังไม่มีข้อมูล Certificate</p>`}<a class="stm-more" href="#site-team/certs">ดู Certificate ทั้งหมด →</a></div>`;
+  }
+  function vCerts() {
+    if (!D.certsReady) return `<div class="stm-card"><p class="stm-empty">🛠️ ยังไม่ได้สร้างตาราง Certificate — รัน <b>database/site_team-004.sql</b> ใน Supabase</p></div>`;
+    const ce = D.canCert, { rows, byKey } = certIndex(), q = S.q.toLowerCase(), t = today();
+    const match = (name, r) => !q || [name, r && r.nick, r && r.code, r && r.name_en].some(v => String(v || "").toLowerCase().includes(q));
+    // 1) matrix: people × courses — pick the right people for the job
+    const used = COURSES.filter(([k]) => (D.certs || []).some(c => c.course === k));
+    const ppl = people().filter(r => r.active && (!S.unit || r.unit === S.unit) && match(r.name_th, r) && (!S.cc || hasCert(byKey.get(r.key), S.cc)));
+    const outsiders = S.cOnly ? [] : [...new Map(rows.filter(x => !x.r && x.c.status !== "resign" && match(x.c.holder_name)).map(x => [thNorm(x.c.holder_name), x.c.holder_name])).values()]
+      .filter(n => !S.cc || hasCert(rows.filter(x => !x.r && thNorm(x.c.holder_name) === thNorm(n)).map(x => x.c), S.cc));
+    const cell = (list, k) => { const cs = (list || []).filter(c => c.course === k); if (!cs.length) return `<td class="stm-cx"></td>`;
+      const c = cs.sort((a, b) => String(b.expiry || "9").localeCompare(String(a.expiry || "9")))[0], [st, l, cls] = certSt(c);
+      const sym = st === "exp" ? "✕" : st === "due" ? "⏰" : st === "resign" ? "–" : "✓";
+      return `<td class="stm-cx"><button class="stm-cdot ${cls}" ${ce ? `data-a="cert-edit" data-id="${c.id}"` : "disabled"} title="${esc(courseL(c) + " · " + l + (c.cert_no ? " · " + c.cert_no : ""))}">${sym}</button></td>`; };
+    const head = `<tr><th>ชื่อ</th><th>ทีม</th>${used.map(([k, l, ic]) => `<th class="stm-ch" title="${esc(l)}"><span>${ic}</span><small>${esc(l)}</small></th>`).join("")}</tr>`;
+    const body = ppl.map(r => `<tr><td>${esc(label(r))}<div class="sub">${esc(r.code)}</div></td><td>${unitBadge(r.unit)}</td>${used.map(([k]) => cell(byKey.get(r.key), k)).join("")}</tr>`).join("")
+      + outsiders.map(n => `<tr class="muted-row"><td>${esc(thNorm(n))}<div class="sub">ไม่อยู่ใน Site Team</div></td><td>—</td>${used.map(([k]) => cell(rows.filter(x => !x.r && thNorm(x.c.holder_name) === thNorm(n)).map(x => x.c), k)).join("")}</tr>`).join("");
+    // 2) renewals: due / expired, not resigned — worked with จป
+    const ren = rows.filter(x => x.c.status !== "resign" && ["due", "exp"].includes(certSt(x.c)[0]) && (!S.cc || x.c.course === S.cc) && match(x.c.holder_name, x.r))
+      .sort((a, b) => String(certDue(a.c) || a.c.expiry || "").localeCompare(String(certDue(b.c) || b.c.expiry || "")));
+    const soon = rows.filter(x => x.c.status !== "resign" && certSt(x.c)[0] === "ok" && x.c.expiry && (!S.cc || x.c.course === S.cc) && parse(certDue(x.c)) <= addMonths(t, 6)).length;
+    return `<div class="stm-bar2"><input type="search" id="stQ" placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัส" value="${esc(S.q)}">
+        <select id="stCc"><option value="">ทุกหลักสูตร</option>${COURSES.map(([k, l, ic]) => `<option value="${k}"${S.cc === k ? " selected" : ""}>${ic} ${esc(l)}</option>`).join("")}</select>
+        <select id="stU"><option value="">ทุกทีม</option>${UNITS.map(([u, l]) => `<option value="${u}"${S.unit === u ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
+        <label class="stm-ck"><input type="checkbox" id="stCOnly"${S.cOnly ? " checked" : ""}> เฉพาะคนใน Site Team</label>
+        ${ce ? `<button class="stm-btn" data-a="cert-new">+ เพิ่ม Certificate</button>` : ""}</div>
+      <div class="stm-card c-cert"><h3><i>⏰</i>ต้องต่ออายุ / หมดอายุ <span class="muted">(${ren.length})</span>${soon ? ` <span class="sub">· ถึงรอบต่อใน 6 เดือน ${soon} ใบ</span>` : ""}</h3>
+        ${ren.length ? `<div class="stm-scroll"><table class="stm-t"><thead><tr><th>ชื่อ</th><th>หลักสูตร</th><th>เลขที่</th><th>หมดอายุ</th><th>ต้องต่อ</th><th>สถานะ</th><th>การต่ออายุ (จป.)</th><th>วันนัด</th><th>หมายเหตุ</th>${ce ? "<th></th>" : ""}</tr></thead><tbody>
+        ${ren.map(({ c, r }) => { const [, l, cls] = certSt(c); return `<tr><td>${esc(r ? label(r) : thNorm(c.holder_name))}${r ? "" : `<div class="sub">ไม่อยู่ใน Site Team</div>`}</td><td>${courseI(c)} ${esc(courseL(c))}</td><td class="mono">${esc(c.cert_no || "")}</td>
+          <td>${fmt(c.expiry)}</td><td>${fmt(certDue(c))}</td><td><span class="stm-st ${cls}">${l}</span></td>
+          <td>${ce ? `<select data-crs="${c.id}">${CERT_RENEW.map(([k, t2]) => `<option value="${k}"${(c.renew_status || "") === k ? " selected" : ""}>${t2}</option>`).join("")}</select>` : esc(CERT_RENEW_L[c.renew_status || ""] || "")}</td>
+          <td>${ce ? `<input type="date" data-crd="${c.id}" value="${esc(c.renew_date || "")}">` : fmt(c.renew_date)}</td><td>${esc(c.renew_note || c.note || "")}</td>${ce ? `<td><button class="stm-lnk" data-a="cert-edit" data-id="${c.id}">แก้ไข</button></td>` : ""}</tr>`; }).join("")}
+        </tbody></table></div>` : `<p class="stm-empty">🎉 ไม่มี Certificate ที่ต้องต่ออายุตอนนี้</p>`}</div>
+      <div class="stm-card stm-scroll"><h3>ตารางทักษะ — ใครมี Certificate อะไร <span class="muted">(${ppl.length + outsiders.length} คน)</span></h3>
+        <p class="sub">✓ เขียว ใช้ได้ · ✓ เทา ไม่ระบุวันหมดอายุ · ⏰ ถึงเวลาต่อ · ✕ หมดอายุ — ${ce ? "กดที่ช่องเพื่อแก้ไข" : "เลือกหลักสูตรด้านบนเพื่อดูเฉพาะคนที่มี"}</p>
+        <table class="stm-t stm-cmat"><thead>${head}</thead><tbody>${body || `<tr><td colspan="20" class="muted">ไม่มีข้อมูล</td></tr>`}</tbody></table></div>`;
+  }
+  function certForm(c) {
+    c = c || { course: S.cc || "SAFE6", status: "active" };
+    const ps = people().filter(r => r.active), { rows } = certIndex(), hit = c.id ? (rows.find(x => x.c.id === c.id) || {}).r : null;
+    const m = document.createElement("div"); m.className = "stm-modal";
+    const sel = (id, l, opts, v) => `<label>${l}<select id="${id}">${opts.map(([k, t]) => `<option value="${esc(k)}"${(v || "") === k ? " selected" : ""}>${esc(t)}</option>`).join("")}</select></label>`;
+    const f = (id, l, v, type = "text") => `<label>${l}<input id="${id}" type="${type}" value="${esc(v ?? "")}"></label>`;
+    m.innerHTML = `<div class="stm-dlg"><h3>${c.id ? "แก้ไข" : "เพิ่ม"} Certificate</h3><div class="stm-form">
+      ${sel("cCourse", "หลักสูตร *", COURSES.map(([k, l, ic]) => [k, ic + " " + l]), c.course)}
+      ${f("cCname", "ชื่อหลักสูตร (ถ้าเลือก อื่นๆ)", c.course_name)}
+      <label class="wide">ผู้ถือ Certificate *<input id="cHolder" list="cPeople" value="${esc(hit ? hit.name_th : thNorm(c.holder_name || ""))}" placeholder="พิมพ์ชื่อ (เลือกจากรายชื่อ Site Team ได้)"><datalist id="cPeople">${ps.map(r => `<option value="${esc(r.name_th)}">${esc((r.nick ? r.nick + " · " : "") + r.unit)}</option>`).join("")}</datalist></label>
+      ${f("cNo", "เลขที่ Cer.", c.cert_no)}${f("cIssue", "เริ่มใช้ Cer.", c.issue, "date")}${f("cExp", "วันหมดอายุ", c.expiry, "date")}
+      <label class="stm-ck"><input type="checkbox" id="cNoExp"${c.no_expiry ? " checked" : ""}> ไม่มีหมดอายุ</label>
+      ${f("cDue", "วันที่ต้องต่อ (ว่าง = " + CERT_LEAD_DAYS + " วันก่อนหมด)", c.renew_due, "date")}${f("cReview", "Cer. ทบทวน", c.review_date, "date")}
+      ${sel("cSt", "สถานะ", [["active", "Active"], ["registered", "ขึ้นทะเบียน"], ["expired", "Expired Certificate"], ["resign", "Resign (ลาออก)"]], c.status)}
+      <label class="wide">ลิงก์ Cer. (Google Drive)<input id="cLink" value="${esc(c.link || "")}"></label>
+      <label class="wide">หมายเหตุ<input id="cNote" value="${esc(c.note || "")}"></label>
+      ${sel("cRs", "การต่ออายุ (จป.)", CERT_RENEW, c.renew_status)}${f("cRd", "วันนัดอบรม / ต่ออายุ", c.renew_date, "date")}
+      <label class="wide">หมายเหตุการต่ออายุ<input id="cRn" value="${esc(c.renew_note || "")}"></label>
+      ${c.link ? `<a class="wide" href="${esc(c.link)}" target="_blank" rel="noopener">📎 เปิดไฟล์ Certificate</a>` : ""}
+    </div><div class="stm-acts"><button class="stm-btn" data-a="c-save">บันทึก</button>${c.id ? ` <button class="stm-btn danger" data-a="c-del">ลบ</button>` : ""} <button class="stm-btn ghost" data-a="c-close">ยกเลิก</button></div></div>`;
+    document.body.appendChild(m);
+    const v = id => m.querySelector("#" + id).value.trim();
+    m.addEventListener("click", async e => {
+      const a = e.target.closest("[data-a]")?.dataset.a; if (e.target === m || a === "c-close") return m.remove();
+      if (a === "c-del") { if (!confirm("ลบ Certificate นี้?")) return; try { await post("cert-delete", { id: c.id }); D.certs = D.certs.filter(x => x.id !== c.id); m.remove(); draw(); toast("ลบแล้ว"); } catch (x) { toast(x.message, 1); } return; }
+      if (a !== "c-save") return;
+      const name = v("cHolder"), r = ps.find(x => thNorm(x.name_th) === thNorm(name));
+      const body = { id: c.id, course: v("cCourse"), course_name: v("cCname"), holder_name: name, worker_id: r && r.worker ? r.worker.id : "", person_id: r && !r.worker ? r.pid : null,
+        cert_no: v("cNo"), issue: v("cIssue"), expiry: v("cExp"), no_expiry: m.querySelector("#cNoExp").checked, renew_due: v("cDue"), review_date: v("cReview"),
+        status: v("cSt"), link: v("cLink"), note: v("cNote"), renew_status: v("cRs"), renew_date: v("cRd"), renew_note: v("cRn") };
+      try { const j = await post("cert", body); D.certs = D.certs.filter(x => x.id !== j.cert.id).concat(j.cert); m.remove(); draw(); toast("บันทึกแล้ว"); } catch (x) { toast(x.message, 1); }
+    });
+  }
+  async function certQuick(id, patch) {
+    const c = (D.certs || []).find(x => x.id === id); if (!c) return;
+    try { const j = await post("cert", { ...c, ...patch }); D.certs = D.certs.filter(x => x.id !== id).concat(j.cert); toast("บันทึกแล้ว"); draw(); } catch (x) { toast(x.message, 1); }
+  }
   function tripLine(t) {
     const ps = tripPeople(t), bad = ps.filter(x => !x.okTravel).length;
     return `<div class="stm-trip"><span class="stm-st st-none">${esc(kindL(t))}</span> <b>${esc(t.title)}</b> <span class="muted">${esc([t.job_no, t.customer].filter(Boolean).join(" · "))}${t.country ? " · " + flag(cKey(t.country)) + " " + esc(t.country) : ""}</span>
@@ -209,7 +325,7 @@
       && (!q || [r.name_th, r.name_en, r.nick, r.code].some(v => String(v || "").toLowerCase().includes(q))));
   }
   function vPeople() {
-    const ce = D.canEdit;
+    const ce = D.canEdit, CI = certIndex();
     const rs = filtered(people().filter(r => r.active || S.st));
     const add = ce ? `<button class="stm-btn" data-a="add">+ เพิ่มคน (ไม่อยู่ใน Manpower)</button>` : "";
     return filterBar(add) + `<div class="stm-card stm-scroll"><table class="stm-t stm-roster"><thead><tr><th>ชื่อ</th><th>ทีม</th><th>ชื่อใน Passport</th>
@@ -218,7 +334,7 @@
         <td class="mono">${ce ? esc(fmtId(r.p.national_id)) : (r.pid ? "•••••••••" : "")}</td>
         <td>${ce ? (r.p.birth_date ? fmt(r.p.birth_date) + ` <span class="muted">(${age(r.p.birth_date)})</span>` : "") : ""}</td>
         <td class="mono">${ce ? esc(r.p.passport_no || "") : esc(mask(r.p.passport_no || ""))}${ce && r.p.passport_file ? ` <a href="${esc(r.p.passport_file)}" target="_blank" rel="noopener" title="เปิดสแกน">📄</a>` : ""}</td>
-        <td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${ST_CLS[r.st]}">${r.stL}</span>${visas(r.p).length ? `<div class="stm-vchips">${visas(r.p).map(visaChip).join("")}</div>` : r.p.visa_note ? `<div class="sub">${esc(r.p.visa_note)}</div>` : ""}</td>
+        <td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${ST_CLS[r.st]}">${r.stL}</span>${(CI.byKey.get(r.key) || []).filter(c => c.status !== "resign").length ? `<div class="stm-vchips">${CI.byKey.get(r.key).filter(c => c.status !== "resign").map(certChip).join("")}</div>` : ""}${visas(r.p).length ? `<div class="stm-vchips">${visas(r.p).map(visaChip).join("")}</div>` : r.p.visa_note ? `<div class="sub">${esc(r.p.visa_note)}</div>` : ""}</td>
         ${ce ? `<td><button class="stm-lnk" data-a="edit" data-k="${esc(r.key)}">แก้ไข</button></td>` : ""}</tr>`).join("") || `<tr><td colspan="9" class="muted">ไม่พบรายชื่อ</td></tr>`}
       </tbody></table></div><div class="muted stm-cnt">${rs.length} คน</div>`;
   }
@@ -273,7 +389,8 @@
   function tripForm() {
     const t = S.trip, ce = D.canEdit, sel = new Set((t.people || []).map(Number));
     const back = parse(t.date_to || t.date_from), need = back ? addMonths(back, TRAVEL_MONTHS) : null;
-    const rs = filtered(people().filter(r => r.active));
+    const TI = certIndex();
+    const rs = filtered(people().filter(r => r.active)).filter(r => !S.tCert || hasCert(TI.byKey.get(r.key), S.tCert));
     const chk = r => { const e = parse(r.p.passport_expiry); if (!e) return ["bad", r.st === "none" ? "ไม่มี Passport" : "ไม่ทราบวันหมดอายุ"]; if (need && e < need) return ["bad", "ไม่ถึง " + TRAVEL_MONTHS + " เดือนหลังกลับ"]; if (!need) return ["", fmt(r.p.passport_expiry)]; return ["ok", "ผ่าน"]; };
     const picked = tripPeople(t);
     const dis = ce ? "" : " disabled";
@@ -304,8 +421,8 @@
       </div>
       <h4>เลือกคน (${sel.size}) ${need ? `<span class="muted">— Passport ต้องหมดอายุหลัง ${fmt(iso(need))}</span>` : `<span class="muted">— ใส่วันกลับเพื่อตรวจ Passport</span>`}</h4>
       ${picked.length ? `<div class="stm-chips">${picked.map(r => `<span class="stm-chip ${r.okTravel ? "" : "bad"}">${esc(label(r))}${r.okTravel ? "" : " ⚠"}</span>`).join("")}</div>` : ""}
-      ${ce ? filterBar() + `<div class="stm-scroll stm-pick"><table class="stm-t"><tbody>${rs.map(r => { const [k, l] = chk(r); const can = !!r.pid;
-        return `<tr><td><label class="stm-ck"><input type="checkbox" data-pick="${r.pid}"${sel.has(r.pid) ? " checked" : ""}${can ? "" : " disabled title=\"ยังไม่มีข้อมูล Passport\""}> ${esc(label(r))}</label></td><td>${esc(r.unit)}</td><td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${k === "ok" ? "st-ok" : k === "bad" ? "st-bad" : "st-none"}">${l}</span></td>${vCell(r)}</tr>`; }).join("")}</tbody></table></div>` : ""}
+      ${ce ? filterBar(`<select id="stTc"><option value="">🎓 ทุก Certificate</option>${COURSES.map(([k, l, ic]) => `<option value="${k}"${S.tCert === k ? " selected" : ""}>${ic} ต้องมี ${esc(l)}</option>`).join("")}</select>`) + `<div class="stm-scroll stm-pick"><table class="stm-t"><tbody>${rs.map(r => { const [k, l] = chk(r); const can = !!r.pid;
+        return `<tr><td><label class="stm-ck"><input type="checkbox" data-pick="${r.pid}"${sel.has(r.pid) ? " checked" : ""}${can ? "" : " disabled title=\"ยังไม่มีข้อมูล Passport\""}> ${esc(label(r))}</label></td><td>${unitBadge(r.unit)}</td><td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${k === "ok" ? "st-ok" : k === "bad" ? "st-bad" : "st-none"}">${l}</span></td>${vCell(r)}<td><div class="stm-vchips">${(TI.byKey.get(r.key) || []).filter(c => ["ok", "due", "unk"].includes(certSt(c)[0])).map(certChip).join("")}</div></td></tr>`; }).join("")}</tbody></table></div>` : ""}
       <div class="stm-acts">${ce ? `<button class="stm-btn" data-a="trip-save">บันทึก</button>${t.id ? ` <button class="stm-btn ghost" data-a="trip-xlsx" data-id="${t.id}">⬇ รายชื่อทำประกัน</button> <button class="stm-btn danger" data-a="trip-del" data-id="${t.id}">ลบทริป</button>` : ""}` : ""} <button class="stm-btn ghost" data-a="trip-close">กลับ</button></div></div>`;
   }
   async function tripXlsx(t) {
@@ -437,6 +554,11 @@
     const keepFocus = (id) => { const e = ROOT.querySelector("#" + id); if (e) { e.focus(); e.setSelectionRange?.(e.value.length, e.value.length); } };
     on("stQ", "input", e => { S.q = e.target.value; readTrip(); draw(); keepFocus("stQ"); });
     on("stU", "change", e => { S.unit = e.target.value; readTrip(); draw(); });
+    on("stCc", "change", e => { location.hash = "#site-team/certs" + (e.target.value ? "/" + e.target.value : ""); });
+    on("stCOnly", "change", e => { S.cOnly = e.target.checked; draw(); });
+    on("stTc", "change", e => { readTrip(); S.tCert = e.target.value; draw(); });
+    ROOT.querySelectorAll("[data-crs]").forEach(x => x.addEventListener("change", () => certQuick(+x.dataset.crs, { renew_status: x.value })));
+    ROOT.querySelectorAll("[data-crd]").forEach(x => x.addEventListener("change", () => certQuick(+x.dataset.crd, { renew_date: x.value })));
     on("stVc", "change", e => { location.hash = "#site-team/visas" + (e.target.value ? "/" + encodeURIComponent(e.target.value) : ""); });
     ROOT.querySelectorAll("tr[data-href]").forEach(tr => tr.addEventListener("click", e => { if (!e.target.closest("a")) location.hash = tr.dataset.href; }));
     on("stS", "change", e => { S.st = e.target.value; readTrip(); draw(); });
@@ -478,6 +600,8 @@
       return;
     }
     if (a === "trip-del") { if (!confirm("ลบทริปนี้?")) return; try { await post("trip-delete", { id: +ds.id }); S.trip = null; D.trips = D.trips.filter(x => x.id !== +ds.id); draw(); } catch (x) { toast(x.message, 1); } return; }
+    if (a === "cert-new") return certForm(null);
+    if (a === "cert-edit") return certForm((D.certs || []).find(c => c.id === +ds.id));
     if (a === "imp-cancel") { S.imp = null; return draw(); }
     if (a === "imp-go") {
       try { const j = await post("import", { rows: S.imp }); S.imp = null; toast(`นำเข้าแล้ว: เพิ่ม ${j.created} · อัปเดต ${j.updated}` + (j.failed.length ? ` · ไม่สำเร็จ ${j.failed.length}` : ""), j.failed.length > 0); if (j.failed.length) console.warn(j.failed); location.hash = "#site-team/people"; load(true); } catch (x) { toast(x.message, 1); }
@@ -508,6 +632,12 @@
 .stm-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}.stm-chip{background:#ebfbee;color:#2b8a3e;border-radius:999px;padding:3px 10px;font-size:12.5px}.stm-chip.bad{background:#fff5f5;color:#c92a2a}
 select.warn{border-color:#fab005}select.bad{border-color:#fa5252}
 .stm-modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;z-index:200;overflow:auto;padding:40px 12px}.stm-dlg{background:#fff;border-radius:14px;padding:18px 20px;max-width:860px;width:100%}.stm-dlg h3{margin:0 0 12px}
+/* certificates */
+.stm-grid .stm-card.c-cert,.stm-card.c-cert{border-top-color:#f06595}.c-cert h3 i{background:#fff0f6}
+.stm-cchip{display:inline-flex;gap:3px;align-items:center;font-size:11px;padding:1px 7px;border-radius:999px;white-space:nowrap}
+.stm-cmat th.stm-ch{text-align:center;vertical-align:bottom;min-width:58px}.stm-cmat th.stm-ch span{display:block;font-size:17px}.stm-cmat th.stm-ch small{display:block;font-size:10.5px;font-weight:500;line-height:1.2;color:#6b7280}
+.stm-cx{text-align:center}.stm-cdot{width:28px;height:28px;border-radius:9px;border:0;font-weight:700;cursor:pointer;font-size:13px}.stm-cdot:disabled{cursor:default}
+.muted-row td{color:#868e96}
 /* friendly look (Dew, 17 Nov 2026) */
 .stm-tabs a{transition:.15s}.stm-tabs a:hover{background:#fff5f5;border-color:#ffc9c9}
 .stm-tile{display:flex!important;align-items:center;gap:12px;text-decoration:none;color:inherit;border:0!important;border-radius:16px!important;box-shadow:0 1px 2px rgba(16,24,40,.06);transition:transform .15s,box-shadow .15s}
@@ -532,6 +662,7 @@ select.warn{border-color:#fab005}select.bad{border-color:#fa5252}
       if (!document.getElementById("stmCss")) { const s = document.createElement("style"); s.id = "stmCss"; s.textContent = CSS; document.head.appendChild(s); }
       ROOT = el; const parts = String(sub || "").split("/"), pg = parts[0];
       S.vc = pg === "visas" && parts[1] ? decodeURIComponent(parts.slice(1).join("/")) : "";
+      if (pg === "certs") S.cc = COURSE[parts[1]] ? parts[1] : "";
       if (pg !== S.page) { S.trip = null; if (pg !== "import") S.imp = null; }
       S.page = TABS.some(t => t[0] === pg) || pg === "import" ? pg : "";
       draw(); load();
