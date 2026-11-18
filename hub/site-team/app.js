@@ -197,7 +197,7 @@
   /* ---------- certificates (site_team_certs) — kept with จป อิ๋ม; editors: SC / PC / SSM + จป (D.canCert) ---------- */
   const COURSES = [["SO_PRO", "จป.วิชาชีพ", "🦺"], ["SO_MGR", "จป.บริหาร", "🦺"], ["SO_SUP", "จป.หัวหน้างาน", "🦺"], ["SAFE6", "ความปลอดภัย 6 ชม.", "⛑️"],
     ["CONFINED", "งานอับอากาศ", "🕳️"], ["CRANE_FIXED", "ปั้นจั่นอยู่กับที่", "🏗️"], ["CRANE_MOBILE", "ปั้นจั่นเคลื่อนที่", "🚧"], ["SCAFFOLD", "นั่งร้าน", "🪜"],
-    ["HEIGHT", "ทำงานที่สูง", "🧗"], ["ELECTRIC", "งานไฟฟ้า", "⚡"], ["FORKLIFT", "โฟล์คลิฟท์", "🚜"], ["OTHER", "อื่นๆ", "📜"]];
+    ["HEIGHT", "ทำงานที่สูง", "🧗"], ["ELECTRIC", "งานไฟฟ้า", "⚡"], ["FORKLIFT", "โฟล์คลิฟท์", "🚜"], ["FIRE_BASIC", "ดับเพลิงขั้นต้น", "🧯"], ["OTHER", "อื่นๆ", "📜"]];
   const COURSE = Object.fromEntries(COURSES.map(c => [c[0], c]));
   const courseL = c => c.course === "OTHER" ? (c.course_name || "อื่นๆ") : (COURSE[c.course] || [, c.course])[1];
   const courseI = c => (COURSE[c.course] || COURSE.OTHER)[2];
