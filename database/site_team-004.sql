@@ -6,7 +6,7 @@
 
 create table if not exists public.site_team_certs (
   id           bigserial primary key,
-  course       text not null,                 -- SO_PRO, SO_MGR, SO_SUP, SAFE6, CONFINED, CRANE_FIXED, CRANE_MOBILE, SCAFFOLD, HEIGHT, ELECTRIC, FORKLIFT, OTHER
+  course       text not null,                 -- SO_PRO, SO_MGR, SO_SUP, SAFE6, CONFINED, CRANE_FIXED, CRANE_MOBILE, SCAFFOLD, HEIGHT, ELECTRIC, FORKLIFT, FIRE_BASIC (ดับเพลิงขั้นต้น), OTHER
   course_name  text,                          -- free name when course = OTHER
   holder_name  text not null,
   worker_id    text,                          -- mp_workers.id
