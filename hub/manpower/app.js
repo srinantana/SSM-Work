@@ -272,7 +272,7 @@
     DATA.SV.forEach((v, k) => { if (!DATA.A.has(k)) spOnly++; });
     if (spOnly) n.set("SERVICE", (n.get("SERVICE") || 0) + spOnly);
     const items = DATA.projects.filter(p => n.has(p.code)).sort((a, b) => n.get(b.code) - n.get(a.code))
-      .map(p => `<button type="button" class="mp-lg pj ${S.project === p.code ? "on" : ""}" data-p="${esc(p.code)}" title="${esc(p.name)}">${esc(p.customer && p.code !== "SERVICE" ? p.customer + " · " : "")}${esc(shortOf(p))} <b>${n.get(p.code)}</b></button>`)
+      .map(p => `<button type="button" class="mp-lg pj ${S.project === p.code ? "on" : ""}" data-p="${esc(p.code)}"${DATA.canEdit ? ` draggable="true" data-drag="p:${esc(p.code)}"` : ""} title="${esc(p.name)}${DATA.canEdit ? " — กดเพื่อกรอง · ลากไปวางที่ช่องของคนเพื่อลงงาน" : ""}">${esc(p.customer && p.code !== "SERVICE" ? p.customer + " · " : "")}${esc(shortOf(p))} <b>${n.get(p.code)}</b></button>`)
       .concat(Object.keys(KIND).filter(k => n.has("_" + k)).map(k => `<span class="mp-lg pj">${KIND[k][1]} <b>${n.get("_" + k)}</b></span>`));
     const tn = {}; DATA.assignments.forEach(a => { if (isOld(a)) return; const t = typeOf(a); tn[t] = (tn[t] || 0) + 1; }); tn.service = (tn.service || 0) + spOnly;
     const nOld = DATA.assignments.filter(isOld).length;
@@ -280,7 +280,42 @@
       + (nOld ? `<span class="mp-lg ty" title="งานจากชีตเดิมที่ยังไม่ได้ผูก Job no. กับ RAK_Master_Project_on_hand (ผูกได้ที่ ข้อมูลหลัก → งาน / ลูกค้า)"><i style="background:${OLD_COL}"></i>งานเดิม (ยังไม่ผูก Job no.) <b>${nOld}</b></span>` : "");
     const um = DATA.serviceUnmatched || [];
     const review = um.length && DATA.canEdit ? `<details class="mp-um"><summary>ชื่อใน Service Plan ที่จับคู่กับช่างไม่ได้ ${um.length} งาน</summary><ul>${um.map(j => `<li><b>${esc(j.job || "แถว " + j.row)}</b> ${esc(j.customer)} · ${esc(j.status)} — ${j.names.map(esc).join(", ")}</li>`).join("")}</ul><p>แก้ชื่อในใบขอคนให้ตรงกับชื่อจริงของช่าง (ถ้าชื่อซ้ำให้ใส่ต้นนามสกุล เช่น "สัญญา สม") แล้ว board จะอัปเดตเอง</p></details>` : "";
-    return `<div class="mp-legend"><span class="mp-lt">สีตามประเภทงาน</span>${types}<span class="mp-sep"></span><span class="mp-lt">งาน (กดเพื่อกรอง)</span>${items.join("")}<span class="mp-lg"><i class="tent-i"></i>จอง (ยังไม่ยืนยัน)</span><span class="mp-lg"><b class="mp-sp in">SP</b>Confirm จาก Service Plan</span><span class="mp-lg"><b class="mp-sp x in">!</b>ชนกับ Service Plan</span><span class="mp-lg"><b class="mp-rq in">ขอ</b>คำขอคนรอ PC Confirm</span><span class="mp-lg"><i class="lv-i"></i>ลา</span><span class="mp-lg"><i class="off-i"></i>H / PH วันหยุด</span></div>${review}`;
+    const pal = DATA.canEdit && DATA.master.length ? `<details class="mp-pal" ${S.palOpen ? "open" : ""}><summary>☰ คลังงาน — ลากชื่องานไปวางที่ช่องของคน</summary>
+      <input type="search" class="mp-palq" placeholder="ค้นหา Job no. / ลูกค้า / ชื่องาน" value="${esc(S.palQ || "")}"><div class="mp-palr">${palItems()}</div></details>` : "";
+    return pal + `<div class="mp-legend"><span class="mp-lt">สีตามประเภทงาน</span>${types}<span class="mp-sep"></span><span class="mp-lt">งาน (กดเพื่อกรอง)</span>${items.join("")}<span class="mp-lg"><i class="tent-i"></i>จอง (ยังไม่ยืนยัน)</span><span class="mp-lg"><b class="mp-sp in">SP</b>Confirm จาก Service Plan</span><span class="mp-lg"><b class="mp-sp x in">!</b>ชนกับ Service Plan</span><span class="mp-lg"><b class="mp-rq in">ขอ</b>คำขอคนรอ PC Confirm</span><span class="mp-lg"><i class="lv-i"></i>ลา</span><span class="mp-lg"><i class="off-i"></i>H / PH วันหยุด</span></div>${review}`;
+  }
+
+  // คลังงาน: jobs from RAK_Master_Project_on_hand, newest Job no. first, filtered by the search box
+  function palItems() {
+    const q = lc(S.palQ || "");
+    const L = DATA.master.filter(m => !q || lc([m.job_no, m.customer, m.job_full, m.job_name].join(" ")).includes(q))
+      .sort((a, b) => String(b.job_no).localeCompare(String(a.job_no)));
+    return L.slice(0, 60).map(m => `<span class="mp-palj" draggable="true" data-drag="m:${esc(m.job_no)}" title="${esc(m.job_no + " · " + (m.customer || "") + " · " + (m.job_full || m.job_name))}"><b>${esc(m.job_no)}</b> ${esc(m.customer || "")} · ${esc(m.job_name || m.job_full)}</span>`).join("")
+      + (L.length > 60 ? `<span class="mp-m">… อีก ${L.length - 60} งาน พิมพ์ค้นหาเพื่อหา</span>` : !L.length ? `<span class="mp-m">ไม่พบงาน</span>` : "");
+  }
+  // Drag a job (legend chip "p:CODE" or คลังงาน "m:JOBNO") onto a person's day cell → entry form for that cell, job filled in
+  function bindJobDrop(root, g) {
+    if (!root.__mpDnd) { root.__mpDnd = true;   // ROOT outlives redraws: bind its listeners once
+    root.addEventListener("dragstart", e => { const t = e.target.closest && e.target.closest("[data-drag]"); if (!t) return;
+      e.dataTransfer.setData("text/plain", t.dataset.drag); e.dataTransfer.effectAllowed = "copy"; root.classList.add("mp-dnd"); });
+    root.addEventListener("dragend", () => { root.classList.remove("mp-dnd"); root.querySelectorAll(".mp-drop").forEach(x => x.classList.remove("mp-drop")); }); }
+    const cell = e => { const td = e.target.closest && e.target.closest("tbody td[data-k]"); return td && !td.closest("tr.mp-ms") ? td : null; };
+    g.addEventListener("dragover", e => { const td = cell(e); if (!td) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy";
+      if (!td.classList.contains("mp-drop")) { g.querySelectorAll(".mp-drop").forEach(x => x.classList.remove("mp-drop")); td.classList.add("mp-drop"); } });
+    g.addEventListener("dragleave", e => { const td = cell(e); if (td && !td.contains(e.relatedTarget)) td.classList.remove("mp-drop"); });
+    g.addEventListener("drop", e => { const td = cell(e); if (!td) return; e.preventDefault(); td.classList.remove("mp-drop"); root.classList.remove("mp-dnd");
+      const v = e.dataTransfer.getData("text/plain") || "", [kind, id] = [v.slice(0, 1), v.slice(2)];
+      const [wid, day] = td.dataset.k.split("|");
+      let job = null;
+      if (kind === "p") { const p = DATA.P.get(id); if (p) { const m = masterOf(p); job = { customer: p.customer || "", name: p.name, job_no: p.job_no || (m && m.job_no) || "", code: p.code }; } }
+      if (kind === "m") { const m = DATA.MJ.get(jobKey(id)); if (m) { const p = DATA.projects.find(x => x.job_no && jobKey(x.job_no) === jobKey(m.job_no) && !linkOdd(x, m));
+        job = p ? { customer: p.customer || m.customer, name: p.name, job_no: m.job_no, code: p.code } : { customer: m.customer, name: m.job_full || m.job_name, job_no: m.job_no }; } }
+      if (!job) return;
+      // usual work type of this job so far (SERVICE → service)
+      const cnt = {}; DATA.assignments.forEach(a => { if (job.code && a.project_code === job.code && a.work_type) cnt[a.work_type] = (cnt[a.work_type] || 0) + 1; });
+      job.work_type = job.code === "SERVICE" ? "service" : Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0] || "";
+      bulk([wid], day, day, job);
+    });
   }
 
   // Contiguous "จอง" run of the same text for one person (gaps of days off / blank Sundays allowed).
@@ -452,7 +487,7 @@
     }
   }
   // Block dragged on the grid: people × days
-  function bulk(ids, from, to) {
+  function bulk(ids, from, to, job) {
     const n = (fromKey(to) - fromKey(from)) / 864e5 + 1;
     const names = ids.map(id => { const w = DATA.workers.find(x => x.id === id); return w ? w.nickname || w.name_th : id; });
     const el = document.createElement("div");
@@ -464,7 +499,12 @@
     document.addEventListener("keydown", onKey);
     (document.fullscreenElement || document.body).appendChild(el);
     wireForms(el, { ids, from, to }, close);
-    el.querySelector(".mp-x").focus();
+    if (job) { const f = el.querySelector(".mp-wform");
+      if (f) { f.customer.value = job.customer || ""; f.customer.dispatchEvent(new Event("input")); f.job.value = job.name || ""; f.job_no.value = job.job_no || "";
+        const wt = job.work_type && f.querySelector(`[name=work_type][value="${job.work_type}"]`); if (wt) wt.checked = true;
+        const d = f.closest("details"); if (d) d.open = true; const lv = el.querySelector(".mp-fwrap.lv"); if (lv) lv.open = false;
+        (f.to || f.customer).focus(); } }
+    else el.querySelector(".mp-x").focus();
   }
   // drag-select (editors): press on a cell, drag across people / days, release → bulk dialog; a plain click opens the cell
   let DRAG = null;
@@ -872,7 +912,10 @@
       const pj = e.target.closest("th[data-pj]"); if (pj) return projectDialog(pj.dataset.pj);
       const td = e.target.closest("td[data-m]"); if (td) { const [c, d] = td.dataset.m.split("|"); milestoneDialog(c, d); }
     });
-    if (g && DATA && DATA.canEdit) bindDrag(g);
+    if (g && DATA && DATA.canEdit) { bindDrag(g); bindJobDrop(ROOT, g); }
+    const pal = ROOT.querySelector(".mp-pal");
+    if (pal) { pal.addEventListener("toggle", () => { S.palOpen = pal.open; });
+      const pq = pal.querySelector(".mp-palq"); pq.addEventListener("input", () => { S.palQ = pq.value; pal.querySelector(".mp-palr").innerHTML = palItems(); }); }
     else if (g) g.addEventListener("click", e => { const td = e.target.closest("td[data-k]"); if (td) detail(td.dataset.k); });
   }
 
@@ -1070,6 +1113,9 @@ button.mp-kpi{font:inherit;text-align:left;cursor:pointer;transition:border-colo
 .mp-tg{font-style:normal;font-size:11px;border:1px dashed #9aa1ab;border-radius:4px;padding:0 4px;color:#4a515c}.mp-lvt{font-style:normal;color:var(--amber);font-weight:600}
 .mp-open{color:var(--rak);font-size:12px;white-space:nowrap;margin-left:6px}
 .mp-ut td,.mp-ut th{font-size:13px}.mp-ub{background:#f1f3f6;border-radius:4px;height:10px;width:140px;overflow:hidden}.mp-ub b{display:block;height:100%;background:var(--green)}
+.mp-lg.pj[draggable=true]{cursor:grab}.mp-dnd .mp-grid tbody tr:not(.mp-ms) td[data-k]{outline:1px dashed #c3cad5;outline-offset:-2px}.mp-grid td.mp-drop{outline:2px solid var(--rak,#c92a2a)!important;outline-offset:-2px;background:#fff1f0!important}
+.mp-pal{margin:0 0 8px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:6px 10px}.mp-pal summary{cursor:pointer;font-size:13px;font-weight:600}.mp-palq{margin:8px 0 6px;width:320px;max-width:100%;padding:5px 9px}
+.mp-palr{display:flex;flex-wrap:wrap;gap:5px;max-height:160px;overflow:auto}.mp-palj{cursor:grab;user-select:none;font-size:12px;border:1px solid var(--line);border-radius:999px;padding:3px 9px;background:#fafbfc;white-space:nowrap}.mp-palj:hover{border-color:#adb5bd;background:#fff}.mp-palj b{font-variant-numeric:tabular-nums}
 .mp-sep{width:1px;height:18px;background:var(--line);margin:0 4px}.mp-lg.pj{background:#fafbfc}.mp-lg.ty{font-weight:500}
 @media (max-width:640px){.mp-legend{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px}.mp-lg{white-space:nowrap;flex:none}.mp-mon span{left:120px}.mp-name{min-width:112px;max-width:112px}.mp-name small{display:none}.mp-zoom{margin-left:0}.mp-scroll{max-height:none}}
 `;
