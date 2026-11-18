@@ -639,7 +639,8 @@ select.warn{border-color:#fab005}select.bad{border-color:#fa5252}
 .stm-grid .stm-card.c-cert,.stm-card.c-cert{border-top-color:#f06595}.c-cert h3 i{background:#fff0f6}
 .stm-cchip{display:inline-flex;gap:3px;align-items:center;font-size:11px;padding:1px 7px;border-radius:999px;white-space:nowrap}
 .stm-cmat th.stm-ch{text-align:center;vertical-align:bottom;min-width:58px}.stm-cmat th.stm-ch span{display:block;font-size:17px}.stm-cmat th.stm-ch small{display:block;font-size:10.5px;font-weight:500;line-height:1.2;color:#6b7280}
-.stm-cx{text-align:center}.stm-cdot{width:28px;height:28px;border-radius:9px;border:0;font-weight:700;cursor:pointer;font-size:13px}.stm-cdot:disabled{cursor:default}
+.stm-cmat td,.stm-cmat th{vertical-align:middle}.stm-cmat th.stm-ch,.stm-cmat td.stm-cx{text-align:center!important;width:96px;min-width:84px;padding-left:4px!important;padding-right:4px!important}
+.stm-cdot{display:flex;align-items:center;justify-content:center;margin:0 auto;width:30px;height:30px;padding:0;border-radius:9px;border:0;font-weight:700;cursor:pointer;font-size:14px;line-height:1}.stm-cdot:disabled{cursor:default}
 .muted-row td{color:#868e96}
 .stm-cmatcard h3{flex-wrap:wrap}.stm-fullbtn{margin-left:auto;font-size:12.5px;padding:6px 12px}
 .stm-cmatwrap{overflow:auto;max-height:72vh;border-radius:10px}
