@@ -1105,7 +1105,7 @@ async function candPurge(cfg) {              // PDPA: delete rejected / withdraw
 async function applyApi(cfg, req, url) {     // public — no session
   const p = url.pathname.slice('/api/apply/'.length);
   if (p === 'tests' && req.method === 'GET') {
-    const rows = await restAll(cfg, `${CAND_T}?select=slug,title,content&open=eq.true&order=id.asc`);
+    const rows = await restAll(cfg, `${CAND_T}?select=slug,title,content,trial&open=eq.true&order=id.asc`);
     if (!rows) return json({ error: 'unavailable' }, 503);
     return json({ tests: rows });
   }
@@ -1152,7 +1152,7 @@ async function candApi(cfg, req, url, prof) {
     if (p === 'data') {
       const purged = await candPurge(cfg).catch(() => 0);
       const [tests, cands, scores] = await Promise.all([
-        restAll(cfg, `${CAND_T}?select=id,slug,title,open,content,rubric&order=id.asc`),
+        restAll(cfg, `${CAND_T}?select=id,slug,title,open,trial,content,rubric&order=id.asc`),
         restAll(cfg, `${CAND_C}?select=${CAND_COLS}&order=submitted_at.desc`),
         restAll(cfg, `${CAND_S}?select=*`),
       ]);
@@ -1199,8 +1199,23 @@ async function candApi(cfg, req, url, prof) {
   }
   if (!edit) return json({ error: 'แก้ไขได้เฉพาะดิวและนุ่น' }, 403);
   if (p === 'test') {
-    const r = await fetch(`${cfg.url}${CAND_T}?id=eq.${Number(d.id) || 0}`, { method: 'PATCH', headers: H, body: JSON.stringify({ open: d.open === true, updated_at: new Date().toISOString() }) });
+    const row = { updated_at: new Date().toISOString() };
+    if ('open' in d) row.open = d.open === true;
+    if ('trial' in d) row.trial = d.trial === true;   // โหมดทดลองใช้ ↔ ใช้งานจริง
+    const r = await fetch(`${cfg.url}${CAND_T}?id=eq.${Number(d.id) || 0}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) });
     return r.ok ? json({ ok: true }) : json({ error: 'supabase' }, 502);
+  }
+  if (p === 'reset') {                       // โหมดทดลองใช้: wipe every applicant, score, log and file before going live
+    if (d.confirm !== 'ล้างข้อมูล') return json({ error: 'พิมพ์ “ล้างข้อมูล” เพื่อยืนยัน' }, 400);
+    const live = await restAll(cfg, `${CAND_T}?select=id&trial=eq.false`);
+    if (live && live.length) return json({ error: 'เปิดใช้งานจริงแล้ว — ล้างข้อมูลทั้งหมดไม่ได้ (ลบทีละคนแทน)' }, 409);
+    const all = (await restAll(cfg, `${CAND_C}?select=id,files`)) || [];
+    const paths = all.flatMap((c) => (c.files || []).map((f) => f.p).filter((x) => x && CAND_FILE.test(x)));
+    if (paths.length) await fetch(`${cfg.url}/storage/v1/object/${CAND_BUCKET}`, { method: 'DELETE', headers: authHeaders(cfg.service), body: JSON.stringify({ prefixes: paths }) }).catch(() => null);
+    const r = await fetch(`${cfg.url}${CAND_C}?id=gt.0`, { method: 'DELETE', headers: authHeaders(cfg.service) });   // scores + log cascade
+    if (!r.ok) return json({ error: 'supabase' }, 502);
+    await fetch(`${cfg.url}${CAND_L}?candidate_id=is.null`, { method: 'DELETE', headers: authHeaders(cfg.service) }).catch(() => null);
+    return json({ ok: true, deleted: all.length });
   }
   if (!c) return json({ error: 'ไม่พบผู้สมัคร' }, 404);
   if (p === 'status') {

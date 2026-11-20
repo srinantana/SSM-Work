@@ -39,6 +39,7 @@ textarea{min-height:220px;resize:vertical;line-height:1.6}
 .prog{font-size:13.5px;color:var(--muted)}.saved{font-size:12.5px;color:#2b8a3e}
 .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
 .done{text-align:center;padding:40px 20px}.done .big{font-size:56px}
+.trial{background:#fff4e6;border:1px solid #ffd8a8;color:#a14b00;border-radius:12px;padding:10px 14px;margin-bottom:16px;font-size:14px}
 .pick a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;margin:8px 0;text-decoration:none;color:inherit;font-weight:600;background:#fff}
 </style>
 </head>
@@ -70,6 +71,7 @@ textarea{min-height:220px;resize:vertical;line-height:1.6}
     if (!T) { $("#app").innerHTML = `<div class="card"><h2>เลือกตำแหน่งที่สมัคร</h2><div class="pick">${TESTS.map(t => `<a href="#${esc(t.slug)}">${esc(t.title)} →</a>`).join("")}</div></div>`; return; }
     D = store.get(key()) || { answers: {} };
     D.consent && D.started_at ? viewTest() : viewStart();
+    if (T.trial) $("#app").insertAdjacentHTML("afterbegin", `<div class="trial">🧪 <b>ทดลองระบบ</b> — ช่วงนี้เป็นการทดลองใช้งาน ข้อมูลที่ส่งจะถูกลบก่อนเปิดรับสมัครจริง</div>`);
   }
 
   function viewStart() {

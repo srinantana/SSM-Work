@@ -9,6 +9,7 @@ create table if not exists public.cand_tests (
   slug        text not null unique,             -- /apply#<slug>
   title       text not null,                    -- position, e.g. Site Control
   open        boolean not null default true,    -- accepting applications
+  trial       boolean not null default true,    -- โหมดทดลองใช้: ข้อมูลล้างได้ก่อนเปิดใช้จริง
   content     jsonb not null,                   -- public: intro, rules, context, questions
   rubric      jsonb not null default '{}'::jsonb, -- internal: scoring dimensions, what to look for, follow-up questions
   created_at  timestamptz not null default now(),
@@ -59,6 +60,8 @@ create table if not exists public.cand_log (
   action        text,
   detail        text
 );
+
+alter table public.cand_tests add column if not exists trial boolean not null default true;   -- added 20 Nov 2026 (โหมดทดลองใช้)
 
 alter table public.cand_tests  enable row level security;
 alter table public.candidates  enable row level security;
