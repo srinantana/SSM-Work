@@ -127,6 +127,7 @@ const MENUS = [
   { id: 'service-plan', name: 'Service Plan' },
   { id: 'manpower', name: 'Manpower' },
   { id: 'site-team', name: 'Site Team' },
+  { id: 'qa-tools', name: 'QA Tools' },
 ];
 const MENU_IDS = MENUS.map((m) => m.id);
 function menuOfPath(path) {
@@ -136,6 +137,7 @@ function menuOfPath(path) {
   if (path.startsWith('/service-plan/') || path.startsWith('/api/service-plan/')) return 'service-plan';
   if (path.startsWith('/manpower/') || path.startsWith('/api/manpower/')) return 'manpower';
   if (path.startsWith('/site-team/') || path.startsWith('/api/site-team/')) return 'site-team';
+  if (path.startsWith('/qa-tools/') || path.startsWith('/api/qa-tools/')) return 'qa-tools';
   const m = path.match(/^\/customers\/[^/]+\/[^/]+\/([^/]+)/);
   if (!m) return null; // not a tool page
   return MENU_IDS.find((id) => m[1].startsWith(id)) || '__admin';
@@ -1073,6 +1075,196 @@ async function readMasterProjects(cfg) {
     return { table: t, rows };
   }
   return { table: null, rows: [] };
+}
+
+// ---------- QA Tools: tool & measuring-equipment register, borrow / return, annual calibration ----------
+// Tables qa_tools, qa_tool_loans, qa_tool_cals, qa_tool_log + private bucket 'qa-tools' (database/qa_tools.sql).
+// Roles (set by Dew, 20 Nov 2026): custodian อาร์ต sakkamon.c — register, photos / documents, receive returns, calibration;
+// approver ดิว nantana.s — approves calibration results and retiring a tool (and can do everything the custodian does).
+// Anyone with the menu can view the register and borrow / ask to return a tool themselves.
+const QA_MANAGE = { usernames: ['sakkamon.c', 'nantana.s'], namesTh: ['ศักดิ์กมล จันทริมา', 'นันทนา ศรีสกุลเตียว'] };
+const QA_APPROVE = { usernames: ['nantana.s'], namesTh: ['นันทนา ศรีสกุลเตียว'] };
+const inList = (L, prof) => L.usernames.includes(String(prof.username || '').toLowerCase()) || L.namesTh.includes(thKey(prof.nameTh));
+const QA_T = '/rest/v1/qa_tools', QA_L = '/rest/v1/qa_tool_loans', QA_C = '/rest/v1/qa_tool_cals', QA_G = '/rest/v1/qa_tool_log', QA_BUCKET = 'qa-tools';
+const QA_FILE = /^t(\d{1,10}|new)\/[A-Za-z0-9_-]{6,60}\.(jpg|pdf)$/;
+const QA_STATUS = ['available', 'on_loan', 'calibration', 'repair', 'lost', 'retire_pending', 'retired'];
+const qaDay = (v) => (ISO_DAY.test(String(v || '')) ? String(v) : null);
+const qaNum = (v) => { const t = String(v ?? '').replace(/,/g, '').trim(); if (!t) return null; const n = Number(t); return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null; };
+const qaFiles = (a, by, max = 20) => (Array.isArray(a) ? a : []).filter((x) => x && QA_FILE.test(String(x.p || ''))).slice(0, max)
+  .map((x) => ({ p: String(x.p), name: mpStr(x.name, 120), kind: mpStr(x.kind, 20), at: mpStr(x.at, 40) || new Date().toISOString(), by: mpStr(x.by, 80) || by }));
+const addMonthsIso = (d, m) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCMonth(x.getUTCMonth() + m); return x.toISOString().slice(0, 10); };
+async function qaApi(cfg, req, url, prof) {
+  const p = url.pathname.slice('/api/qa-tools/'.length);
+  const manage = inList(QA_MANAGE, prof), approve = inList(QA_APPROVE, prof);
+  const who = prof.username || prof.email, whoName = prof.nameTh || prof.name || who;
+  const H = { ...authHeaders(cfg.service), prefer: 'return=representation' };
+  const rest = async (path, method, body) => { const r = await fetch(cfg.url + path, { method, headers: H, body: body && JSON.stringify(body) }); const d = await r.json().catch(() => null); return { ok: r.ok, status: r.status, data: d }; };
+  const log = (tool_id, action, detail) => fetch(cfg.url + QA_G, { method: 'POST', headers: authHeaders(cfg.service), body: JSON.stringify({ tool_id, by: whoName, action, detail: mpStr(detail, 500) }) }).catch(() => null);
+  const tool = async (id) => { const r = await rest(`${QA_T}?id=eq.${Number(id) || 0}&select=*`, 'GET'); return r.ok && r.data && r.data[0]; };
+  const setTool = (id, row) => rest(`${QA_T}?id=eq.${id}`, 'PATCH', { ...row, updated_by: who, updated_at: new Date().toISOString() });
+  if (req.method === 'GET') {
+    if (p === 'data') {
+      const [tools, loans, cals] = await Promise.all([
+        restAll(cfg, `${QA_T}?select=*&order=asset_no.asc`),
+        restAll(cfg, `${QA_L}?select=*&order=out_at.desc&limit=1000`),
+        restAll(cfg, `${QA_C}?select=*&order=created_at.desc&limit=1000`),
+      ]);
+      if (!tools || !loans || !cals) return json({ error: 'no_table' }, 503);
+      return json({ me: { username: who, name: whoName, canManage: manage, canApprove: approve }, tools, loans, cals });
+    }
+    if (p === 'log') {
+      const id = Number(url.searchParams.get('tool')) || 0;
+      const rows = await restAll(cfg, `${QA_G}?select=*&tool_id=eq.${id}&order=at.desc&limit=200`);
+      return json({ log: rows || [] });
+    }
+    if (p === 'file') {
+      const path = url.searchParams.get('p') || '';
+      if (!QA_FILE.test(path)) return json({ error: 'path' }, 400);
+      const r = await fetch(`${cfg.url}/storage/v1/object/${QA_BUCKET}/${path}`, { headers: authHeaders(cfg.service) });
+      if (!r.ok) return json({ error: 'not found' }, 404);
+      return new Response(r.body, { headers: { 'content-type': path.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg', 'content-disposition': 'inline', 'cache-control': 'private, max-age=604800, immutable', 'x-content-type-options': 'nosniff' } });
+    }
+    return json({ error: 'not found' }, 404);
+  }
+  if (req.method !== 'POST') return json({ error: 'method' }, 405);
+  if (p === 'file') {
+    if (!manage) return json({ error: 'อัปโหลดได้เฉพาะผู้ดูแลเครื่องมือ' }, 403);
+    const t = url.searchParams.get('tool') || 'new', ct = req.headers.get('content-type') || '';
+    if (!/^(\d{1,10}|new)$/.test(t)) return json({ error: 'tool' }, 400);
+    const pdf = ct === 'application/pdf';
+    if (!pdf && !/^image\/(jpeg|png|webp)$/.test(ct)) return json({ error: 'รองรับเฉพาะรูปภาพหรือ PDF' }, 415);
+    const buf = await req.arrayBuffer();
+    if (!buf.byteLength || buf.byteLength > 4 * 1024 * 1024) return json({ error: 'ไฟล์ใหญ่เกิน 4 MB' }, 413);
+    const path = `t${t}/${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}.${pdf ? 'pdf' : 'jpg'}`;
+    const h = authHeaders(cfg.service); h['content-type'] = pdf ? 'application/pdf' : 'image/jpeg'; h['x-upsert'] = 'false';
+    const r = await fetch(`${cfg.url}/storage/v1/object/${QA_BUCKET}/${path}`, { method: 'POST', headers: h, body: buf });
+    if (!r.ok) return json({ error: r.status === 404 || r.status === 400 ? 'ยังไม่มีที่เก็บไฟล์ — ให้ Admin รัน database/qa_tools.sql' : 'storage' }, 502);
+    return json({ path });
+  }
+  let d; try { d = await req.json(); } catch { return json({ error: 'json' }, 400); }
+  if (!d || typeof d !== 'object') return json({ error: 'json' }, 400);
+  const now = new Date().toISOString(), today = now.slice(0, 10);
+
+  if (p === 'tool') {                                   // add / edit a tool (custodian)
+    if (!manage) return json({ error: 'แก้ไขทะเบียนได้เฉพาะผู้ดูแลเครื่องมือ' }, 403);
+    const id = Number(d.id) || 0, old = id ? await tool(id) : null;
+    if (id && !old) return json({ error: 'ไม่พบเครื่องมือ' }, 404);
+    const row = { asset_no: mpStr(d.asset_no, 40), name: mpStr(d.name, 160), category: mpStr(d.category, 40) || null, brand: mpStr(d.brand, 80) || null,
+      model: mpStr(d.model, 80) || null, serial_no: mpStr(d.serial_no, 80) || null, spec: mpStr(d.spec, 200) || null, location: mpStr(d.location, 120) || null,
+      owner_name: mpStr(d.owner_name, 120) || null, purchase_date: qaDay(d.purchase_date), price: qaNum(d.price), needs_cal: d.needs_cal !== false,
+      cal_interval_m: Math.min(120, Math.max(1, parseInt(d.cal_interval_m, 10) || 12)), last_cal_date: qaDay(d.last_cal_date), next_cal_due: qaDay(d.next_cal_due),
+      photos: qaFiles(d.photos, who, 12), docs: qaFiles(d.docs, who), note: mpStr(d.note, 1000) || null };
+    if (!row.asset_no || !row.name) return json({ error: 'ใส่รหัสทรัพย์สินและชื่อเครื่องมือ' }, 400);
+    if (row.needs_cal && row.last_cal_date && !row.next_cal_due) row.next_cal_due = addMonthsIso(row.last_cal_date, row.cal_interval_m);
+    if (['available', 'repair', 'lost'].includes(d.status) && (!old || ['available', 'repair', 'lost'].includes(old.status))) row.status = d.status;
+    const r = id ? await setTool(id, row) : await rest(QA_T, 'POST', { ...row, status: row.status || 'available', created_by: who, updated_by: who });
+    if (!r.ok) return json({ error: r.status === 409 ? 'รหัสทรัพย์สินนี้มีอยู่แล้ว' : 'supabase' }, r.status === 409 ? 409 : 502);
+    const t = r.data[0];
+    log(t.id, id ? 'แก้ไขข้อมูล' : 'เพิ่มเข้าทะเบียน', id && old.status !== t.status ? `สถานะ ${old.status} → ${t.status}` : '');
+    return json({ ok: true, tool: t });
+  }
+  if (p === 'import') {                                 // bulk add / update by asset no. (custodian)
+    if (!manage) return json({ error: 'นำเข้าได้เฉพาะผู้ดูแลเครื่องมือ' }, 403);
+    const rows = (Array.isArray(d.rows) ? d.rows : []).slice(0, 1000);
+    const existing = (await restAll(cfg, `${QA_T}?select=id,asset_no`)) || [];
+    const byNo = new Map(existing.map((t) => [t.asset_no.toLowerCase(), t.id]));
+    const out = { created: 0, updated: 0, failed: [] };
+    for (const x of rows) {
+      const row = { asset_no: mpStr(x.asset_no, 40), name: mpStr(x.name, 160) };
+      if (!row.asset_no || !row.name) { out.failed.push((x.asset_no || '?') + ': ไม่มีรหัส/ชื่อ'); continue; }
+      for (const k of ['category', 'brand', 'model', 'serial_no', 'spec', 'location', 'owner_name', 'note']) if (x[k] != null && x[k] !== '') row[k] = mpStr(x[k], k === 'note' ? 1000 : 160);
+      for (const k of ['purchase_date', 'last_cal_date', 'next_cal_due']) if (qaDay(x[k])) row[k] = x[k];
+      if (x.price != null && x.price !== '') row.price = qaNum(x.price);
+      if (x.needs_cal != null && x.needs_cal !== '') row.needs_cal = !/^(no|n|false|0|ไม่)/i.test(String(x.needs_cal));
+      if (x.cal_interval_m) row.cal_interval_m = Math.min(120, Math.max(1, parseInt(x.cal_interval_m, 10) || 12));
+      if (row.last_cal_date && !row.next_cal_due && row.needs_cal !== false) row.next_cal_due = addMonthsIso(row.last_cal_date, row.cal_interval_m || 12);
+      const id = byNo.get(row.asset_no.toLowerCase());
+      const r = id ? await setTool(id, row) : await rest(QA_T, 'POST', { ...row, created_by: who, updated_by: who });
+      if (!r.ok) { out.failed.push(row.asset_no + ' (' + r.status + ')'); continue; }
+      if (id) out.updated++; else { out.created++; byNo.set(row.asset_no.toLowerCase(), r.data[0].id); log(r.data[0].id, 'นำเข้าจาก Excel', ''); }
+    }
+    return json(out);
+  }
+  if (p === 'borrow') {                                 // anyone with the menu
+    const t = await tool(d.tool_id);
+    if (!t) return json({ error: 'ไม่พบเครื่องมือ' }, 404);
+    if (t.status !== 'available') return json({ error: 'เครื่องมือนี้ไม่ว่าง (' + t.status + ')' }, 409);
+    if (t.needs_cal && t.next_cal_due && t.next_cal_due < today) return json({ error: 'เลยกำหนดสอบเทียบแล้ว — ห้ามใช้จนกว่าจะสอบเทียบ' }, 409);
+    const due = qaDay(d.due_back);
+    if (!due || due < today) return json({ error: 'ใส่วันที่จะคืน' }, 400);
+    const forUser = manage && mpStr(d.borrower_name, 120) ? { borrower: mpStr(d.borrower, 80) || who, borrower_name: mpStr(d.borrower_name, 120) } : { borrower: who, borrower_name: whoName };
+    const lock = await rest(`${QA_T}?id=eq.${t.id}&status=eq.available`, 'PATCH', { status: 'on_loan', updated_by: who, updated_at: now });   // claim first: two people can't borrow the same tool
+    if (!lock.ok || !lock.data || !lock.data.length) return json({ error: 'มีคนยืมเครื่องมือนี้ไปแล้ว' }, 409);
+    const r = await rest(QA_L, 'POST', { tool_id: t.id, ...forUser, job_no: mpStr(d.job_no, 40) || null, customer: mpStr(d.customer, 120) || null,
+      site: mpStr(d.site, 160) || null, purpose: mpStr(d.purpose, 300) || null, due_back: due, status: 'out' });
+    if (!r.ok) { await setTool(t.id, { status: 'available' }); return json({ error: 'supabase' }, 502); }
+    log(t.id, 'ยืม', `${forUser.borrower_name} · ${[d.job_no, d.customer, d.site].filter(Boolean).join(' · ')} · คืน ${due}`);
+    return json({ ok: true, loan: r.data[0] });
+  }
+  if (p === 'return-request' || p === 'receive') {
+    const lr = await rest(`${QA_L}?id=eq.${Number(d.id) || 0}&select=*`, 'GET'); const loan = lr.ok && lr.data && lr.data[0];
+    if (!loan || loan.status === 'returned') return json({ error: 'ไม่พบรายการยืม' }, 404);
+    if (p === 'return-request') {
+      if (loan.borrower !== who && !manage) return json({ error: 'แจ้งคืนได้เฉพาะคนยืม' }, 403);
+      await rest(`${QA_L}?id=eq.${loan.id}`, 'PATCH', { status: 'return_requested', return_requested_at: now, return_note: mpStr(d.note, 300) || null });
+      log(loan.tool_id, 'แจ้งคืน', loan.borrower_name + (d.note ? ' · ' + mpStr(d.note, 200) : ''));
+      return json({ ok: true });
+    }
+    if (!manage) return json({ error: 'รับคืนได้เฉพาะผู้ดูแลเครื่องมือ' }, 403);
+    const cond = ['ok', 'damaged', 'missing_parts'].includes(d.condition) ? d.condition : 'ok';
+    await rest(`${QA_L}?id=eq.${loan.id}`, 'PATCH', { status: 'returned', returned_at: now, return_condition: cond, return_note: mpStr(d.note, 300) || loan.return_note, received_by: whoName });
+    await setTool(loan.tool_id, { status: cond === 'ok' ? 'available' : 'repair' });
+    log(loan.tool_id, 'รับคืน', `${loan.borrower_name} · สภาพ: ${{ ok: 'ปกติ', damaged: 'ชำรุด', missing_parts: 'อุปกรณ์ไม่ครบ' }[cond]}${d.note ? ' · ' + mpStr(d.note, 200) : ''}`);
+    return json({ ok: true });
+  }
+  if (p === 'cal-send' || p === 'cal-result') {         // custodian
+    if (!manage) return json({ error: 'บันทึกการสอบเทียบได้เฉพาะผู้ดูแลเครื่องมือ' }, 403);
+    const t = await tool(d.tool_id); if (!t) return json({ error: 'ไม่พบเครื่องมือ' }, 404);
+    if (p === 'cal-send') {
+      if (t.status === 'on_loan') return json({ error: 'เครื่องมืออยู่ระหว่างถูกยืม — รับคืนก่อน' }, 409);
+      const r = await rest(QA_C, 'POST', { tool_id: t.id, sent_date: qaDay(d.sent_date) || today, lab: mpStr(d.lab, 120) || null, note: mpStr(d.note, 500) || null, status: 'sent', created_by: who });
+      if (!r.ok) return json({ error: 'supabase' }, 502);
+      await setTool(t.id, { status: 'calibration' });
+      log(t.id, 'ส่งสอบเทียบ', [d.lab, d.sent_date].filter(Boolean).join(' · '));
+      return json({ ok: true, cal: r.data[0] });
+    }
+    const calDate = qaDay(d.cal_date); if (!calDate) return json({ error: 'ใส่วันที่สอบเทียบ' }, 400);
+    const result = ['pass', 'adjusted', 'fail'].includes(d.result) ? d.result : null; if (!result) return json({ error: 'เลือกผลการสอบเทียบ' }, 400);
+    const row = { cal_date: calDate, cert_no: mpStr(d.cert_no, 80) || null, result, next_due: qaDay(d.next_due) || (result === 'fail' ? null : addMonthsIso(calDate, t.cal_interval_m || 12)),
+      cost: qaNum(d.cost), lab: mpStr(d.lab, 120) || null, docs: qaFiles(d.docs, who), note: mpStr(d.note, 500) || null, status: 'pending_approval', updated_at: now };
+    const id = Number(d.id) || 0;
+    const r = id ? await rest(`${QA_C}?id=eq.${id}&tool_id=eq.${t.id}&status=in.(sent,rejected,pending_approval)`, 'PATCH', row)
+                 : await rest(QA_C, 'POST', { ...row, tool_id: t.id, sent_date: qaDay(d.sent_date), created_by: who });
+    if (!r.ok || !r.data || !r.data[0]) return json({ error: 'บันทึกไม่สำเร็จ' }, 502);
+    if (t.status !== 'calibration') await setTool(t.id, { status: 'calibration' });
+    log(t.id, 'บันทึกผลสอบเทียบ (รออนุมัติ)', `${{ pass: 'ผ่าน', adjusted: 'ปรับตั้งแล้วผ่าน', fail: 'ไม่ผ่าน' }[result]} · ${calDate}${row.cert_no ? ' · ใบรับรอง ' + row.cert_no : ''}`);
+    return json({ ok: true, cal: r.data[0] });
+  }
+  if (p === 'cal-approve') {                            // approver
+    if (!approve) return json({ error: 'อนุมัติได้เฉพาะผู้อนุมัติ' }, 403);
+    const cr = await rest(`${QA_C}?id=eq.${Number(d.id) || 0}&select=*`, 'GET'); const c = cr.ok && cr.data && cr.data[0];
+    if (!c || c.status !== 'pending_approval') return json({ error: 'ไม่พบรายการรออนุมัติ' }, 404);
+    const ok = d.approve !== false;
+    await rest(`${QA_C}?id=eq.${c.id}`, 'PATCH', { status: ok ? 'approved' : 'rejected', approved_by: whoName, approved_at: now, approve_note: mpStr(d.note, 300) || null, updated_at: now });
+    if (ok) await setTool(c.tool_id, { last_cal_date: c.cal_date, next_cal_due: c.next_due, status: c.result === 'fail' ? 'repair' : 'available' });
+    log(c.tool_id, ok ? 'อนุมัติผลสอบเทียบ' : 'ไม่อนุมัติผลสอบเทียบ', (ok ? `ครบกำหนดครั้งถัดไป ${c.next_due || '-'}` : '') + (d.note ? ' · ' + mpStr(d.note, 200) : ''));
+    return json({ ok: true });
+  }
+  if (p === 'retire') {                                 // custodian asks, approver confirms
+    const t = await tool(d.id); if (!t) return json({ error: 'ไม่พบเครื่องมือ' }, 404);
+    if (d.step === 'request') {
+      if (!manage) return json({ error: 'forbidden' }, 403);
+      if (t.status === 'on_loan') return json({ error: 'เครื่องมืออยู่ระหว่างถูกยืม' }, 409);
+      await setTool(t.id, { status: 'retire_pending', retire_reason: mpStr(d.reason, 300) || null });
+      log(t.id, 'ขอจำหน่าย / เลิกใช้', mpStr(d.reason, 300)); return json({ ok: true });
+    }
+    if (!approve) return json({ error: 'อนุมัติได้เฉพาะผู้อนุมัติ' }, 403);
+    if (t.status !== 'retire_pending') return json({ error: 'ไม่มีคำขอ' }, 409);
+    const ok = d.approve !== false;
+    await setTool(t.id, { status: ok ? 'retired' : 'available' });
+    log(t.id, ok ? 'อนุมัติจำหน่าย / เลิกใช้' : 'ไม่อนุมัติจำหน่าย', mpStr(d.note, 300)); return json({ ok: true });
+  }
+  return json({ error: 'not found' }, 404);
 }
 
 // ---------- Site Team (ทีมหน้างาน): team list + passport / ID / birth date, renewals, overseas trips ----------
@@ -2287,6 +2479,14 @@ export default async function middleware(req) {
     if (!live) return json({ error: 'login required' }, 401);
     if (!canOpen(live, 'punch-list')) return json({ error: 'no access' }, 403);
     try { return await punchApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
+  }
+
+  if (path.startsWith('/api/qa-tools/')) {
+    if (!signedIn) return json({ error: 'login required' }, 401);
+    const live = await liveProfile(cfg, user);
+    if (!live) return json({ error: 'login required' }, 401);
+    if (!canOpen(live, 'qa-tools')) return json({ error: 'no access' }, 403);
+    try { return await qaApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
   }
 
   if (path.startsWith('/api/site-team/')) {
