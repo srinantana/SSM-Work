@@ -354,15 +354,19 @@
       async v => { await post("holder", { id: t.id, owner_name: v("hName"), department: v("hDept"), date: v("hDate"), reason: v("hWhy"), status: v("hSt"), note: v("hNote") }); await refresh("บันทึกแล้ว"); });
   }
   function dlgCalSend(t) {
-    dialog(`🚚 ส่งสอบเทียบ: ${esc(t.asset_no)} · ${esc(t.name)}`, `<div class="qa-form">${fld("cDate", "วันที่ส่ง", TODAY(), "date")}${fld("cLab", "หน่วยงานสอบเทียบ (Lab)", lastLab(t))}<label class="wide">หมายเหตุ<input id="cNote"></label></div>`,
+    dialog(`🚚 ส่งสอบเทียบ: ${esc(t.asset_no)} · ${esc(t.name)}`, `<div class="qa-form">${fld("cDate", "วันที่ส่ง", TODAY(), "date")}${labSel("cLab", "หน่วยงานสอบเทียบ (Lab)", lastLab(t))}<label class="wide">หมายเหตุ<input id="cNote"></label></div>`,
       async v => { await post("cal-send", { tool_id: t.id, sent_date: v("cDate"), lab: v("cLab"), note: v("cNote") }); await refresh("บันทึกการส่งสอบเทียบแล้ว"); });
   }
+  const LABS = ["Thai Heart Calibration Co., Ltd. (THC)", "Quality Calibration Co.,Ltd. (QC)"];   // หน่วยงานสอบเทียบภายนอก
+  const labOf = v => { const s = String(v || "").trim(); return /^thai\s*h/i.test(s) ? LABS[0] : /^quality\s*cal/i.test(s) || /^qc$/i.test(s) ? LABS[1] : s; };   // old short names → full name
+  const labSel = (id, l, val) => { const cur = labOf(val), opts = LABS.concat(cur && !LABS.includes(cur) ? [cur] : []);
+    return `<label>${l}<select id="${id}"><option value="">— เลือก —</option>${opts.map(o => `<option value="${esc(o)}"${o === cur ? " selected" : ""}>${esc(o)}</option>`).join("")}</select></label>`; };
   const lastLab = t => (D.cals.find(c => c.tool_id === t.id && c.lab) || {}).lab || "";
   function dlgCalResult(t, calId) {
     const c = D.cals.find(x => x.id === +calId) || {};
     const files = (c.docs || []).filter(f => !f.url), link = ((c.docs || []).find(f => f.url) || {}).url || "";   // certificate = link (files uploaded earlier are kept)
     const m = dialog(`📄 ผลสอบเทียบ: ${esc(t.asset_no)} · ${esc(t.name)}`, `<div class="qa-form">
-      ${fld("rDate", "วันที่สอบเทียบ *", c.cal_date || TODAY(), "date")}${fld("rLab", "หน่วยงาน (Lab)", c.lab || lastLab(t))}${fld("rCert", "เลขที่ใบรับรอง (Certificate No.)", c.cert_no)}
+      ${fld("rDate", "วันที่สอบเทียบ *", c.cal_date || TODAY(), "date")}${labSel("rLab", "หน่วยงาน (Lab)", c.lab || lastLab(t))}${fld("rCert", "เลขที่ใบรับรอง (Certificate No.)", c.cert_no)}
       ${sel("rRes", "ผล *", [["", "— เลือก —"], ...Object.entries(RES)], c.result)}${fld("rNext", "ครบกำหนดครั้งถัดไป (ว่าง = +" + (t.cal_interval_m || 12) + " เดือน)", c.next_due, "date")}${fld("rCost", "ค่าใช้จ่าย (บาท)", c.cost, "number", ' min="0"')}
       <label class="wide">🔗 ลิงก์ใบรับรอง (Certificate) — วางลิงก์ Google Drive / OneDrive ที่เก็บไฟล์<input id="rLink" type="url" placeholder="https://drive.google.com/..." value="${esc(link)}"></label>
       <label class="wide">หมายเหตุ<input id="rNote" value="${esc(c.note || "")}"></label></div>
