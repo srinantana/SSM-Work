@@ -17,7 +17,7 @@
   const DUE_SOON = 30;   // days before the calibration due date to start warning
 
   let ROOT = null, D = null, ERR = "", LOADING = null;
-  const S = { page: "", tool: 0, q: "", cat: "", dept: "", st: "", imp: null, sel: new Set(), hq: "", hst: "", hy: "" };
+  const S = { page: "", tool: 0, q: "", cat: "", dept: "", st: "", imp: null, sel: new Set(), hq: "", hst: "", hy: "", view: (() => { try { return localStorage.getItem("qaView") || "grid"; } catch (e) { return "grid"; } })() };
 
   /* ---------- helpers ---------- */
   const pad = n => String(n).padStart(2, "0");
@@ -162,14 +162,23 @@
     const m = me(), ts = filtered();
     const tools = m.canManage ? `<button class="qa-btn" data-a="new">+ เพิ่มเครื่องมือ</button>` : "";
     const sel = S.sel.size ? `<button class="qa-btn ghost" data-a="labels">🏷 พิมพ์ป้าย QR (${S.sel.size})</button> <button class="qa-lnk" data-a="sel-none">ล้าง</button>` : `<button class="qa-btn ghost" data-a="sel-all">☑ เลือกทั้งหมดเพื่อพิมพ์ป้าย</button>`;
-    return filters() + tools + ` <button class="qa-btn ghost" data-a="xlsx">⬇ Excel</button></div><div class="qa-bar2">${sel}<span class="muted">${ts.length} รายการ</span></div>
+    const vbtn = `<span class="qa-vsw" role="group" aria-label="มุมมอง"><button class="${S.view !== "rows" ? "on" : ""}" data-a="view" data-v="grid" title="มุมมองการ์ด">▦</button><button class="${S.view === "rows" ? "on" : ""}" data-a="view" data-v="rows" title="มุมมองรายบรรทัด">☰</button></span>`;
+    const head = filters() + tools + ` <button class="qa-btn ghost" data-a="xlsx">⬇ Excel</button></div><div class="qa-bar2">${sel}<span class="muted">${ts.length} รายการ</span>${vbtn}</div>`;
+    const empty = `<p class="muted">ไม่พบเครื่องมือ${m.canManage && !D.tools.length ? " — เริ่มจาก “+ เพิ่มเครื่องมือ” หรือ “⬆ นำเข้า Excel”" : ""}</p>`;
+    if (S.view === "rows") return head + (ts.length ? `<div class="qa-card qa-scroll"><table class="qa-t qa-rows"><thead><tr><th></th><th>รหัส</th><th>ชื่อเครื่องมือ</th><th>ยี่ห้อ / รุ่น / ขนาด</th><th>สถานะ</th><th>สอบเทียบ</th><th>ผู้ถือครอง / ผู้ยืม</th><th></th></tr></thead><tbody>
+      ${ts.map(t => { const c = calState(t), l = openLoan(t); return `<tr><td><input type="checkbox" data-sel="${t.id}"${S.sel.has(t.id) ? " checked" : ""}></td>
+        <td class="mono"><a href="#qa-tools/tool/${t.id}">${esc(t.asset_no)}</a></td><td><a href="#qa-tools/tool/${t.id}"><b>${esc(t.name)}</b></a></td>
+        <td class="sub">${esc([t.brand, t.model, t.spec].filter(x => x && x !== "-").join(" · "))}</td><td>${stChip(t)}</td><td>${t.needs_cal ? chip(c.l, c.c) : `<span class="sub">—</span>`}</td>
+        <td class="sub">${l ? "👤 " + esc(l.borrower_name) + " · คืน " + fmt(l.due_back) : t.lendable ? "🧰 เครื่องมือกลาง" : esc([t.owner_name, t.department].filter(Boolean).join(" · "))}</td>
+        <td>${canBorrow(t) ? `<button class="qa-btn sm" data-a="borrow" data-id="${t.id}">ยืม</button>` : ""}</td></tr>`; }).join("")}</tbody></table></div>` : empty);
+    return head + `
       <div class="qa-cards">${ts.map(t => { const c = calState(t), l = openLoan(t);
         return `<div class="qa-tcard"><label class="qa-pick"><input type="checkbox" data-sel="${t.id}"${S.sel.has(t.id) ? " checked" : ""}></label>
           <a href="#qa-tools/tool/${t.id}" class="qa-tlink">${thumb(t)}<div class="qa-tbody"><div class="sub mono">${esc(t.asset_no)}</div><b>${esc(t.name)}</b>
           <div class="sub">${esc([t.brand, t.model, t.spec].filter(x => x && x !== "-").join(" · "))}</div>
           <div class="qa-tags">${stChip(t)}${t.needs_cal ? chip("🎯 " + c.l, c.c) : ""}</div>
           ${l ? `<div class="sub">👤 ยืมโดย ${esc(l.borrower_name)} · คืน ${fmt(l.due_back)}</div>` : t.lendable ? `<div class="sub">🧰 เครื่องมือกลาง ให้ยืมได้</div>` : t.owner_name ? `<div class="sub">🧑‍🔧 ${esc(t.owner_name)}${t.department ? " · " + esc(t.department) : ""}</div>` : ""}</div></a>
-          ${canBorrow(t) ? `<button class="qa-btn sm" data-a="borrow" data-id="${t.id}">ยืม</button>` : ""}</div>`; }).join("") || `<p class="muted">ไม่พบเครื่องมือ${m.canManage && !D.tools.length ? " — เริ่มจาก “+ เพิ่มเครื่องมือ” หรือ “⬆ นำเข้า Excel”" : ""}</p>`}</div>`;
+          ${canBorrow(t) ? `<button class="qa-btn sm" data-a="borrow" data-id="${t.id}">ยืม</button>` : ""}</div>`; }).join("") || empty}</div>`;
   }
 
   function vTool() {
@@ -572,6 +581,7 @@
       if (a === "retire-ok" || a === "retire-no") return dlgNote(a === "retire-ok" ? "✔ อนุมัติจำหน่าย" : "✖ ไม่อนุมัติจำหน่าย", "หมายเหตุ", async n => { await post("retire", { id: t.id, approve: a === "retire-ok", note: n }); await refresh("บันทึกแล้ว"); }, "ยืนยัน");
       if (a === "label") return printLabels([t.id]);
       if (a === "labels") return printLabels([...S.sel]);
+      if (a === "view") { S.view = ds.v === "rows" ? "rows" : "grid"; try { localStorage.setItem("qaView", S.view); } catch (e) { /* private mode */ } return draw(); }
       if (a === "sel-all") { filtered().forEach(x => S.sel.add(x.id)); return draw(); }
       if (a === "sel-none") { S.sel.clear(); return draw(); }
       if (a === "xlsx") return exportXlsx("list");
@@ -601,7 +611,7 @@
 .qa-btn{padding:8px 15px;border-radius:9px;border:1px solid var(--rak);background:var(--rak);color:#fff;font:inherit;font-size:13.5px;cursor:pointer;white-space:nowrap}.qa-btn:hover{background:var(--rak-dark)}.qa-btn:disabled{opacity:.5}
 .qa-btn.ghost{background:#fff;color:var(--ink,#1f2328);border-color:#d6dae0}.qa-btn.ghost:hover{border-color:var(--rak-line);background:var(--blush)}.qa-btn.danger{color:#c92a2a}.qa-btn.sm{padding:5px 11px;font-size:12.5px}
 .qa-lnk{background:none;border:0;color:var(--rak);cursor:pointer;font:inherit;font-size:12.5px}
-.qa-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.qa-vsw{margin-left:auto;display:inline-flex;border:1px solid #dee2e6;border-radius:8px;overflow:hidden}.qa-vsw button{border:0;background:#fff;padding:6px 11px;font-size:16px;line-height:1;cursor:pointer;color:#6b7280}.qa-vsw button.on{background:var(--rak,#65a30d);color:#fff}.qa-rows td{vertical-align:middle}.qa-rows td a{color:inherit;text-decoration:none}.qa-rows tbody tr:hover{background:#f8faf5}.qa-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
 .qa-tcard{position:relative;display:flex;gap:12px;align-items:flex-start;background:#fff;border:1px solid var(--line,#e3e6ea);border-radius:14px;padding:12px}.qa-tcard:hover{border-color:var(--rak-line)}
 .qa-tlink{display:flex;gap:12px;text-decoration:none;color:inherit;flex:1;min-width:0}.qa-tbody{min-width:0;display:flex;flex-direction:column;gap:3px}.qa-tbody b{font-size:14.5px}
 .qa-tags{display:flex;gap:4px;flex-wrap:wrap;margin:2px 0}.qa-pick{position:absolute;top:6px;left:6px;z-index:1}.qa-pick input{width:16px;height:16px}
