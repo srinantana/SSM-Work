@@ -15,7 +15,7 @@
   const QR = ["https://cdn.jsdelivr.net/npm/qrcode-generator@2.0.4/dist/qrcode.js", "sha384-e9EFD6BGC90bkW9aDV5xbbBfzwN7G8YImHao2lfLVKV/hPB0E0go+H3I64h7oHtA"];
 
   let ROOT = null, D = null, ERR = "", LOADING = null;
-  const S = { page: "", id: 0, q: "", st: "", test: "", add: false };
+  const S = { page: "", id: 0, q: "", st: "", test: "", add: false, tile: "" };
   const me = () => (D && D.me) || {};
 
   const pad = n => String(n).padStart(2, "0");
@@ -66,14 +66,18 @@
 
   function vList() {
     const cs = D.candidates, q = S.q.toLowerCase();
-    const list = cs.filter(c => (!S.st || c.status === S.st || (S.st === "open" && !["hired", "rejected", "withdrawn"].includes(c.status)) || (S.st === "pending" && pending(c))) && (!S.test || String(c.test_id) === S.test)
+    const isUnscored = c => !["rejected", "withdrawn"].includes(c.status) && !scoresOf(c).some(s => s.assessor === me().username);
+    const isSoon = c => { const d = daysLeft(c); return d !== null && d <= 14; };
+    const TILE = { "": () => true, unseen: isNew, unscored: isUnscored, interview: c => c.status === "interview", hired: c => c.status === "hired", soon: isSoon };
+    const list = cs.filter(c => (TILE[S.tile] || TILE[""])(c) && (!S.st || c.status === S.st || (S.st === "open" && !["hired", "rejected", "withdrawn"].includes(c.status)) || (S.st === "pending" && pending(c))) && (!S.test || String(c.test_id) === S.test)
       && (!q || [c.name, c.phone, c.email, c.line_id, c.position].some(v => String(v || "").toLowerCase().includes(q))));
     const cnt = k => cs.filter(c => c.status === k).length;
-    const unscored = cs.filter(c => !["rejected", "withdrawn"].includes(c.status) && !scoresOf(c).some(s => s.assessor === me().username)).length;
-    const soon = cs.filter(c => { const d = daysLeft(c); return d !== null && d <= 14; }).length;
-    const tiles = [["📥", "ผู้สมัครทั้งหมด", cs.length, ""], ["🆕", "ยังไม่ได้เปิดดู", cs.filter(isNew).length, "new"], ["✍️", "ฉันยังไม่ให้คะแนน", unscored, unscored ? "warn" : ""],
-      ["📅", "นัดสัมภาษณ์", cnt("interview"), ""], ["🤝", "รับเข้าทำงาน", cnt("hired"), "ok"], ["🗑", `จะถูกลบใน 14 วัน`, soon, soon ? "warn" : ""]];
-    return `<div class="cd-tiles">${tiles.map(([i, l, n, k]) => `<div class="cd-tile t-${k}"><i>${i}</i><b>${n}</b><span>${l}</span></div>`).join("")}</div>
+    const unscored = cs.filter(isUnscored).length, soon = cs.filter(isSoon).length;
+    const tiles = [["", "📥", "ผู้สมัครทั้งหมด", cs.length, ""], ["unseen", "🆕", "ยังไม่ได้เปิดดู", cs.filter(isNew).length, "new"], ["unscored", "✍️", "ฉันยังไม่ให้คะแนน", unscored, unscored ? "warn" : ""],
+      ["interview", "📅", "นัดสัมภาษณ์", cnt("interview"), ""], ["hired", "🤝", "รับเข้าทำงาน", cnt("hired"), "ok"], ["soon", "🗑", `จะถูกลบใน 14 วัน`, soon, soon ? "warn" : ""]];
+    const tileName = (tiles.find(t => t[0] === S.tile) || [])[2];
+    return `<div class="cd-tiles">${tiles.map(([f, i, l, n, k]) => `<button type="button" class="cd-tile t-${k}${S.tile === f ? " on" : ""}" data-tile="${f}" title="${f ? "กดเพื่อกรอง · กดซ้ำเพื่อดูทั้งหมด" : "ดูทั้งหมด"}"><i>${i}</i><b>${n}</b><span>${l}</span></button>`).join("")}</div>
+      ${S.tile ? `<div class="cd-note">กรอง: <b>${esc(tileName)}</b> · ${list.length} คน <button class="cd-btn ghost sm" data-tile="">✕ ล้างตัวกรอง</button></div>` : ""}
       ${D.purged ? `<div class="cd-note">ลบข้อมูลผู้สมัครที่ไม่ผ่าน / ถอนตัวครบ ${D.keepDays} วันแล้ว ${D.purged} คน (PDPA)</div>` : ""}
       <div class="cd-bar"><input type="search" id="cdQ" placeholder="🔍 ค้นหาชื่อ / เบอร์ / อีเมล" value="${esc(S.q)}">
         <select id="cdSt"><option value="">ทุกสถานะ</option><option value="open"${S.st === "open" ? " selected" : ""}>กำลังพิจารณา</option><option value="pending"${S.st === "pending" ? " selected" : ""}>รอทำแบบทดสอบ</option>${Object.entries(ST).map(([k, [l]]) => `<option value="${k}"${S.st === k ? " selected" : ""}>${l}</option>`).join("")}</select>
@@ -204,6 +208,7 @@
     const on = (id, ev, fn) => { const e = ROOT.querySelector("#" + id); if (e) e.addEventListener(ev, fn); };
     on("cdQ", "input", e => { S.q = e.target.value; draw(); const q = ROOT.querySelector("#cdQ"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); });
     on("cdSt", "change", e => { S.st = e.target.value; draw(); });
+    ROOT.querySelectorAll("[data-tile]").forEach(b => b.addEventListener("click", () => { const f = b.dataset.tile; S.tile = f && S.tile === f ? "" : f; if (S.tile) S.st = ""; draw(); }));
     on("cdTest", "change", e => { S.test = e.target.value; draw(); });
     on("cdFit", "toggle", e => { const o = e.target.open; try { localStorage.setItem(FOLD_KEY, o ? "1" : "0"); } catch {} const t = e.target.querySelector(".cd-foldt"); if (t) t.textContent = o ? "ย่อ ▴" : "ขยาย ▾"; });
     on("adName", "input", e => { const v = e.target.value, w = ROOT.querySelector("#adWarn"); const hit = nameKey(v).length >= 4 && D.candidates.find(x => sameName(x.name, v));
@@ -293,8 +298,8 @@
 .cd-card{background:#fff;border:1px solid var(--line,#e3e6ea);border-radius:14px;padding:16px 18px;margin-bottom:14px}.cd-card h2{margin:2px 0 6px;font-size:21px}.cd-card h3{margin:0 0 10px;font-size:15px}
 .cd-err,.bad{color:#c92a2a}.muted{color:#8a9099}.sub{font-size:12px;color:#8a9099}.pre{white-space:pre-wrap;text-align:left!important;font-size:12.5px;max-width:280px}
 .cd-note{background:var(--blush);border-radius:10px;padding:9px 12px;margin-bottom:12px;font-size:13px}
-.cd-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}.cd-tile{display:grid;grid-template-columns:auto 1fr;column-gap:10px;align-items:center;background:#fff;border:1px solid var(--line,#e3e6ea);border-radius:14px;padding:12px 14px}
-.cd-tile i{grid-row:span 2;font-style:normal;font-size:20px;width:40px;height:40px;display:grid;place-items:center;background:var(--blush);border-radius:12px}.cd-tile b{font-size:23px;line-height:1}.cd-tile span{font-size:12px;color:#6b7280}.t-new b{color:var(--rak)}.t-warn b{color:#d9480f}.t-ok b{color:#2b8a3e}
+.cd-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}.cd-tile{font:inherit;color:inherit;text-align:left;cursor:pointer;transition:border-color .15s,box-shadow .15s;display:grid;grid-template-columns:auto 1fr;column-gap:10px;align-items:center;background:#fff;border:1px solid var(--line,#e3e6ea);border-radius:14px;padding:12px 14px}
+.cd-tile i{grid-row:span 2;font-style:normal;font-size:20px;width:40px;height:40px;display:grid;place-items:center;background:var(--blush);border-radius:12px}.cd-tile b{font-size:23px;line-height:1}.cd-tile:hover{border-color:var(--rak-line)}.cd-tile.on{border-color:var(--rak);box-shadow:0 0 0 2px var(--blush-2)}.cd-tile span{font-size:12px;color:#6b7280}.t-new b{color:var(--rak)}.t-warn b{color:#d9480f}.t-ok b{color:#2b8a3e}
 .cd-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}.cd-bar input,.cd-bar select,.cd-lab select,.cd-lab textarea{padding:8px 11px;border:1px solid #d6dae0;border-radius:9px;font:inherit;font-size:13.5px;background:#fff}.cd-bar input[type=search]{flex:1 1 260px;max-width:420px}
 .cd-btn{display:inline-block;padding:8px 15px;border-radius:9px;border:1px solid var(--rak);background:var(--rak);color:#fff;font:inherit;font-size:13.5px;cursor:pointer;text-decoration:none;white-space:nowrap}.cd-btn:hover{background:var(--rak-dark)}
 .cd-btn.ghost{background:#fff;color:var(--ink,#1f2328);border-color:#d6dae0}.cd-btn.ghost:hover{background:var(--blush);border-color:var(--rak-line)}.cd-btn.sm{padding:5px 11px;font-size:12.5px}.cd-btn.danger{color:#c92a2a}
