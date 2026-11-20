@@ -274,9 +274,10 @@
   const courseI = c => (COURSE[c.course] || COURSE.OTHER)[2];
   const CERT_RENEW = [["", "—"], ["planned", "ต้องต่อ · รอนัด"], ["booked", "นัดอบรมแล้ว"], ["done", "ต่ออายุแล้ว"]];
   const CERT_RENEW_L = Object.fromEntries(CERT_RENEW);
-  const CERT_LEAD_DAYS = 90;   // renew this many days before expiry when the sheet has no วันที่ต้องต่อ
+  const CERT_LEAD_MONTHS = 3;   // วันที่ต้องต่อ is filled automatically this many months before expiry (จป can change it)
+  const certAutoDue = exp => { const e = parse(exp); if (!e) return ""; return iso(addMonths(e, -CERT_LEAD_MONTHS)); };
   const thNorm = s => String(s || "").normalize("NFC").replace(/^\s*(นางสาว|น\.ส\.|นาย|นาง|Mr\.?|Ms\.?|Mrs\.?)\s*/i, "").replace(/([ั-ฺ็-๎])\1+/g, "$1").replace(/\s+/g, " ").trim();
-  function certDue(c) { if (c.no_expiry || !c.expiry) return null; if (c.renew_due) return c.renew_due; const e = parse(c.expiry); e.setDate(e.getDate() - CERT_LEAD_DAYS); return iso(e); }
+  function certDue(c) { if (c.no_expiry || !c.expiry) return null; if (c.renew_due) return c.renew_due; return certAutoDue(c.expiry); }
   function certSt(c) {   // → [key, label, css]
     if (c.status === "resign") return ["resign", "ลาออก", "st-none"];
     const e = parse(c.expiry), t = today();
@@ -312,7 +313,7 @@
       const n = s => cs.filter(c => certSt(c)[0] === s).length;
       return `<tr class="stm-click" data-href="#site-team/certs/${k}"><th><a href="#site-team/certs/${k}">${ic} ${esc(l)}</a></th><td class="n">${cs.length}</td><td class="n ok">${n("ok") + n("unk") || ""}</td><td class="n warn">${n("due") || ""}</td><td class="n bad">${n("exp") || ""}</td></tr>`; }).join("");
     const due = live.filter(c => ["due", "exp"].includes(certSt(c)[0]) && c.renew_status !== "done").length;
-    return `<div class="stm-card c-cert"><h3><i>🎓</i>Certificate</h3>${rows ? `<table class="stm-t"><thead><tr><th>หลักสูตร</th><th class="n">ใบ</th><th class="n">ใช้ได้</th><th class="n" title="ถึงวันที่ต้องต่อ (${CERT_LEAD_DAYS} วันก่อนหมดอายุ)">ต้องต่อ</th><th class="n">หมดแล้ว</th></tr></thead><tbody>${rows}</tbody></table>
+    return `<div class="stm-card c-cert"><h3><i>🎓</i>Certificate</h3>${rows ? `<table class="stm-t"><thead><tr><th>หลักสูตร</th><th class="n">ใบ</th><th class="n">ใช้ได้</th><th class="n" title="ถึงวันที่ต้องต่อ (${CERT_LEAD_MONTHS} เดือนก่อนหมดอายุ)">ต้องต่อ</th><th class="n">หมดแล้ว</th></tr></thead><tbody>${rows}</tbody></table>
       ${due ? `<p class="bad sub">⚠️ ต้องต่ออายุ / หมดแล้ว ${due} ใบ — ติดตามกับ จป.</p>` : ""}` : `<p class="stm-empty">📜 ยังไม่มีข้อมูล Certificate</p>`}<a class="stm-more" href="#site-team/certs">ดู Certificate ทั้งหมด →</a></div>`;
   }
   function vCerts() {
@@ -334,6 +335,7 @@
     // 2) renewals: due / expired, not resigned — worked with จป
     const ren = rows.filter(x => x.c.status !== "resign" && x.c.renew_status !== "done" && ["due", "exp"].includes(certSt(x.c)[0]) && (!S.cc || x.c.course === S.cc) && match(x.c.holder_name, x.r))
       .sort((a, b) => String(certDue(a.c) || a.c.expiry || "").localeCompare(String(certDue(b.c) || b.c.expiry || "")));
+    const noExp = rows.filter(x => x.c.status !== "resign" && x.c.renew_status !== "done" && !x.c.no_expiry && !x.c.expiry && x.c.status !== "registered" && (!S.cc || x.c.course === S.cc) && match(x.c.holder_name, x.r));
     const soon = rows.filter(x => x.c.status !== "resign" && certSt(x.c)[0] === "ok" && x.c.expiry && (!S.cc || x.c.course === S.cc) && parse(certDue(x.c)) <= addMonths(t, 6)).length;
     const bar = `<div class="stm-bar2"><input type="search" id="stQ" placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัส" value="${esc(S.q)}">
         <select id="stCc"><option value="">ทุกหลักสูตร</option>${COURSES.map(([k, l, ic]) => `<option value="${k}"${S.cc === k ? " selected" : ""}>${ic} ${esc(l)}</option>`).join("")}</select>
@@ -348,6 +350,8 @@
           <td>${ce ? `<select data-crs="${c.id}">${CERT_RENEW.map(([k, t2]) => `<option value="${k}"${(c.renew_status || "") === k ? " selected" : ""}>${t2}</option>`).join("")}</select>` : esc(CERT_RENEW_L[c.renew_status || ""] || "")}</td>
           <td>${ce ? `<input type="date" data-crd="${c.id}" value="${esc(c.renew_date || "")}">` : fmt(c.renew_date)}</td><td>${esc(c.renew_note || c.note || "")}</td>${ce ? `<td><button class="stm-lnk" data-a="cert-edit" data-id="${c.id}">แก้ไข</button></td>` : ""}</tr>`; }).join("")}
         </tbody></table></div>` : `<p class="stm-empty">🎉 ไม่มี Certificate ที่ต้องต่ออายุตอนนี้</p>`}</div>
+      ${noExp.length ? `<details class="stm-card c-cert stm-noexp"><summary><b>📝 ยังไม่ได้ใส่วันหมดอายุ ${noExp.length} ใบ</b> <span class="sub">— ให้ จป. ใส่วันหมดอายุ ระบบจะตั้งวันที่ต้องต่อ ${CERT_LEAD_MONTHS} เดือนก่อนหมดให้อัตโนมัติ และเตือนเมื่อถึงกำหนด</span></summary>
+        <div class="stm-vchips" style="margin-top:8px">${noExp.map(({ c, r }) => `<button class="stm-cchip st-none" ${ce ? `data-a="cert-edit" data-id="${c.id}"` : "disabled"} title="${esc(c.cert_no || "")}">${courseI(c)} ${esc(courseL(c))} · ${esc(r ? label(r) : thNorm(c.holder_name))}</button>`).join("")}</div></details>` : ""}
       <div class="stm-card stm-cmatcard${S.cFull ? " stm-full" : ""}"><h3>ตารางทักษะ — ใครมี Certificate อะไร <span class="muted">(${ppl.length + outsiders.length} คน)</span>
           <button class="stm-btn ghost stm-fullbtn" data-a="cmat-full">${S.cFull ? "✕ ออกจากเต็มจอ" : "⛶ ขยายเต็มจอ"}</button></h3>${S.cFull ? bar : ""}
         <p class="sub">✓ เขียว ใช้ได้ · ✓ เทา ไม่ระบุวันหมดอายุ · ⏰ ถึงเวลาต่อ · ✕ หมดอายุ — ${ce ? "กดที่ช่องเพื่อแก้ไข" : "เลือกหลักสูตรด้านบนเพื่อดูเฉพาะคนที่มี"}</p>
@@ -365,7 +369,7 @@
       <label class="wide">ผู้ถือ Certificate *<input id="cHolder" list="cPeople" value="${esc(hit ? hit.name_th : thNorm(c.holder_name || ""))}" placeholder="พิมพ์ชื่อ (เลือกจากรายชื่อ Site Team ได้)"><datalist id="cPeople">${ps.map(r => `<option value="${esc(r.name_th)}">${esc((r.nick ? r.nick + " · " : "") + r.unit)}</option>`).join("")}</datalist></label>
       ${f("cNo", "เลขที่ Cer.", c.cert_no)}${f("cIssue", "เริ่มใช้ Cer.", c.issue, "date")}${f("cExp", "วันหมดอายุ", c.expiry, "date")}
       <label class="stm-ck"><input type="checkbox" id="cNoExp"${c.no_expiry ? " checked" : ""}> ไม่มีหมดอายุ</label>
-      ${f("cDue", "วันที่ต้องต่อ (ว่าง = " + CERT_LEAD_DAYS + " วันก่อนหมด)", c.renew_due, "date")}${f("cReview", "Cer. ทบทวน", c.review_date, "date")}
+      ${f("cDue", "วันที่ต้องต่อ (อัตโนมัติ " + CERT_LEAD_MONTHS + " เดือนก่อนหมด · จป แก้ได้)", c.renew_due || certAutoDue(c.expiry), "date")}${f("cReview", "Cer. ทบทวน", c.review_date, "date")}
       ${sel("cSt", "สถานะ", [["active", "Active"], ["registered", "ขึ้นทะเบียน"], ["expired", "Expired Certificate"], ["resign", "Resign (ลาออก)"]], c.status)}
       <label class="wide">ลิงก์ Cer. (Google Drive)<input id="cLink" value="${esc(c.link || "")}"></label>
       <label class="wide">หมายเหตุ<input id="cNote" value="${esc(c.note || "")}"></label>
@@ -375,6 +379,8 @@
     </div><div class="stm-acts"><button class="stm-btn" data-a="c-save">บันทึก</button>${c.id ? ` <button class="stm-btn danger" data-a="c-del">ลบ</button>` : ""} <button class="stm-btn ghost" data-a="c-close">ยกเลิก</button></div></div>`;
     document.body.appendChild(m);
     const v = id => m.querySelector("#" + id).value.trim();
+    let autoDue = c.renew_due ? "" : certAutoDue(c.expiry);   // keep following the expiry until จป types their own date
+    m.querySelector("#cExp").addEventListener("change", () => { const d = m.querySelector("#cDue"); if (!d.value || d.value === autoDue) { autoDue = certAutoDue(v("cExp")); d.value = autoDue; } });
     m.addEventListener("click", async e => {
       const a = e.target.closest("[data-a]")?.dataset.a; if (e.target === m || a === "c-close") return m.remove();
       if (a === "c-del") { if (!confirm("ลบ Certificate นี้?")) return; try { await post("cert-delete", { id: c.id }); D.certs = D.certs.filter(x => x.id !== c.id); m.remove(); draw(); toast("ลบแล้ว"); } catch (x) { toast(x.message, 1); } return; }
@@ -766,6 +772,7 @@ select.warn{border-color:#fab005}select.bad{border-color:#fa5252}
 .stm-cmat td,.stm-cmat th{vertical-align:middle}.stm-cmat th.stm-ch,.stm-cmat td.stm-cx{text-align:center!important;width:96px;min-width:84px;padding-left:4px!important;padding-right:4px!important}
 .stm-cdot{display:flex;align-items:center;justify-content:center;margin:0 auto;width:30px;height:30px;padding:0;border-radius:9px;border:0;font-weight:700;cursor:pointer;font-size:14px;line-height:1}.stm-cdot:disabled{cursor:default}
 .muted-row td{color:#868e96}
+.stm-noexp summary{cursor:pointer;list-style:none}.stm-noexp button.stm-cchip{border:0;cursor:pointer;font:inherit;font-size:11.5px}
 .stm-cmatcard h3{flex-wrap:wrap}.stm-fullbtn{margin-left:auto;font-size:12.5px;padding:6px 12px}
 .stm-cmatwrap{overflow:auto;max-height:72vh;border-radius:10px}
 .stm-cmat thead th{position:sticky;top:0;z-index:2;background:#fdf2f8;box-shadow:0 1px 0 #f1d5e3}
