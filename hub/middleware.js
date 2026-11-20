@@ -1413,7 +1413,7 @@ async function stAwardedJobs(cfg) {
 // Certificates (site_team_certs, database/site_team-004.sql): SC / PC / SSM plus จป อิ๋ม (นิภาพร ฝางคนรัก) may edit (Dew, 18 Nov 2026)
 const CERT_EDIT = { usernames: ['nipaporn.f'], namesTh: ['นิภาพร ฝางคนรัก'] };
 const canEditCert = (prof) => canEditManpower(prof) || CERT_EDIT.usernames.includes(String(prof.username || '').toLowerCase()) || CERT_EDIT.namesTh.includes(thKey(prof.nameTh));
-const CERT_COURSES = ['SO_PRO', 'SO_MGR', 'SO_SUP', 'SAFE6', 'CONFINED', 'CRANE_FIXED', 'CRANE_MOBILE', 'SCAFFOLD', 'HEIGHT', 'ELECTRIC', 'FORKLIFT', 'FIRE_BASIC', 'OTHER'];
+const CERT_COURSES = ['SO_PRO', 'SO_MGR', 'SO_SUP', 'SAFE6', 'CONFINED', 'CRANE_FIXED', 'CRANE_MOBILE', 'SCAFFOLD', 'HEIGHT', 'ELECTRIC', 'FORKLIFT', 'REACH_TRUCK', 'FIRE_BASIC', 'OTHER'];
 function certClean(d) {
   const o = {
     course: CERT_COURSES.includes(String(d.course || '')) ? String(d.course) : 'OTHER', course_name: mpStr(d.course_name, 120) || null,
