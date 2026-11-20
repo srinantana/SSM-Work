@@ -205,6 +205,7 @@ body[data-menu="punch-list"] .content,body[data-menu="punch-list"]>:not(#shell){
 body[data-menu="service-plan"] .content,body[data-menu="service-plan"]>:not(#shell){--rak:#7c3aed;--rak-dark:#6d28d9;--blush:#f5f3ff;--blush-2:#ddd6fe;--rak-line:#c4b5fd}
 body[data-menu="manpower"] .content,body[data-menu="manpower"]>:not(#shell){--rak:#0891b2;--rak-dark:#0e7490;--blush:#ecfeff;--blush-2:#a5f3fc;--rak-line:#67e8f9}
 body[data-menu="site-team"] .content,body[data-menu="site-team"]>:not(#shell){--rak:#db2777;--rak-dark:#be185d;--blush:#fdf2f8;--blush-2:#fbcfe8;--rak-line:#f9a8d4}
+body[data-menu="team-tracking"] .content,body[data-menu="team-tracking"]>:not(#shell){--rak:#0f766e;--rak-dark:#115e59;--blush:#f0fdfa;--blush-2:#99f6e4;--rak-line:#5eead4}
 body[data-menu="candidates"] .content,body[data-menu="candidates"]>:not(#shell){--rak:#4338ca;--rak-dark:#3730a3;--blush:#eef2ff;--blush-2:#c7d2fe;--rak-line:#a5b4fc}
 body[data-menu="qa-tools"] .content,body[data-menu="qa-tools"]>:not(#shell){--rak:#65a30d;--rak-dark:#4d7c0f;--blush:#f7fee7;--blush-2:#d9f99d;--rak-line:#bef264}
 body[data-menu="manual"] .content,body[data-menu="manual"]>:not(#shell){--rak:#a16207;--rak-dark:#854d0e;--blush:#fefce8;--blush-2:#fde68a;--rak-line:#fcd34d}
@@ -224,6 +225,8 @@ body[data-menu="manual"] .content,body[data-menu="manual"]>:not(#shell){--rak:#a
   <symbol id="i-team" viewBox="0 0 24 24"><circle class="d" cx="9" cy="9" r="3.4"/><path class="d" d="M3 19.5a6 6 0 0 1 12 0z"/><circle class="s" cx="9" cy="9.6" r="2.8"/><path class="s" d="M5.6 8.4a3.4 3.4 0 0 1 6.8 0zM9 4.6v.9M3 19.5a6 6 0 0 1 12 0M16 7.2a2.6 2.6 0 1 1 0 5.2M17.2 14.4a5 5 0 0 1 3.8 5.1"/></symbol>
   <!-- Site Team: passport -->
   <!-- Candidates: person + clipboard -->
+  <!-- Team Tracking: checklist -->
+  <symbol id="i-todo" viewBox="0 0 24 24"><rect class="d" x="3.5" y="3.5" width="17" height="17" rx="3"/><rect class="s" x="3.5" y="3.5" width="17" height="17" rx="3"/><path class="s" d="M7 8.5l1.4 1.4L11 7.3M13 8.5h4.5M7 14.5l1.4 1.4L11 13.3M13 14.5h4.5"/></symbol>
   <symbol id="i-cand" viewBox="0 0 24 24"><rect class="d" x="4" y="4" width="13" height="17" rx="2.2"/><rect class="s" x="4" y="4" width="13" height="17" rx="2.2"/><path class="s" d="M8 3h5v3H8zM7.5 10.5h6M7.5 14h4"/><circle class="s" cx="17.5" cy="15.5" r="2.4"/><path class="s" d="M13.8 21c.5-1.9 2-3 3.7-3s3.2 1.1 3.7 3"/></symbol>
   <!-- QA Tools: caliper + check -->
   <symbol id="i-caliper" viewBox="0 0 24 24"><path class="d" d="M4 4h4v16H4z"/><path class="s" d="M4 4h4v16H4zM8 6h12v4H8M12 10v4M10 10v3M14 10v3M5.8 7v2M5.8 11v2M5.8 15v2"/><path class="s" d="M14.5 17.2l1.8 1.8 3.4-3.6"/></symbol>
@@ -270,6 +273,7 @@ body[data-menu="manual"] .content,body[data-menu="manual"]>:not(#shell){--rak:#a
 <script src="/qa-tools/app.js?v=20261120o"></script>
 <script src="/candidates/fit.js?v=20261120c"></script>
 <script src="/candidates/app.js?v=20261120h"></script>
+<script src="/team-tracking/app.js?v=20261120a"></script>
 <script src="/manual/app.js?v=20261120d"></script>
 <script>
 "use strict";
@@ -295,6 +299,8 @@ const MODULES = [
      plan:["แจ้งเตือนสอบเทียบใกล้ครบ / ยืมเกินกำหนด ทาง LINE หรืออีเมล","รายงานสอบเทียบประจำปีสำหรับ ISO audit"]},
   {id:"candidates",  icon:"i-cand", live:true, beta:true, name:"SSM Candidates", th:"รับสมัครคนเข้าทีม · แบบทดสอบ",       desc:"ลิงก์สมัครสาธารณะให้ผู้สมัครทำแบบทดสอบ · แนบ CV / Resume · ให้คะแนนตามเกณฑ์ · ติดตามสถานะจนรับเข้าทำงาน",
      plan:["นัดสัมภาษณ์ลง Google Calendar","แจ้งเตือนเมื่อมีผู้สมัครใหม่","รับเข้าทำงานแล้วส่งชื่อเข้า Manpower / Site Team"]},
+  {id:"team-tracking", icon:"i-todo", live:true, beta:true, name:"Team Tracking", th:"งานติดตามของทีม · To-do",   desc:"งานจุกจิกของทีม — เอกสาร แผนงาน Estimate Report · ใครทำ เสร็จเมื่อไหร่ · งานซ้ำรายสัปดาห์ · ข้อความเตือนส่ง LINE",
+     plan:["แจ้งเตือนอัตโนมัติเมื่อใกล้ครบกำหนด (อีเมล / LINE)","ผูกงานกับ Service Plan / Job"]},
   // Manual stays the LAST menu: open to every signed-in user, always sorted to the bottom (see visibleModules).
   {id:"manual",      icon:"i-book",    live:true, always:true, name:"คู่มือการใช้งาน", th:"คู่มือ SSM Work",       desc:"วิธีใช้งาน SSM Work ทีละเมนู · เข้าระบบ เปลี่ยนรหัสผ่าน และสิทธิ์การใช้งาน"},
 ];
@@ -310,6 +316,7 @@ const TONES = {
   "site-team":    ["#db2777", "#fdf2f8", "#fbcfe8"],
   "qa-tools":     ["#65a30d", "#f7fee7", "#d9f99d"],
   "candidates":   ["#4338ca", "#eef2ff", "#c7d2fe"],
+  "team-tracking": ["#0f766e", "#f0fdfa", "#99f6e4"],
   "manual":       ["#a16207", "#fefce8", "#fde68a"],
 };
 const tone = id => { const t = TONES[id]; return t ? ` style="--mc:${t[0]};--mt:${t[1]};--md:${t[2]}"` : ""; };
@@ -421,8 +428,9 @@ function render(){
   const st = id === "site-team" && ME !== null && allowed(id) && window.SiteTeam;
   const qa = id === "qa-tools" && ME !== null && allowed(id) && window.QATools;
   const cd = id === "candidates" && ME !== null && allowed(id) && window.Candidates;
+  const tt = id === "team-tracking" && ME !== null && allowed(id) && window.TeamTracking;
   const mn = id === "manual" && ME !== null && window.Manual;
-  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : mn ? hero(m) + `<div id="mnRoot"></div>` : sp ? (subRoute() ? "" : hero(m)) + `<div id="spRoot"></div>` : se ? (subRoute() ? "" : hero(m)) + `<div id="seRoot"></div>` : pu ? (subRoute() ? "" : hero(m)) + `<div id="puRoot"></div>` : pl ? `<div id="plRoot" class="spc-root"></div>` : mp ? `<div id="mpRoot" class="mp-root"></div>` : st ? hero(m) + `<div id="stRoot"></div>` : qa ? hero(m) + `<div id="qaRoot"></div>` : cd ? hero(m) + `<div id="cdRoot"></div>` : allowed(id) ? pageModule(m) : pageDenied(m))
+  document.getElementById("content").innerHTML = (id === "home" ? pageHome() : ME === null ? `<div class="empty">กำลังโหลด…</div>` : mn ? hero(m) + `<div id="mnRoot"></div>` : sp ? (subRoute() ? "" : hero(m)) + `<div id="spRoot"></div>` : se ? (subRoute() ? "" : hero(m)) + `<div id="seRoot"></div>` : pu ? (subRoute() ? "" : hero(m)) + `<div id="puRoot"></div>` : pl ? `<div id="plRoot" class="spc-root"></div>` : mp ? `<div id="mpRoot" class="mp-root"></div>` : st ? hero(m) + `<div id="stRoot"></div>` : qa ? hero(m) + `<div id="qaRoot"></div>` : cd ? hero(m) + `<div id="cdRoot"></div>` : tt ? hero(m) + `<div id="ttRoot"></div>` : allowed(id) ? pageModule(m) : pageDenied(m))
     + `<div class="foot"><span>RAK Engineering Co., Ltd. · Site &amp; Service Management</span><span>${REG.updated ? "อัปเดตรายการ " + esc(REG.updated) : ""}</span></div>`;
   renderNav();
   if (sp) window.SparePart.mount(document.getElementById("spRoot"), subRoute());
@@ -433,6 +441,7 @@ function render(){
   if (st) window.SiteTeam.mount(document.getElementById("stRoot"), subRoute());
   if (qa) window.QATools.mount(document.getElementById("qaRoot"), subRoute());
   if (cd) window.Candidates.mount(document.getElementById("cdRoot"), subRoute());
+  if (tt) window.TeamTracking.mount(document.getElementById("ttRoot"), subRoute());
   if (mn) window.Manual.mount(document.getElementById("mnRoot"), subRoute());
   const q = document.getElementById("q");
   if (q) q.addEventListener("input", () => { document.getElementById("list").innerHTML = customerBlocks(rows(), q.value.trim().toLowerCase()); });

@@ -129,6 +129,7 @@ const MENUS = [
   { id: 'site-team', name: 'Site Team' },
   { id: 'qa-tools', name: 'QA Tools' },
   { id: 'candidates', name: 'SSM Candidates' },
+  { id: 'team-tracking', name: 'Team Tracking' },
 ];
 const MENU_IDS = MENUS.map((m) => m.id);
 function menuOfPath(path) {
@@ -140,6 +141,7 @@ function menuOfPath(path) {
   if (path.startsWith('/site-team/') || path.startsWith('/api/site-team/')) return 'site-team';
   if (path.startsWith('/qa-tools/') || path.startsWith('/api/qa-tools/')) return 'qa-tools';
   if (path.startsWith('/candidates/') || path.startsWith('/api/candidates/')) return 'candidates';
+  if (path.startsWith('/team-tracking/') || path.startsWith('/api/team-tracking/')) return 'team-tracking';
   const m = path.match(/^\/customers\/[^/]+\/[^/]+\/([^/]+)/);
   if (!m) return null; // not a tool page
   return MENU_IDS.find((id) => m[1].startsWith(id)) || '__admin';
@@ -1107,6 +1109,85 @@ async function readMasterProjects(cfg) {
     return { table: t, rows };
   }
   return { table: null, rows: [] };
+}
+
+// ---------- Team Tracking: small to-dos of the team (เอกสาร แผนงาน estimate report) — who, what, by when ----------
+// Table tt_tasks (database/team_tracking.sql). Anyone with the menu adds a to-do for themselves or a teammate who has
+// the menu; the assignee, the person who created it, and admins can update it. A repeating to-do (daily / weekly /
+// monthly) creates its next occurrence when it is marked done.
+const TT = '/rest/v1/tt_tasks';
+const TT_CAT = ['doc', 'plan', 'estimate', 'report', 'other'], TT_STATUS = ['todo', 'doing', 'done', 'cancelled'], TT_REPEAT = ['', 'daily', 'weekly', 'monthly'];
+let TT_PEOPLE = { at: 0, list: null };
+async function ttPeople(cfg) {             // users who can open the menu (5-minute cache)
+  if (TT_PEOPLE.list && Date.now() - TT_PEOPLE.at < 300000) return TT_PEOPLE.list;
+  const users = await listUsers(cfg);
+  const list = users.filter((u) => !u.banned_until || Date.parse(u.banned_until) < Date.now()).map((u) => profileOf(cfg, u))
+    .filter((p) => p.username && canOpen(p, 'team-tracking')).map((p) => ({ username: p.username, name: p.name || p.username, nameTh: p.nameTh || '' }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'th'));
+  TT_PEOPLE = { at: Date.now(), list };
+  return list;
+}
+const ttNext = (due, rep) => { const d = new Date((due || new Date().toISOString().slice(0, 10)) + 'T00:00:00Z');
+  if (rep === 'daily') d.setUTCDate(d.getUTCDate() + 1); else if (rep === 'weekly') d.setUTCDate(d.getUTCDate() + 7); else d.setUTCMonth(d.getUTCMonth() + 1);
+  return d.toISOString().slice(0, 10); };
+async function ttApi(cfg, req, url, prof) {
+  const p = url.pathname.slice('/api/team-tracking/'.length);
+  const who = prof.username || prof.email, whoName = prof.name || prof.nameTh || who, admin = prof.role === 'admin';
+  const H = { ...authHeaders(cfg.service), prefer: 'return=representation' };
+  if (req.method === 'GET' && p === 'data') {
+    const since = new Date(Date.now() - 45 * 864e5).toISOString();
+    const [people, tasks] = await Promise.all([ttPeople(cfg).catch(() => []), restAll(cfg, `${TT}?select=*&or=(status.in.(todo,doing),done_at.gt.${since})&order=due.asc.nullslast,id.asc`)]);
+    if (!tasks) return json({ error: 'no_table' }, 503);
+    return json({ me: { username: who, name: whoName, admin }, people, tasks });
+  }
+  if (req.method !== 'POST') return json({ error: 'method' }, 405);
+  let d; try { d = await req.json(); } catch { return json({ error: 'json' }, 400); }
+  const now = new Date().toISOString();
+  const one = async (id) => { const r = await restAll(cfg, `${TT}?select=*&id=eq.${Number(id) || 0}`); return r && r[0]; };
+  const may = (t) => admin || t.assignee === who || t.created_by === who;
+  if (p === 'task') {
+    const people = await ttPeople(cfg).catch(() => []);
+    const id = Number(d.id) || 0, old = id ? await one(id) : null;
+    if (id && !old) return json({ error: 'ไม่พบงาน' }, 404);
+    if (old && !may(old)) return json({ error: 'แก้ได้เฉพาะคนสั่งงานหรือคนรับงาน' }, 403);
+    const row = { title: mpStr(d.title, 200), detail: mpStr(d.detail, 2000) || null, category: TT_CAT.includes(d.category) ? d.category : 'other',
+      job_no: mpStr(d.job_no, 40) || null, customer: mpStr(d.customer, 120) || null, due: ISO_DAY.test(String(d.due || '')) ? d.due : null,
+      priority: d.priority === 'high' ? 'high' : 'normal', repeat: TT_REPEAT.includes(d.repeat) ? d.repeat : '', updated_at: now };
+    if (!row.title) return json({ error: 'ใส่ชื่องาน' }, 400);
+    const asg = mpStr(d.assignee, 80) || (old ? old.assignee : who);
+    const pp = people.find((x) => x.username === asg);
+    if (!pp && asg !== who) return json({ error: 'คนนี้ยังไม่มีสิทธิ์เมนู Team Tracking' }, 400);
+    row.assignee = asg; row.assignee_name = pp ? pp.name : whoName;
+    const r = id ? await fetch(`${cfg.url}${TT}?id=eq.${id}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) })
+                 : await fetch(cfg.url + TT, { method: 'POST', headers: H, body: JSON.stringify({ ...row, created_by: who, created_by_name: whoName, status: 'todo' }) });
+    return r.ok ? json({ ok: true, task: (await r.json())[0] }) : json({ error: 'supabase' }, 502);
+  }
+  const t = await one(d.id); if (!t) return json({ error: 'ไม่พบงาน' }, 404);
+  if (!may(t)) return json({ error: 'แก้ได้เฉพาะคนสั่งงานหรือคนรับงาน' }, 403);
+  if (p === 'status') {
+    if (!TT_STATUS.includes(d.status)) return json({ error: 'status' }, 400);
+    const r = await fetch(`${cfg.url}${TT}?id=eq.${t.id}`, { method: 'PATCH', headers: H, body: JSON.stringify({ status: d.status, done_at: d.status === 'done' ? now : null, updated_at: now }) });
+    if (!r.ok) return json({ error: 'supabase' }, 502);
+    let next = null;
+    if (d.status === 'done' && t.status !== 'done' && t.repeat) {
+      const n = await fetch(cfg.url + TT, { method: 'POST', headers: H, body: JSON.stringify({ title: t.title, detail: t.detail, category: t.category, job_no: t.job_no, customer: t.customer,
+        assignee: t.assignee, assignee_name: t.assignee_name, created_by: t.created_by, created_by_name: t.created_by_name, due: ttNext(t.due, t.repeat), priority: t.priority, repeat: t.repeat, status: 'todo' }) });
+      if (n.ok) next = (await n.json())[0];
+    }
+    return json({ ok: true, task: (await r.json())[0], next });
+  }
+  if (p === 'note') {
+    const text = mpStr(d.text, 1000); if (!text) return json({ error: 'ใส่ข้อความ' }, 400);
+    const notes = [...(t.notes || []), { at: now, by: whoName, text }].slice(-50);
+    const r = await fetch(`${cfg.url}${TT}?id=eq.${t.id}`, { method: 'PATCH', headers: H, body: JSON.stringify({ notes, updated_at: now }) });
+    return r.ok ? json({ ok: true, task: (await r.json())[0] }) : json({ error: 'supabase' }, 502);
+  }
+  if (p === 'delete') {
+    if (!admin && t.created_by !== who) return json({ error: 'ลบได้เฉพาะคนสร้างงาน' }, 403);
+    const r = await fetch(`${cfg.url}${TT}?id=eq.${t.id}`, { method: 'DELETE', headers: authHeaders(cfg.service) });
+    return r.ok ? json({ ok: true }) : json({ error: 'supabase' }, 502);
+  }
+  return json({ error: 'not found' }, 404);
 }
 
 // ---------- Candidates: public written test (/apply, no login) + internal review / scoring ----------
@@ -2893,6 +2974,14 @@ export default async function middleware(req) {
     if (!live) return json({ error: 'login required' }, 401);
     if (!canOpen(live, 'punch-list')) return json({ error: 'no access' }, 403);
     try { return await punchApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
+  }
+
+  if (path.startsWith('/api/team-tracking/')) {
+    if (!signedIn) return json({ error: 'login required' }, 401);
+    const live = await liveProfile(cfg, user);
+    if (!live) return json({ error: 'login required' }, 401);
+    if (!canOpen(live, 'team-tracking')) return json({ error: 'no access' }, 403);
+    try { return await ttApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
   }
 
   if (path.startsWith('/api/candidates/')) {
