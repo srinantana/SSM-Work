@@ -51,9 +51,25 @@ test('one character different → new applicant', async () => {
   assert.deepEqual(rows[0].answers, {});
 });
 
-test('title prefix is not stripped (exact match)', async () => {
-  await submit('นายวิสุธรรม แก้วเกษ');
-  assert.equal(rows.length, 2);
+for (const n of ['นายวิสุธรรม แก้วเกษ', 'นาย วิสุธรรม แก้วเกษ', 'Mr. วิสุธรรม แก้วเกษ']) {
+  test(`title prefix is ignored: ${n}`, async () => {
+    await submit(n);
+    assert.equal(rows.length, 1);
+    assert.deepEqual(rows[0].answers, { 1: 'a1', 2: 'a2' });
+  });
+}
+
+test('prefix on the pre-created name is ignored too (นางสาว / น.ส.)', async () => {
+  rows[0].name = 'นางสาว สมหญิง ใจดี';
+  await submit('น.ส.สมหญิง ใจดี');
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].answers, { 1: 'a1', 2: 'a2' });
+});
+
+test('นางสาว is not read as นาง + สาว…', async () => {
+  rows[0].name = 'สาวิตรี ใจดี';
+  await submit('นางสาวิตรี ใจดี');   // นาง + สาวิตรี → matches; documented: longest prefix first
+  assert.equal(rows.length, 1);
 });
 
 test('pre-created row with the same phone does not block the submission', async () => {

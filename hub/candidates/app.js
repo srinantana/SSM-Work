@@ -29,7 +29,10 @@
   const isNew = c => !(c.seen_by || []).includes(me().username);
   const daysLeft = c => ["rejected", "withdrawn"].includes(c.status) ? Math.max(0, D.keepDays - Math.floor((Date.now() - new Date(c.status_at)) / 864e5)) : null;
   const pending = c => !Object.keys(c.answers || {}).length;   // สร้างจาก CV แล้ว รอผู้สมัครทำแบบทดสอบ
-  const nameKey = s => String(s ?? "").normalize("NFC").replace(/[\s\u200B-\u200D\u2060\uFEFF]/g, "");
+  const PREFIXES = ["นางสาว", "น.ส.", "นส.", "นาง", "นาย", "mrs.", "mr.", "ms."];   // same rule as candNameKeys in middleware
+  const nameKeys = s => { const k = String(s ?? "").normalize("NFC").replace(/[\s\u200B-\u200D\u2060\uFEFF]/g, ""); return [k, ...PREFIXES.filter(p => k.toLowerCase().startsWith(p) && k.length > p.length).map(p => k.slice(p.length))]; };
+  const nameKey = s => nameKeys(s)[0];
+  const sameName = (a, b) => { const A = nameKeys(a); return nameKeys(b).some(k => A.includes(k)); };
   const fileHref = f => f.url || "/api/candidates/file?p=" + encodeURIComponent(f.p);
 
   async function load(force) {
@@ -88,7 +91,7 @@
   // ---------- เพิ่มผู้สมัครจาก CV ก่อนทำแบบทดสอบ — คำตอบเข้าชื่อนี้เมื่อชื่อ-นามสกุลตรงกันทุกตัวอักษร (ไม่นับเว้นวรรค) ----------
   function vAdd() {
     return `<div class="cd-card cd-add"><h3>+ เพิ่มผู้สมัครจาก CV (ก่อนทำแบบทดสอบ)</h3>
-      <p class="sub">เมื่อผู้สมัครส่งแบบทดสอบด้วย <b>ชื่อ-นามสกุลที่ตรงกันทุกตัวอักษร</b> (ไม่นับเว้นวรรค) คำตอบจะเข้ามาอยู่ในชื่อนี้อัตโนมัติ — พิมพ์ชื่อให้ตรงกับที่ผู้สมัครจะกรอก ไม่ใส่คำนำหน้า (นาย / นางสาว)</p>
+      <p class="sub">เมื่อผู้สมัครส่งแบบทดสอบด้วย <b>ชื่อ-นามสกุลที่ตรงกันทุกตัวอักษร</b> (ไม่นับเว้นวรรค และไม่นับคำนำหน้า นาย / นาง / นางสาว) คำตอบจะเข้ามาอยู่ในชื่อนี้อัตโนมัติ</p>
       <div class="cd-addg"><label class="cd-lab">ชื่อ-นามสกุล *<input id="adName" placeholder="เช่น วิสุธรรม แก้วเกษ"></label>
         <label class="cd-lab">เบอร์โทร<input id="adPhone" inputmode="tel"></label><label class="cd-lab">อีเมล<input id="adEmail" type="email"></label><label class="cd-lab">LINE<input id="adLine"></label>
         ${D.tests.length > 1 ? `<label class="cd-lab">ตำแหน่ง<select id="adTest">${D.tests.map(t => `<option value="${t.id}">${esc(t.title)}</option>`).join("")}</select></label>` : ""}
@@ -102,6 +105,8 @@
   const fitPct = c => { const r = c.fit && (c.fit.roles || []).find(x => x.k === "sitecontrol"); return r ? r.pct : null; };
   const fitCls = p => p >= 70 ? "ok" : p >= 50 ? "mid" : "low";
   const FIT_TXT = {};   // unsaved CV text per candidate
+  const FOLD_KEY = "ssm.cand.fitOpen";   // ย่อ / ขยาย — remembered per browser
+  const fitOpen = () => { try { return localStorage.getItem(FOLD_KEY) !== "0"; } catch { return true; } };
   function vFit(c) {
     const m = me(), F = window.CandFit, f = c.fit;
     const txt = FIT_TXT[c.id] ?? c.cv_text ?? "";
@@ -112,13 +117,14 @@
         ${(f.dims || []).map(d => `<tr><td>${esc(d.name)}</td><td class="n"><span class="cd-fitn ${fitCls(d.score)}">${d.score}</span></td><td>${(d.hits || []).map(h => `<span class="cd-kw">${esc(h)}</span>`).join(" ") || `<span class="sub">ไม่พบ</span>`}</td></tr>`).join("")}</tbody></table>
         ${(f.gaps || []).length ? `<div class="cd-fitgap"><b>❓ ด้านที่ CV ยังไม่แสดง — คำถามแนะนำตอนสัมภาษณ์</b><ul>${f.gaps.map(g => `<li><b>${esc(g.name)}:</b> ${esc(g.ask)}</li>`).join("")}</ul><button class="cd-btn ghost sm" data-a="fit-ask">↳ ใส่ลงช่อง “ข้อกังวลและคำถามสำหรับสัมภาษณ์” ของฉัน</button></div>` : ""}
       </div>` : `<p class="muted">ยังไม่ได้วิเคราะห์</p>`;
-    return `<div class="cd-card"><h3>🧭 ความเข้ากันได้เบื้องต้น — CV × โครงสร้าง SSM</h3>
+    const sc = fitPct(c), open = fitOpen();
+    return `<details class="cd-card cd-fold" id="cdFit"${open ? " open" : ""}><summary><h3>🧭 ความเข้ากันได้เบื้องต้น — CV × โครงสร้าง SSM</h3>${sc !== null ? `<span class="cd-fitn ${fitCls(sc)}">Site Control ${sc}%</span>` : `<span class="sub">ยังไม่ได้วิเคราะห์</span>`}<span class="cd-foldt">${open ? "ย่อ ▴" : "ขยาย ▾"}</span></summary>
       <p class="sub">เทียบคำใน CV กับ 7 ด้านงานของ SSM (คุมงานติดตั้ง · Service · วางแผน/Manday · ประสานงาน · เอกสาร/ERP · Safety/SAT · เทคนิค) แล้วให้น้ำหนักตาม 3 บทบาท — ใช้คัดกรองเบื้องต้น ไม่แทนแบบทดสอบและการสัมภาษณ์</p>
       ${res}
       ${m.canEdit ? `<details class="cd-prompt"${f ? "" : " open"}><summary>${f ? "แก้ข้อความ CV / วิเคราะห์ใหม่" : "วางข้อความจาก CV เพื่อวิเคราะห์"}</summary>
         <p class="sub">CV ใน Google Drive: เปิดไฟล์ → “เปิดด้วย Google เอกสาร” (อ่านตัวหนังสือจาก PDF/รูปให้) → คัดลอกทั้งหมดมาวางที่นี่ · ตรวจคำที่อ่านเพี้ยนก่อนกดวิเคราะห์</p>
         <textarea id="cdCv" rows="8" style="width:100%;padding:8px 11px;border:1px solid #d6dae0;border-radius:9px;font:inherit;font-size:13.5px" placeholder="วางข้อความ CV / Resume ที่นี่ — ประวัติงาน ช่วงปี หน้าที่ ทักษะ">${esc(txt)}</textarea>
-        <div class="cd-bar" style="margin-top:6px"><button class="cd-btn sm" data-a="fit-run"${F ? "" : " disabled"}>🧭 วิเคราะห์และบันทึก</button>${f ? ` <button class="cd-btn ghost sm danger" data-a="fit-clear">ล้างผล</button>` : ""}<span class="sub" id="cdCvN"></span></div></details>` : f ? "" : `<p class="sub">ดิว / นุ่น เป็นผู้วาง CV เพื่อวิเคราะห์</p>`}</div>`;
+        <div class="cd-bar" style="margin-top:6px"><button class="cd-btn sm" data-a="fit-run"${F ? "" : " disabled"}>🧭 วิเคราะห์และบันทึก</button>${f ? ` <button class="cd-btn ghost sm danger" data-a="fit-clear">ล้างผล</button>` : ""}<span class="sub" id="cdCvN"></span></div></details>` : f ? "" : `<p class="sub">ดิว / นุ่น เป็นผู้วาง CV เพื่อวิเคราะห์</p>`}</details>`;
   }
 
   function vCand() {
@@ -145,7 +151,7 @@
         ${m.canEdit ? `<div class="cd-addg"><label class="cd-lab">ชื่อ-นามสกุล (ใช้จับคู่กับแบบทดสอบ)<input id="edName" value="${esc(c.name)}"></label><label class="cd-lab">เบอร์โทร<input id="edPhone" value="${esc(c.phone || "")}"></label><label class="cd-lab">อีเมล<input id="edEmail" value="${esc(c.email || "")}"></label><label class="cd-lab">LINE<input id="edLine" value="${esc(c.line_id || "")}"></label></div>
           <label class="cd-lab">โน้ตของทีมสรรหา<textarea id="cdNote" rows="2">${esc(c.note || "")}</textarea></label><button class="cd-btn ghost sm" data-a="save-note">บันทึกชื่อ / ติดต่อ / โน้ต</button>` : c.note ? `<div class="cd-note">${esc(c.note)}</div>` : ""}</div>
       ${vFit(c)}
-      ${pending(c) ? `<div class="cd-trial"><div>⏳ <b>ยังไม่ได้ทำแบบทดสอบ</b> — ส่งลิงก์ <b>${esc(location.origin)}/apply/</b> ให้ผู้สมัคร เมื่อเขาส่งด้วยชื่อ-นามสกุล “${esc(c.name)}” (ตรงทุกตัวอักษร ไม่นับเว้นวรรค) คำตอบจะเข้ามาที่หน้านี้อัตโนมัติ</div>${m.canEdit ? `<button class="cd-btn ghost sm" data-a="copy" data-link="${esc(location.origin)}/apply/">📋 คัดลอกลิงก์</button>` : ""}</div>` : ""}
+      ${pending(c) ? `<div class="cd-trial"><div>⏳ <b>ยังไม่ได้ทำแบบทดสอบ</b> — ส่งลิงก์ <b>${esc(location.origin)}/apply/</b> ให้ผู้สมัคร เมื่อเขาส่งด้วยชื่อ-นามสกุล “${esc(c.name)}” (ตรงทุกตัวอักษร ไม่นับเว้นวรรคและคำนำหน้า) คำตอบจะเข้ามาที่หน้านี้อัตโนมัติ</div>${m.canEdit ? `<button class="cd-btn ghost sm" data-a="copy" data-link="${esc(location.origin)}/apply/">📋 คัดลอกลิงก์</button>` : ""}</div>` : ""}
       ${rb.scale ? `<details class="cd-card cd-guide"><summary>📏 วิธีให้คะแนน (สำหรับผู้สัมภาษณ์เท่านั้น)</summary><p>${esc(rb.note || "")}</p><p>ให้คะแนนข้อละ 20 คะแนน แบ่งเป็น 4 ด้าน ด้านละ 5 คะแนน: ${esc((rb.dims || []).join(" · "))}</p><ul>${rb.scale.map(x => `<li>${esc(x)}</li>`).join("")}</ul>${rb.usage ? `<p class="sub">${esc(rb.usage)}</p>` : ""}</details>` : ""}
       ${qs.map(q => { const r = (rb.questions || []).find(x => x.no === q.no) || {}; const sc = mine.scores[q.no] || [];
         return `<div class="cd-card cd-q"><div class="cd-qh"><div><span class="sub">ข้อ ${q.no} · ${q.points || 20} คะแนน</span><h3>${esc(q.title)}</h3></div><div class="cd-qt"><b>${sumQ(q.no)}</b> / 20</div></div>
@@ -199,7 +205,8 @@
     on("cdQ", "input", e => { S.q = e.target.value; draw(); const q = ROOT.querySelector("#cdQ"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); });
     on("cdSt", "change", e => { S.st = e.target.value; draw(); });
     on("cdTest", "change", e => { S.test = e.target.value; draw(); });
-    on("adName", "input", e => { const k = nameKey(e.target.value), w = ROOT.querySelector("#adWarn"); const hit = k.length >= 4 && D.candidates.find(x => nameKey(x.name) === k);
+    on("cdFit", "toggle", e => { const o = e.target.open; try { localStorage.setItem(FOLD_KEY, o ? "1" : "0"); } catch {} const t = e.target.querySelector(".cd-foldt"); if (t) t.textContent = o ? "ย่อ ▴" : "ขยาย ▾"; });
+    on("adName", "input", e => { const v = e.target.value, w = ROOT.querySelector("#adWarn"); const hit = nameKey(v).length >= 4 && D.candidates.find(x => sameName(x.name, v));
       w.innerHTML = hit ? `⚠️ มีชื่อนี้แล้ว: <a href="#candidates/c/${hit.id}">${esc(hit.name)}</a>${pending(hit) ? " (รอทำแบบทดสอบ)" : " (ส่งแบบทดสอบแล้ว)"}` : ""; });
     ROOT.querySelectorAll("tr[data-go]").forEach(r => r.addEventListener("click", e => { if (!e.target.closest("a")) location.hash = "#candidates/c/" + r.dataset.go; }));
     ROOT.querySelectorAll("[data-a]").forEach(b => b.addEventListener("click", () => act(b.dataset.a, b.dataset)));
@@ -310,6 +317,8 @@
 .cd-qr{width:150px;text-align:center}.cd-qr svg{width:150px;height:150px}
 .cd-trial{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:#fff4e6;border:1px solid #ffd8a8;color:#a14b00;border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:13.5px}
 .cd-log{padding:5px 0;border-bottom:1px solid #f1f3f5}
+.cd-fold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.cd-fold>summary::-webkit-details-marker{display:none}.cd-fold>summary h3{margin:0}.cd-fold[open]>summary{margin-bottom:10px}
+.cd-foldt{margin-left:auto;font-size:12.5px;color:var(--rak);border:1px solid var(--rak-line);border-radius:8px;padding:3px 10px;background:#fff}.cd-fold>summary:hover .cd-foldt{background:var(--blush)}
 .cd-addg{display:grid;align-items:end;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:4px 12px}.cd-addg input,.cd-addg select{padding:8px 11px;border:1px solid #d6dae0;border-radius:9px;font:inherit;font-size:13.5px;color:var(--ink,#1f2328)}.cd-add{border-left:4px solid var(--rak)}#adWarn{color:#d9480f;margin:4px 0 8px}
 .cd-fit{display:flex;flex-direction:column;gap:12px;margin:8px 0}.cd-fitroles{display:flex;flex-direction:column;gap:7px}.cd-fitrole{display:grid;grid-template-columns:minmax(150px,240px) 1fr 52px;gap:10px;align-items:center;font-size:13.5px}.cd-fitrole.main span{font-weight:600}.cd-fitrole b{text-align:right}
 .cd-fitbar{height:10px;background:#f1f3f5;border-radius:999px;overflow:hidden}.cd-fitbar i{display:block;height:100%;border-radius:999px}.cd-fitbar i.ok{background:#2b8a3e}.cd-fitbar i.mid{background:#f08c00}.cd-fitbar i.low{background:#adb5bd}
