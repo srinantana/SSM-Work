@@ -1368,13 +1368,13 @@ async function qaApi(cfg, req, url, prof) {
 // added here who is not on the board. Editors = Manpower editors (SC / PC / SSM). Everyone else with the menu sees names,
 // teams and expiry dates only: national ID, passport no. and birth date are removed before the response leaves the server.
 const ST_FIELDS = ['emp_code', 'name_en', 'name_th', 'sex', 'nationality', 'national_id', 'birth_date', 'passport_no', 'passport_issue', 'passport_expiry',
-  'passport_file', 'visa_note', 'renewal_status', 'renewal_cost', 'renewal_note', 'insurance_type', 'insurance_policy', 'insurance_start', 'insurance_expiry', 'note', 'active', 'team', 'visas'];
-const ST_PRIVATE = ['national_id', 'birth_date', 'passport_no', 'passport_issue', 'insurance_policy', 'passport_file', 'sex'];
+  'passport_file', 'visa_note', 'renewal_status', 'renewal_cost', 'renewal_note', 'insurance_type', 'insurance_policy', 'insurance_file', 'insurance_start', 'insurance_expiry', 'note', 'active', 'team', 'visas'];
+const ST_PRIVATE = ['national_id', 'birth_date', 'passport_no', 'passport_issue', 'insurance_policy', 'insurance_file', 'passport_file', 'sex'];
 const stDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
 function stClean(d) {
   const o = {};
   const str = (k, n) => { if (k in d) o[k] = mpStr(d[k], n) || null; };
-  str('emp_code', 20); str('name_en', 120); str('name_th', 120); str('passport_file', 400); str('visa_note', 300); str('renewal_note', 300); str('insurance_policy', 80); str('note', 500);
+  str('emp_code', 20); str('name_en', 120); str('name_th', 120); str('passport_file', 400); str('visa_note', 300); str('renewal_note', 300); str('insurance_policy', 80); str('insurance_file', 400); str('note', 500);
   if ('sex' in d) o.sex = ['M', 'F'].includes(String(d.sex || '').toUpperCase()) ? String(d.sex).toUpperCase() : null;
   if ('nationality' in d) o.nationality = mpStr(d.nationality, 3).toUpperCase() || 'THA';
   if ('national_id' in d) { const v = String(d.national_id || '').replace(/\D/g, ''); if (v && v.length !== 13) throw new Error('เลขบัตรประชาชนต้องมี 13 หลัก'); o.national_id = v || null; }
@@ -1394,9 +1394,9 @@ function stClean(d) {
 // Writes to site_team_people; if a newer column is not there yet (database/site_team-002 / -003.sql not run), retry without it.
 async function stWrite(u, method, H, row) {
   let r = await fetch(u, { method, headers: H, body: JSON.stringify(row) });
-  for (let i = 0; i < 4 && !r.ok && r.status === 400; i++) {
+  for (let i = 0; i < 5 && !r.ok && r.status === 400; i++) {
     const t = await r.clone().text().catch(() => '');
-    const col = ['team', 'visas', 'kind', 'status', 'insurance_start'].find((k) => k in row && new RegExp(`'${k}'|"${k}"|\\b${k}\\b`).test(t));
+    const col = ['team', 'visas', 'kind', 'status', 'insurance_start', 'insurance_file'].find((k) => k in row && new RegExp(`'${k}'|"${k}"|\\b${k}\\b`).test(t));
     if (!col) break;
     const { [col]: _drop, ...rest } = row; row = rest;
     r = await fetch(u, { method, headers: H, body: JSON.stringify(row) });
