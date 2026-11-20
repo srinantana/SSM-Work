@@ -26,7 +26,7 @@
   const RENEW_L = Object.fromEntries(RENEW);
   const INS = [["", "—"], ["trip", "รายเที่ยว"], ["annual", "รายปี"]];
   const INS_L = Object.fromEntries(INS);
-  const TABS = [["", "🏠 ภาพรวม"], ["people", "👷 รายชื่อทีม"], ["renew", "🔄 ต่ออายุ Passport"], ["visas", "🛂 วีซ่า"], ["certs", "🎓 Certificate"], ["trips", "✈️ เดินทางต่างประเทศ"]];
+  const TABS = [["", "🏠 ภาพรวม"], ["people", "👷 รายชื่อทีม"], ["renew", "🔄 ต่ออายุ Passport"], ["visas", "🛂 วีซ่า"], ["certs", "🎓 Certificate"], ["insurance", "🛡️ ประกันเดินทาง"], ["trips", "✈️ เดินทางต่างประเทศ"]];
   const TRAVEL_MONTHS = 6;   // most countries need the passport valid ≥ 6 months after the return date
   const RENEW_MONTHS = 9;    // flag for renewal this early: a Thai passport takes ~1–2 weeks plus the trip to an office
 
@@ -140,7 +140,7 @@
     if (ERR) { ROOT.innerHTML = `<div class="stm-card stm-err">${esc(ERR)}</div>`; return; }
     if (!D) { ROOT.innerHTML = `<div class="stm-card">กำลังโหลด…</div>`; return; }
     const note = D.canEdit ? "" : `<div class="stm-note">คุณเห็นชื่อ ทีม และวันหมดอายุเท่านั้น — เลขบัตรประชาชน เลข Passport และวันเกิด ดูได้เฉพาะ SC / PC / SSM</div>`;
-    const page = { "": vDash, people: vPeople, renew: vRenew, visas: vVisas, certs: vCerts, trips: vTrips, import: vImport }[S.page] || vDash;
+    const page = { "": vDash, people: vPeople, renew: vRenew, visas: vVisas, certs: vCerts, insurance: vIns, trips: vTrips, import: vImport }[S.page] || vDash;
     ROOT.innerHTML = tabs() + note + page();
     bind();
   }
@@ -178,6 +178,40 @@
     const soon = vr.filter(x => x.st === "soon" || x.st === "exp").length;
     return `<div class="stm-card c-visa"><h3><i>🛂</i>วีซ่า</h3>${rows ? `<table class="stm-t"><thead><tr><th>ประเทศ</th><th class="n">คน</th><th class="n">ใช้ได้</th><th class="n" title="เหลือ &lt; ${VISA_SOON} เดือน">ใกล้หมด</th><th class="n">หมดแล้ว</th></tr></thead><tbody>${rows}</tbody></table>
       ${soon ? `<p class="bad sub">⚠️ ใกล้หมด / หมดแล้ว ${soon} รายการ</p>` : ""}` : `<p class="stm-empty">🗺️ ยังไม่มีข้อมูลวีซ่า<br><span class="sub">ใส่ได้ที่ รายชื่อทีม → แก้ไข → + เพิ่มวีซ่า</span></p>`}<a class="stm-more" href="#site-team/visas">ดูวีซ่าทั้งหมด →</a></div>`;
+  }
+  /* travel insurance — annual policies per person + who still needs per-trip cover for upcoming trips */
+  const INS_SOON_DAYS = 60;
+  function insSt(p) {   // annual policy status today → [key, label, css]
+    if (p.insurance_type !== "annual" || !p.insurance_expiry) return null;
+    const t = today(), s = parse(p.insurance_start), e = parse(p.insurance_expiry);
+    if (e < t) return ["exp", "หมดอายุแล้ว", "st-bad"];
+    if (s && s > t) return ["future", "เริ่ม " + fmt(p.insurance_start), "st-none"];
+    const d = Math.round((e - t) / 864e5);
+    return d <= INS_SOON_DAYS ? ["soon", "เหลือ " + d + " วัน", "st-warn"] : ["ok", "Active · เหลือ " + d + " วัน", "st-ok"];
+  }
+  function vIns() {
+    const ce = D.canEdit, now = iso(today()), q = S.q.toLowerCase();
+    const ppl = people().filter(r => r.active && (!S.unit || r.unit === S.unit) && (!q || [r.name_th, r.name_en, r.nick, r.code].some(v => String(v || "").toLowerCase().includes(q))));
+    const ann = ppl.map(r => ({ r, st: insSt(r.p) })).filter(x => x.st).sort((a, b) => String(a.r.p.insurance_expiry).localeCompare(String(b.r.p.insurance_expiry)));
+    const n = k => ann.filter(x => x.st[0] === k).length;
+    const trips = D.trips.filter(t => (t.date_to || t.date_from || "") >= now).sort((a, b) => String(a.date_from || "").localeCompare(String(b.date_from || "")));
+    const tRows = trips.map(t => { const ps = tripPeople(t); return { t, ps, need: ps.filter(r => !(annualCover(r.p, t) || {}).ok) }; });
+    const needN = tRows.reduce((s, x) => s + x.need.length, 0);
+    const tiles = [["มีประกันรายปี (Active)", n("ok") + n("soon"), "ok", "🛡️"], ["ใกล้หมด (≤ " + INS_SOON_DAYS + " วัน)", n("soon"), "warn", "⏰"], ["หมดอายุแล้ว", n("exp"), "bad", "⛔"], ["ต้องซื้อรายเที่ยว (ทริปที่จะถึง)", needN, "all", "🧾"]];
+    return `<div class="stm-tiles">${tiles.map(([l, v, k, ic]) => `<div class="stm-tile t-${k}"><i>${ic}</i><div><b>${v}</b><span>${l}</span></div></div>`).join("")}</div>
+      <div class="stm-bar2"><input type="search" id="stQ" placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัส" value="${esc(S.q)}">
+        <select id="stU"><option value="">ทุกทีม</option>${UNITS.map(([u, l]) => `<option value="${u}"${S.unit === u ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
+        <span class="muted">ใส่ / แก้ประกันได้ที่ปุ่มแก้ไขของแต่ละคน (ประกันเดินทาง · เลขกรมธรรม์ · เริ่ม · หมดอายุ)</span></div>
+      <div class="stm-card c-ins"><h3><i>🛡️</i>ประกันเดินทางรายปี <span class="muted">(${ann.length} คน)</span></h3>
+        ${ann.length ? `<div class="stm-scroll"><table class="stm-t"><thead><tr><th>ชื่อ</th><th>Name (ตาม Passport)</th><th>ทีม</th>${ce ? "<th>เลขกรมธรรม์</th>" : ""}<th>เริ่ม</th><th>หมดอายุ</th><th>สถานะ</th>${ce ? "<th></th>" : ""}</tr></thead><tbody>
+        ${ann.map(({ r, st }) => `<tr><td>${esc(label(r))}<div class="sub">${esc(r.code || "")}</div></td><td>${esc(r.p.name_en || r.name_en || "")}</td><td>${unitBadge(r.unit)}</td>${ce ? `<td class="mono">${esc(r.p.insurance_policy || "—")}</td>` : ""}
+          <td>${fmt(r.p.insurance_start)}</td><td>${fmt(r.p.insurance_expiry)}</td><td><span class="stm-st ${st[2]}">${st[1]}</span></td>${ce ? `<td><button class="stm-lnk" data-a="edit" data-k="${esc(r.key)}">แก้ไข</button></td>` : ""}</tr>`).join("")}
+        </tbody></table></div>` : `<p class="stm-empty">🛡️ ยังไม่มีใครมีประกันรายปี</p>`}</div>
+      <div class="stm-card c-trip"><h3><i>✈️</i>ทริปที่กำลังจะถึง — ใครต้องซื้อประกันรายเที่ยว</h3>
+        ${tRows.length ? tRows.map(({ t, ps, need }) => `<div class="stm-trip">${tripLine(t)}
+          ${ps.length ? `<div class="stm-vchips" style="margin-top:6px">${ps.map(r => { const a = annualCover(r.p, t); return `<span class="stm-cchip ${a && a.ok ? "st-ok" : "st-warn"}" title="${esc(a ? a.l : "ไม่มีประกันรายปี")}">${a && a.ok ? "🛡️" : "🧾"} ${esc(label(r))}</span>`; }).join("")}</div>
+          <p class="sub">${need.length ? `<b class="bad">ต้องซื้อรายเที่ยว ${need.length} คน</b>` : "✅ ทุกคนมีประกันรายปีครอบคลุมแล้ว"} · 🛡️ มีรายปี ${ps.length - need.length} คน</p>` : `<p class="sub muted">ยังไม่ได้เลือกคน</p>`}
+          <div class="stm-acts">${ce ? `<button class="stm-lnk" data-a="trip-xlsx" data-id="${t.id}">⬇ รายชื่อทำประกัน (Excel)</button>` : ""}</div></div>`).join("") : `<p class="stm-empty">🧳 ยังไม่มีทริปที่กำลังจะถึง</p>`}</div>`;
   }
   function vVisas() {
     const ce = D.canEdit, all = visaRows(), cs = [...new Set(all.map(x => x.country))].sort();
@@ -671,6 +705,7 @@
 select.warn{border-color:#fab005}select.bad{border-color:#fa5252}
 .stm-modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;z-index:200;overflow:auto;padding:40px 12px}.stm-dlg{background:#fff;border-radius:14px;padding:18px 20px;max-width:860px;width:100%}.stm-dlg h3{margin:0 0 12px}
 .stm-qv{margin-top:10px;padding:10px 12px;background:#fafbfc;border:1px solid #eef0f3;border-radius:12px;overflow:auto}.stm-qv .stm-t{margin-bottom:6px}
+.stm-grid .stm-card.c-ins,.stm-card.c-ins{border-top:4px solid #339af0}.c-ins h3 i{background:#e7f5ff}
 /* certificates */
 .stm-grid .stm-card.c-cert,.stm-card.c-cert{border-top-color:#f06595}.c-cert h3 i{background:#fff0f6}
 .stm-cchip{display:inline-flex;gap:3px;align-items:center;font-size:11px;padding:1px 7px;border-radius:999px;white-space:nowrap}
