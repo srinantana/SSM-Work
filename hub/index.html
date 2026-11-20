@@ -270,7 +270,7 @@ const icon = (id, cls="ic") => `<svg class="${cls}" aria-hidden="true"><use href
 /* Menu. Add a module here, then tag its tools in registry.json with "module": "<id>". */
 const MODULES = [
   {id:"home",        icon:"i-home",    name:"Home",         th:"ภาพรวม",                  desc:"ลูกค้า โปรเจค และเครื่องมือทั้งหมดของ SSM"},
-  {id:"site-expense",icon:"i-expense", beta:true, name:"Site Expense", th:"ประเมินค่าใช้จ่ายหน้างาน",  desc:"Dashboard Budget vs Actual · Estimate จาก SOW → Budgetary · บันทึก Actual รายวันจากหน้างาน",
+  {id:"site-expense",icon:"i-expense", live:true, name:"Site Expense", th:"ประเมินค่าใช้จ่ายหน้างาน",  desc:"Dashboard Budget vs Actual · Estimate จาก SOW → Budgetary · บันทึก Actual รายวันจากหน้างาน",
      plan:["Dashboard: Budget vs Actual ค้นหาด้วย Project no.","Estimate จาก Scope of Work → อนุมัติ → เปิด Job → Budgetary","Actual record: ทีมหน้างานบันทึกค่าใช้จ่ายรายวัน"]},
   {id:"spare-part",  icon:"i-gear",    live:true, name:"Spare Part",   th:"รายการอะไหล่แนะนำ",        desc:"รายการอะไหล่แนะนำให้ลูกค้า แยกตามระบบ อ้างอิง P&ID และ Aux list",
      plan:["สร้างรายการอะไหล่จาก P&ID + Aux list + BOM","จุดใช้งานตาม P&ID และข้อมูลผู้ผลิต","Export Excel ตามแบบฟอร์มลูกค้า"]},
