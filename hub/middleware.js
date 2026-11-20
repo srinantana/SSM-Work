@@ -1081,6 +1081,8 @@ async function readMasterProjects(cfg) {
 // Tables qa_tools, qa_tool_loans, qa_tool_cals, qa_tool_log + private bucket 'qa-tools' (database/qa_tools.sql).
 // Roles (set by Dew, 20 Nov 2026): custodian อาร์ต sakkamon.c — register, photos / documents, receive returns, calibration;
 // approver ดิว nantana.s — approves calibration results and retiring a tool (and can do everything the custodian does).
+// Calibration flow (20 Nov 2026): sent → result recorded → pending_verify → internal verification by the QA Engineer
+// (FM-QA-10 บันทึกผลการทวนสอบเครื่องมือวัด, stored in qa_tool_cals.verify) → pending_approval → approved / rejected.
 // Anyone with the menu can view the register and borrow / ask to return a tool themselves.
 const QA_MANAGE = { usernames: ['sakkamon.c', 'nantana.s'], namesTh: ['ศักดิ์กมล จันทริมา', 'นันทนา ศรีสกุลเตียว'] };
 const QA_APPROVE = { usernames: ['nantana.s'], namesTh: ['นันทนา ศรีสกุลเตียว'] };
@@ -1248,20 +1250,38 @@ async function qaApi(cfg, req, url, prof) {
     const calDate = qaDay(d.cal_date); if (!calDate) return json({ error: 'ใส่วันที่สอบเทียบ' }, 400);
     const result = ['pass', 'adjusted', 'fail'].includes(d.result) ? d.result : null; if (!result) return json({ error: 'เลือกผลการสอบเทียบ' }, 400);
     const row = { cal_date: calDate, cert_no: mpStr(d.cert_no, 80) || null, result, next_due: qaDay(d.next_due) || (result === 'fail' ? null : addMonthsIso(calDate, t.cal_interval_m || 12)),
-      cost: qaNum(d.cost), lab: mpStr(d.lab, 120) || null, docs: qaFiles(d.docs, who), note: mpStr(d.note, 500) || null, status: 'pending_approval', updated_at: now };
+      cost: qaNum(d.cost), lab: mpStr(d.lab, 120) || null, docs: qaFiles(d.docs, who), note: mpStr(d.note, 500) || null, status: 'pending_verify', updated_at: now };
     const id = Number(d.id) || 0;
-    const r = id ? await rest(`${QA_C}?id=eq.${id}&tool_id=eq.${t.id}&status=in.(sent,rejected,pending_approval)`, 'PATCH', row)
+    const r = id ? await rest(`${QA_C}?id=eq.${id}&tool_id=eq.${t.id}&status=in.(sent,rejected,pending_verify,pending_approval)`, 'PATCH', row)
                  : await rest(QA_C, 'POST', { ...row, tool_id: t.id, sent_date: qaDay(d.sent_date), created_by: who });
     if (!r.ok || !r.data || !r.data[0]) return json({ error: 'บันทึกไม่สำเร็จ' }, 502);
     if (t.status !== 'calibration') await setTool(t.id, { status: 'calibration' });
-    log(t.id, 'บันทึกผลสอบเทียบ (รออนุมัติ)', `${{ pass: 'ผ่าน', adjusted: 'ปรับตั้งแล้วผ่าน', fail: 'ไม่ผ่าน' }[result]} · ${calDate}${row.cert_no ? ' · ใบรับรอง ' + row.cert_no : ''}`);
+    log(t.id, 'บันทึกผลสอบเทียบ (รอทวนสอบ)', `${{ pass: 'ผ่าน', adjusted: 'ปรับตั้งแล้วผ่าน', fail: 'ไม่ผ่าน' }[result]} · ${calDate}${row.cert_no ? ' · ใบรับรอง ' + row.cert_no : ''}`);
     return json({ ok: true, cal: r.data[0] });
+  }
+  if (p === 'cal-verify') {                             // QA Engineer (custodian) — internal verification, form FM-QA-10
+    if (!manage) return json({ error: 'ทวนสอบได้เฉพาะ QA Engineer / ผู้ดูแลเครื่องมือ' }, 403);
+    const cr = await rest(`${QA_C}?id=eq.${Number(d.id) || 0}&select=*`, 'GET'); const c = cr.ok && cr.data && cr.data[0];
+    if (!c || !['pending_verify', 'pending_approval', 'rejected'].includes(c.status) || !c.cal_date) return json({ error: 'ไม่พบรายการที่รอทวนสอบ' }, 404);
+    const v = d.verify || {}, date = qaDay(v.date); if (!date) return json({ error: 'ใส่วันที่ดำเนินการ' }, 400);
+    const points = (Array.isArray(v.points) ? v.points : []).slice(0, 40).map((x) => ({ pt: mpStr(x.pt, 60), err: mpStr(x.err, 60), unc: mpStr(x.unc, 60), mpe: mpStr(x.mpe, 60), ok: x.ok === true ? true : x.ok === false ? false : null }))
+      .filter((x) => x.pt || x.err || x.unc || x.mpe);
+    if (!points.length) return json({ error: 'ใส่จุดสอบเทียบอย่างน้อย 1 จุด' }, 400);
+    if (points.some((x) => x.ok === null)) return json({ error: 'เลือกผล ผ่าน / ไม่ผ่าน ให้ครบทุกจุด' }, 400);
+    const verify = { no: mpStr(v.no, 30), date, ref_cert: mpStr(v.ref_cert, 80) || c.cert_no || '', criteria: mpStr(v.criteria, 300), points,
+      note: mpStr(v.note, 1000), protect: mpStr(v.protect, 1000), by: who, name: whoName, position: mpStr(v.position, 80) || 'วิศวกรประกันคุณภาพ', at: now };
+    const r = await rest(`${QA_C}?id=eq.${c.id}`, 'PATCH', { verify, status: 'pending_approval', approved_by: null, approved_at: null, approve_note: null, updated_at: now });
+    if (!r.ok) return json({ error: r.status === 400 ? 'ยังไม่มีช่องทวนสอบ — ให้ Admin รัน database/qa_tools-002.sql' : 'บันทึกไม่สำเร็จ' }, 502);
+    const fails = points.filter((x) => !x.ok).length;
+    log(c.tool_id, 'ทวนสอบผลสอบเทียบ (รออนุมัติ)', `${verify.no ? 'Verify No. ' + verify.no + ' · ' : ''}${points.length} จุด · ${fails ? 'ไม่ผ่าน ' + fails + ' จุด' : 'ผ่านทุกจุด'}`);
+    return json({ ok: true });
   }
   if (p === 'cal-approve') {                            // approver
     if (!approve) return json({ error: 'อนุมัติได้เฉพาะผู้อนุมัติ' }, 403);
     const cr = await rest(`${QA_C}?id=eq.${Number(d.id) || 0}&select=*`, 'GET'); const c = cr.ok && cr.data && cr.data[0];
     if (!c || c.status !== 'pending_approval') return json({ error: 'ไม่พบรายการรออนุมัติ' }, 404);
     const ok = d.approve !== false;
+    if (ok && !c.verify) return json({ error: 'ยังไม่ได้ทวนสอบ (FM-QA-10) — ให้ QA Engineer ทวนสอบก่อนอนุมัติ' }, 409);
     await rest(`${QA_C}?id=eq.${c.id}`, 'PATCH', { status: ok ? 'approved' : 'rejected', approved_by: whoName, approved_at: now, approve_note: mpStr(d.note, 300) || null, updated_at: now });
     if (ok) await setTool(c.tool_id, { last_cal_date: c.cal_date, next_cal_due: c.next_due, status: c.result === 'fail' ? 'repair' : 'available' });
     log(c.tool_id, ok ? 'อนุมัติผลสอบเทียบ' : 'ไม่อนุมัติผลสอบเทียบ', (ok ? `ครบกำหนดครั้งถัดไป ${c.next_due || '-'}` : '') + (d.note ? ' · ' + mpStr(d.note, 200) : ''));

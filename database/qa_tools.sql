@@ -68,7 +68,7 @@ create table if not exists public.qa_tool_cals (
   cost            numeric(12,2),
   docs            jsonb not null default '[]'::jsonb,
   note            text,
-  status          text not null default 'sent',  -- sent | pending_approval | approved | rejected
+  status          text not null default 'sent',  -- sent | pending_verify | pending_approval | approved | rejected  (verify: database/qa_tools-002.sql)
   approved_by     text,
   approved_at     timestamptz,
   approve_note    text,
