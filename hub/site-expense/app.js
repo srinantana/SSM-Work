@@ -261,9 +261,9 @@
       amt: r => num(r.lump_qty) * num(r.lump_rate) + num(r.manday_qty) * num(r.manday_rate),
       brief: r => r.title || r.supplier || "–" }],
     transportation: [
-      { kind: "veh", title: "รถขนส่ง / เครน / โฟล์คลิฟท์", hint: "คัน × เที่ยว (หรือวัน) × ราคา + คนให้สัญญาณ × ค่าให้สัญญาณ · ราคาตาม Zone ของ “จังหวัดปลายทาง” · รถ 6/10 ล้อ เทรลเลอร์ คิดต่อเที่ยว · เครน โฟล์คลิฟท์ คิดต่อวัน (รวม mobilization)",
+      { kind: "veh", title: "รถขนส่ง / เครน / โฟล์คลิฟท์", hint: "คัน × เที่ยว (หรือวัน) × ราคา + คนให้สัญญาณ × ค่าให้สัญญาณ × เที่ยว · ราคาตาม Zone ของ “จังหวัดปลายทาง” · รถ 6/10 ล้อ เทรลเลอร์ คิดต่อเที่ยว · เครน โฟล์คลิฟท์ คิดต่อวัน (รวม mobilization)",
         fields: [F("description", "ประเภทรถ", { t: "pick", list: "vehicles", w: 190 }), F("vehicles_qty", "คัน", { w: 60, d: 1 }), F("trips", "เที่ยว/วัน", { w: 70, d: 1 }), F("rate", "ราคา/เที่ยว·วัน", { w: 110 }), F("signal_crew", "คนให้สัญญาณ", { w: 90 }), F("signal_rate", "ค่าให้สัญญาณ", { w: 100, d: MR.signal }), F("note", "หมายเหตุ", { t: "text" })],
-        amt: r => num(r.vehicles_qty) * num(r.trips) * num(r.rate) + num(r.signal_crew) * num(r.signal_rate),
+        amt: r => num(r.vehicles_qty) * num(r.trips) * num(r.rate) + num(r.signal_crew) * num(r.signal_rate) * num(r.trips), // signal crew paid per trip, as in Base44
         brief: r => `${r.description || "–"} ×${num(r.trips) || 0} เที่ยว` }],
     accommodation: [{ kind: "acc", title: "ที่พัก", hint: "ห้อง × คืน (หรือเดือน) × ราคา",
       fields: [F("label", "ที่พัก / ประเภทห้อง", { t: "pick", list: "rooms", w: 220 }), F("billing", "คิดเป็น", { t: "select", opts: [["night", "คืน"], ["month", "เดือน"]], w: 80 }), F("unit_qty", "ห้อง", { w: 64, d: 1 }), F("periods", "คืน / เดือน", { w: 80, d: 1 }), F("rate", "ราคา", { w: 100 }), F("note", "หมายเหตุ", { t: "text" })],
@@ -1173,7 +1173,7 @@
     const owner = { draft: "create", revise: "create", requested: "approve", reviewed: "approve", approved: "award" }[p.status];
     const waitMsg = p.list === "active" && owner && !actions.length ? `<span class="se-hint">ขั้นตอนนี้เป็นของ ${namesWith(owner)} · สลับคนด้านบนเพื่อทดสอบ</span>` : "";
     const hist = p.history.slice().reverse();
-    const ACT = { submit: "ส่งตรวจ", approve: "ผ่าน / อนุมัติ", back: "ส่งกลับแก้", lock: "เปิด Job & ล็อกงบ", award: "Get Award · ผูก Job no. & ล็อก Budget control", duplicate: "Duplicate จากโปรเจคเดิม" };
+    const ACT = { submit: "ส่งตรวจ", approve: "ผ่าน / อนุมัติ", back: "ส่งกลับแก้", lock: "เปิด Job & ล็อกงบ", award: "Get Award · ผูก Job no. & ล็อก Budget control", duplicate: "Duplicate จากโปรเจคเดิม", import: "ย้ายข้อมูลจาก Base44" };
     sec.innerHTML = `
       <div class="se-sec-h"><h3>📝 Estimate · ประเมินจาก Scope of Work</h3>${ed ? `<span class="badge live">แก้ไขได้</span>` : `<span class="badge off">${p.status === "locked" ? "🔒 ล็อกเป็น Budgetary แล้ว" : "อ่านอย่างเดียว"}</span>`}</div>
       ${p.status === "revise" ? `<div class="se-alert">↩ ถูกส่งกลับให้แก้: ${esc((p.history.filter(h => h.action === "back").pop() || {}).note || "-")}</div>` : ""}
