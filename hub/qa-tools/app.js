@@ -178,7 +178,7 @@
         <div class="qa-ring t-${tone(comp)}" style="--p:${comp}"><b>${comp}%</b><span>อยู่ในกำหนด</span></div>
         <div class="qa-legend"><a href="#qa-tools/list" data-a="kpi" data-st="calsoon"><i class="d-warn"></i>ครบใน ${DUE_SOON} วัน <b>${soonN}</b></a><a href="#qa-tools/list" data-a="kpi" data-st="calover"><i class="d-bad"></i>เลยกำหนด <b>${overN}</b></a>${unkN ? `<a href="#qa-tools/cal"><i class="d-off"></i>ไม่มีวันครบ <b>${unkN}</b></a>` : ""}<span><i class="d-ok"></i>ในกำหนด <b>${okN - soonN}</b></span></div>
         <p class="sub">เครื่องมือที่ต้องสอบเทียบ ${num(need.length)} รายการ · เป้าหมาย ≥ 95%</p></div>
-      <div class="qa-card qa-kc"><h3>🏭 ความพร้อมรายแผนก</h3>
+      <div class="qa-card qa-kc"><h3>🏭 ความพร้อมสอบเทียบรายแผนก</h3>
         <table class="qa-kt">${depRows.map(r => `<tr data-a="kpi" data-dept="${esc(r.d === "ไม่ระบุแผนก" ? "" : r.d)}" data-st="calover" title="ดูรายการเลยกำหนดของแผนกนี้"><td>${esc(r.d)}</td><td class="n">${r.n}</td><td class="w">${bar(r.p, 100, "t-" + tone(r.p))}</td><td class="n t-${tone(r.p)}">${r.p}%</td></tr>`).join("") || `<tr><td class="muted">ไม่มีข้อมูล</td></tr>`}</table>
         <p class="sub">จำนวน · % อยู่ในกำหนด — กดแถวเพื่อดูรายการเลยกำหนด</p></div>
       <div class="qa-card qa-kc qa-wide"><h3>📅 ภาระงานสอบเทียบ 12 เดือนข้างหน้า</h3>
