@@ -51,7 +51,9 @@
     if (!D) { ROOT.innerHTML = `<div class="cd-card">กำลังโหลด…</div>`; return; }
     const newN = D.candidates.filter(isNew).length;
     const tabs = `<div class="cd-tabs"><a href="#candidates" class="${S.page !== "tests" ? "on" : ""}">ผู้สมัคร${newN ? ` <b class="cd-dot">${newN}</b>` : ""}</a><a href="#candidates/tests" class="${S.page === "tests" ? "on" : ""}">แบบทดสอบ · ลิงก์สมัคร</a>${me().canEdit ? `<span class="cd-role">ดิว / นุ่น — แก้ไขได้</span>` : ""}</div>`;
-    ROOT.innerHTML = tabs + (S.page === "c" ? vCand() : S.page === "tests" ? vTests() : vList());
+    const trial = D.tests.some(t => t.trial);
+    const banner = trial ? `<div class="cd-trial"><div>🧪 <b>โหมดทดลองใช้</b> — ทดลองส่งแบบทดสอบ ให้คะแนน แนบไฟล์ได้ตามสบาย ข้อมูลทั้งหมดล้างได้ก่อนเปิดใช้งานจริง · หน้าสมัครจะขึ้นป้าย “ทดลองระบบ”</div>${me().canEdit ? `<div><button class="cd-btn ghost sm" data-a="reset">🧹 ล้างข้อมูลทดลองทั้งหมด</button> <button class="cd-btn sm" data-a="golive">🚀 เปิดใช้งานจริง</button></div>` : ""}</div>` : "";
+    ROOT.innerHTML = tabs + banner + (S.page === "c" ? vCand() : S.page === "tests" ? vTests() : vList());
     bind();
   }
 
@@ -187,6 +189,19 @@
     try {
       if (a === "copy") { await navigator.clipboard.writeText(ds.link).then(() => toast("คัดลอกลิงก์แล้ว"), () => prompt("คัดลอกลิงก์นี้", ds.link)); return; }
       if (a === "toggle") { await post("test", { id: +ds.id, open: ds.open === "1" }); await load(true); return toast(ds.open === "1" ? "เปิดรับสมัครแล้ว" : "ปิดรับสมัครแล้ว"); }
+      if (a === "reset") {
+        const n = D.candidates.length;
+        const t = prompt(`ล้างข้อมูลทดลองทั้งหมด: ผู้สมัคร ${n} คน พร้อมคะแนน โน้ต และไฟล์แนบ — ลบแล้วกู้คืนไม่ได้\nพิมพ์ “ล้างข้อมูล” เพื่อยืนยัน`);
+        if (t === null) return; const j = await post("reset", { confirm: t.trim() }); toast(`ล้างแล้ว ${j.deleted} คน`); location.hash = "#candidates"; return load(true);
+      }
+      if (a === "golive") {
+        const n = D.candidates.length;
+        if (n && confirm(`ยังมีข้อมูลทดลอง ${n} คน — ล้างก่อนเปิดใช้งานจริงไหม?\n(OK = ล้างแล้วเปิดใช้จริง · Cancel = ไม่เปิดตอนนี้)`)) { const t = prompt("พิมพ์ “ล้างข้อมูล” เพื่อยืนยันการล้าง"); if (t === null) return; await post("reset", { confirm: t.trim() }); }
+        else if (n) return;
+        if (!confirm("เปิดใช้งานจริง? หลังจากนี้ป้าย “ทดลองระบบ” จะหายจากหน้าสมัคร และล้างข้อมูลทั้งหมดไม่ได้อีก")) return;
+        for (const t of D.tests.filter(x => x.trial)) await post("test", { id: t.id, trial: false });
+        toast("เปิดใช้งานจริงแล้ว 🚀"); return load(true);
+      }
       if (!c) return;
       if (a === "print") return printCand(c);
       if (a === "save-score") { keepText(); const m = myScore(c); const j = await post("score", { id: c.id, scores: m.scores, strengths: m.strengths, concerns: m.concerns });
@@ -228,6 +243,7 @@
 .cd-pts{display:flex;gap:4px}.cd-pts button{flex:1;min-width:30px;padding:6px 0;border:1px solid #d6dae0;background:#fff;border-radius:8px;font:inherit;font-size:13.5px;cursor:pointer}.cd-pts button.on{background:var(--rak);border-color:var(--rak);color:#fff;font-weight:600}
 .cd-link{display:flex;gap:18px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin:10px 0}.cd-url{font:13px ui-monospace,monospace;background:#f6f7f9;border-radius:8px;padding:8px 10px;margin:6px 0 8px;word-break:break-all}
 .cd-qr{width:150px;text-align:center}.cd-qr svg{width:150px;height:150px}
+.cd-trial{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:#fff4e6;border:1px solid #ffd8a8;color:#a14b00;border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:13.5px}
 .cd-log{padding:5px 0;border-bottom:1px solid #f1f3f5}
 .cd-toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#1f2328;color:#fff;padding:10px 16px;border-radius:10px;z-index:300;font-size:13.5px}.cd-toast.bad{background:#c92a2a}
 `;
