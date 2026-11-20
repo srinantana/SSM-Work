@@ -337,10 +337,11 @@
     if (!document.getElementById("mn-css")) {
       const st = document.createElement("style"); st.id = "mn-css"; st.textContent = CSS; document.head.appendChild(st);
     }
-    const list = SECTIONS.filter(s => !s.adminOnly || isAdmin());
+    // only the menus this user can open (plus "เริ่มต้นใช้งาน"); admins see every section
+    const list = SECTIONS.filter(s => (!s.adminOnly || isAdmin()) && canOpen(s));
     const cur = list.some(s => s.id === sub) ? sub : "";
     const chips = `<nav class="mn-chips" aria-label="หัวข้อคู่มือ"><a class="mn-chip" href="#manual" aria-current="${cur ? "false" : "true"}">📖 ทั้งหมด</a>${
-      list.map(s => `<a class="mn-chip" href="#manual/${s.id}" aria-current="${s.id === cur}">${s.emoji} ${esc(s.title)}${canOpen(s) ? "" : ' <span class="lk">🔒</span>'}</a>`).join("")
+      list.map(s => `<a class="mn-chip" href="#manual/${s.id}" aria-current="${s.id === cur}">${s.emoji} ${esc(s.title)}</a>`).join("")
     }</nav>`;
     root.innerHTML = `<div class="mn">${chips}${(cur ? list.filter(s => s.id === cur) : list).map(card).join("")}</div>`;
   }
