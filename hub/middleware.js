@@ -1171,6 +1171,22 @@ async function qaApi(cfg, req, url, prof) {
   if (!d || typeof d !== 'object') return json({ error: 'json' }, 400);
   const now = new Date().toISOString(), today = now.slice(0, 10);
 
+  if (p === 'photos-share') {                           // copy newly added photos to the same item under other codes (custodian confirms which)
+    if (!manage) return json({ error: 'แก้ไขทะเบียนได้เฉพาะผู้ดูแลเครื่องมือ' }, 403);
+    const src = await tool(d.from_id); if (!src) return json({ error: 'ไม่พบเครื่องมือ' }, 404);
+    const add = qaFiles(d.photos, who, 12); if (!add.length) return json({ error: 'ไม่มีรูปที่จะเพิ่ม' }, 400);
+    const ids = [...new Set((Array.isArray(d.ids) ? d.ids : []).map(Number).filter((n) => n > 0 && n !== src.id))].slice(0, 300);
+    const key = (f) => f.url || f.p;
+    let n = 0;
+    for (const id of ids) {
+      const t = await tool(id); if (!t || t.status === 'retired') continue;
+      const have = new Set((t.photos || []).map(key)), fresh = add.filter((f) => !have.has(key(f)));
+      if (!fresh.length) continue;
+      const all = fresh.concat(t.photos || []), photos = all.filter((f) => f.kind !== 'web').concat(all.filter((f) => f.kind === 'web')).slice(0, 12);   // real photos before web samples
+      const r = await setTool(id, { photos }); if (r.ok) { n++; log(id, 'เพิ่มรูป (รายการเดียวกัน)', `${fresh.length} รูป จาก ${src.asset_no}`); }
+    }
+    return json({ ok: true, updated: n });
+  }
   if (p === 'tool') {                                   // add / edit a tool (custodian)
     if (!manage) return json({ error: 'แก้ไขทะเบียนได้เฉพาะผู้ดูแลเครื่องมือ' }, 403);
     const id = Number(d.id) || 0, old = id ? await tool(id) : null;

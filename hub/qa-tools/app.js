@@ -341,10 +341,14 @@
       <datalist id="qaDepts">${depts().map(d => `<option value="${esc(d)}">`).join("")}</datalist>
       <h4>รูปเครื่องมือ และเอกสาร (คู่มือ / ใบรับรอง / ใบซื้อ)</h4><div id="tFiles">${files()}</div>`,
       async v => {
+        const pk = f => f.url || f.p, before = new Set((x.photos || []).map(pk)), added = photos.filter(f => !before.has(pk(f)));
+        photos.sort((a, b) => (a.kind === "web") - (b.kind === "web"));   // real photos before web samples
         await post("tool", { id: t ? t.id : 0, asset_no: v("tNo"), name: v("tName"), category: v("tCat"), brand: v("tBrand"), model: v("tModel"), serial_no: v("tSn"), spec: v("tSpec"),
           location: v("tLoc"), owner_name: v("tOwner"), department: v("tDept"), fixed_asset_no: v("tFa"), lendable: v("tLend"), purchase_date: v("tBuy"), price: v("tPrice"), status: v("tSt"), needs_cal: v("tCal"), cal_interval_m: v("tInt"),
           last_cal_date: v("tLast"), next_cal_due: v("tNext"), note: v("tNote"), photos, docs });
         await refresh("บันทึกแล้ว");
+        const sib = t && added.length ? sameItem({ ...t, name: v("tName"), brand: v("tBrand"), model: v("tModel"), spec: v("tSpec") }) : [];
+        if (sib.length) setTimeout(() => dlgSharePhotos(t, added, sib), 50);
       });
     const box = m.querySelector("#tFiles");
     const rebind = () => {
@@ -355,6 +359,20 @@
         box.innerHTML = files(); rebind(); }; });
     };
     rebind();
+  }
+  // same item under other codes = same name + brand + model + size (ignoring case / spaces / "-")
+  const itemKey = t => [t.name, t.brand, t.model, t.spec].map(v => String(v || "").trim().toLowerCase().replace(/\s+/g, " ").replace(/^-$/, "")).join("|");
+  const sameItem = t => { const k = itemKey(t); return D.tools.filter(o => o.id !== t.id && o.status !== "retired" && itemKey(o) === k).sort((a, b) => String(a.asset_no).localeCompare(String(b.asset_no), undefined, { numeric: true })); };
+  function dlgSharePhotos(t, added, sib) {
+    const m = dialog(`📷 เพิ่มรูปให้รายการเดียวกันด้วยไหม?`, `<p>เพิ่มรูปใหม่ ${added.length} รูปให้ <b>${esc(t.asset_no)}</b> แล้ว — มีอีก <b>${sib.length}</b> รหัสที่เป็นรายการเดียวกัน (${esc([t.name, t.brand, t.model, t.spec].filter(v => v && v !== "-").join(" · "))})</p>
+      <div class="qa-files">${added.map(f => `<span class="qa-f"><img src="${esc(docHref(f))}" referrerpolicy="no-referrer" alt=""></span>`).join("")}</div>
+      <p class="sub"><label class="qa-ck"><input type="checkbox" id="sAll" checked> เลือกทั้งหมด</label></p>
+      <div class="qa-sib">${sib.map(o => `<label class="qa-ck"><input type="checkbox" data-sib="${o.id}" checked> <span class="mono">${esc(o.asset_no)}</span> <span class="sub">${esc(o.owner_name || "")}${(o.photos || []).some(f => f.kind !== "web") ? " · มีรูปแล้ว" : ""}</span></label>`).join("")}</div>
+      <p class="sub">รูปจะเพิ่มต่อจากรูปเดิมของแต่ละรหัส (ไม่ลบรูปเดิม) และอยู่ก่อนรูปตัวอย่างจากอินเทอร์เน็ต</p>`,
+      async () => { const ids = [...m.querySelectorAll("[data-sib]:checked")].map(c => +c.dataset.sib); if (!ids.length) throw new Error("เลือกอย่างน้อย 1 รหัส หรือกด “เฉพาะรหัสนี้”");
+        const r = await post("photos-share", { from_id: t.id, ids, photos: added }); await refresh(`เพิ่มรูปให้อีก ${(r && r.updated) || ids.length} รหัสแล้ว`); }, "✔ เพิ่มให้รหัสที่เลือก");
+    const cancel = m.querySelector('[data-d="close"]'); if (cancel) cancel.textContent = "เฉพาะรหัสนี้";
+    const all = m.querySelector("#sAll"); all.onchange = () => m.querySelectorAll("[data-sib]").forEach(c => { c.checked = all.checked; });
   }
   const depts = () => [...new Set(["ประกันคุณภาพ", "กลโลหะ", "พลาสติก", "ไฟฟ้า", "วิศวกรรม", "ติดตั้งและบริการ", "คลังสินค้า", "วางแผนการผลิต", "การตลาด", ...D.tools.map(t => t.department).filter(Boolean)])];
   function dlgHolder(t) {
@@ -623,7 +641,7 @@
 .qa-btn{padding:8px 15px;border-radius:9px;border:1px solid var(--rak);background:var(--rak);color:#fff;font:inherit;font-size:13.5px;cursor:pointer;white-space:nowrap}.qa-btn:hover{background:var(--rak-dark)}.qa-btn:disabled{opacity:.5}
 .qa-btn.ghost{background:#fff;color:var(--ink,#1f2328);border-color:#d6dae0}.qa-btn.ghost:hover{border-color:var(--rak-line);background:var(--blush)}.qa-btn.danger{color:#c92a2a}.qa-btn.sm{padding:5px 11px;font-size:12.5px}
 .qa-lnk{background:none;border:0;color:var(--rak);cursor:pointer;font:inherit;font-size:12.5px}
-.qa-th.qa-web,.qa-photos img.qa-web{object-fit:contain;background:#fff;border:1px solid #f1f3f5}.qa-thw{position:relative;display:inline-block;flex:none}.qa-webtag{position:absolute;left:3px;bottom:3px;background:rgba(0,0,0,.55);color:#fff;font-style:normal;font-size:9.5px;padding:1px 5px;border-radius:5px;line-height:1.4;pointer-events:none}.qa-vsw{margin-left:auto;display:inline-flex;border:1px solid #dee2e6;border-radius:8px;overflow:hidden}.qa-vsw button{border:0;background:#fff;padding:6px 11px;font-size:16px;line-height:1;cursor:pointer;color:#6b7280}.qa-vsw button.on{background:var(--rak,#65a30d);color:#fff}.qa-rows td{vertical-align:middle}.qa-rows td a{color:inherit;text-decoration:none}.qa-rows tbody tr:hover{background:#f8faf5}.qa-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.qa-th.qa-web,.qa-photos img.qa-web{object-fit:contain;background:#fff;border:1px solid #f1f3f5}.qa-sib{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 12px;max-height:260px;overflow:auto;border:1px solid #f1f3f5;border-radius:8px;padding:8px}.qa-thw{position:relative;display:inline-block;flex:none}.qa-webtag{position:absolute;left:3px;bottom:3px;background:rgba(0,0,0,.55);color:#fff;font-style:normal;font-size:9.5px;padding:1px 5px;border-radius:5px;line-height:1.4;pointer-events:none}.qa-vsw{margin-left:auto;display:inline-flex;border:1px solid #dee2e6;border-radius:8px;overflow:hidden}.qa-vsw button{border:0;background:#fff;padding:6px 11px;font-size:16px;line-height:1;cursor:pointer;color:#6b7280}.qa-vsw button.on{background:var(--rak,#65a30d);color:#fff}.qa-rows td{vertical-align:middle}.qa-rows td a{color:inherit;text-decoration:none}.qa-rows tbody tr:hover{background:#f8faf5}.qa-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
 .qa-tcard{position:relative;display:flex;gap:12px;align-items:flex-start;background:#fff;border:1px solid var(--line,#e3e6ea);border-radius:14px;padding:12px}.qa-tcard:hover{border-color:var(--rak-line)}
 .qa-tlink{display:flex;gap:12px;text-decoration:none;color:inherit;flex:1;min-width:0}.qa-tbody{min-width:0;display:flex;flex-direction:column;gap:3px}.qa-tbody b{font-size:14.5px}
 .qa-tags{display:flex;gap:4px;flex-wrap:wrap;margin:2px 0}.qa-pick{position:absolute;top:6px;left:6px;z-index:1}.qa-pick input{width:16px;height:16px}
