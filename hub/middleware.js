@@ -1085,6 +1085,9 @@ async function readMasterProjects(cfg) {
 // ดิว or นุ่น (vanalee.c) from the recruit Drive folder; rejected / withdrawn applicants are deleted after 90 days.
 // Everyone with the menu can read answers and score (own score sheet); only CAND_EDIT changes status, files, deletes.
 const CAND_EDIT = ['nantana.s', 'vanalee.c'];
+// โหมดทดลองใช้ only: these people get the same rights as ดิว to test the flow (Dew, 20 Nov 2026) — matched by Thai name.
+// Rights end automatically once every test is set live (cand_tests.trial = false).
+const CAND_TRIAL_EDIT = ['อรอิศรา พงศ์ผาติโรจน์'];   // เอ๋
 const CAND_STATUS = ['new', 'screening', 'interview', 'interviewed', 'offer', 'hired', 'rejected', 'withdrawn'];
 const CAND_KEEP_DAYS = 90;
 const CAND_FILE = /^c\d{1,10}\/[A-Za-z0-9_-]{6,60}\.(pdf|jpg)$/;
@@ -1166,7 +1169,9 @@ async function applyApi(cfg, req, url) {     // public — no session
 }
 async function candApi(cfg, req, url, prof) {
   const p = url.pathname.slice('/api/candidates/'.length);
-  const edit = CAND_EDIT.includes(String(prof.username || '').toLowerCase());
+  const trialEditor = !CAND_EDIT.includes(String(prof.username || '').toLowerCase()) && CAND_TRIAL_EDIT.includes(thKey(prof.nameTh))
+    && !!((await restAll(cfg, `${CAND_T}?select=id&trial=eq.true&limit=1`)) || []).length;
+  const edit = CAND_EDIT.includes(String(prof.username || '').toLowerCase()) || trialEditor;
   const who = prof.username || prof.email, whoName = prof.nameTh || prof.name || who;
   const H = { ...authHeaders(cfg.service), prefer: 'return=representation' };
   const one = async (id) => { const r = await restAll(cfg, `${CAND_C}?select=${CAND_COLS}&id=eq.${Number(id) || 0}`); return r && r[0]; };
@@ -1182,7 +1187,7 @@ async function candApi(cfg, req, url, prof) {
         restAll(cfg, `${CAND_N}?select=*&order=interview_date.desc,created_at.desc`),   // Interview notes (added 20 Nov 2026) — null until the table exists
       ]);
       if (!tests || !cands || !scores) return json({ error: 'no_table' }, 503);
-      return json({ me: { username: who, name: whoName, canEdit: edit }, keepDays: CAND_KEEP_DAYS, purged, tests, candidates: cands, scores, notes: notes || [], notesReady: !!notes });
+      return json({ me: { username: who, name: whoName, canEdit: edit, trialEditor }, keepDays: CAND_KEEP_DAYS, purged, tests, candidates: cands, scores, notes: notes || [], notesReady: !!notes });
     }
     if (p === 'log') { const rows = await restAll(cfg, `${CAND_L}?select=*&candidate_id=eq.${Number(url.searchParams.get('c')) || 0}&order=at.desc&limit=100`); return json({ log: rows || [] }); }
     if (p === 'file') {
