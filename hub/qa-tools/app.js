@@ -50,7 +50,9 @@
   const canBorrow = t => t.lendable && t.status === "available" && calState(t).k !== "over";
   const normName = s => String(s || "").replace(/^(นาย|นางสาว|นาง|น\.ส\.)\s*/, "").replace(/\s+/g, "");
   const isMine = t => !!t.owner_name && normName(t.owner_name) === normName(me().name);
-  const thumb = (t, cls = "qa-th") => t.photos && t.photos[0] ? `<img class="${cls}" loading="lazy" src="${fileUrl(t.photos[0].p)}" alt="">` : `<span class="${cls} qa-noimg">${(CAT_L[t.category] || "🧰").split(" ")[0]}</span>`;
+  // a photo is an uploaded file {p} or a web picture {url} (sample image of the model — kind "web"); broken web pictures fall back to the icon
+  const imgErr = `onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:this.className+' qa-noimg',textContent:'🧰'}))"`;
+  const thumb = (t, cls = "qa-th") => t.photos && t.photos[0] ? `<span class="qa-thw"><img class="${cls}${t.photos[0].url ? " qa-web" : ""}" loading="lazy" referrerpolicy="no-referrer" src="${esc(docHref(t.photos[0]))}" alt="" ${imgErr}>${t.photos[0].url ? `<i class="qa-webtag">ตัวอย่าง</i>` : ""}</span>` : `<span class="${cls} qa-noimg">${(CAT_L[t.category] || "🧰").split(" ")[0]}</span>`;
 
   /* ---------- api ---------- */
   async function load(force) {
@@ -208,7 +210,7 @@
     acts.push(`<button class="qa-btn ghost" data-a="label" data-id="${t.id}">🏷 ป้าย QR</button>`);
     const docs = (t.docs || []).map(f => `<a class="qa-doc" target="_blank" rel="noopener" href="${esc(docHref(f))}">${f.url ? "🔗" : "📎"} ${esc(f.name || "เอกสาร")}</a>`).join("");
     return `<div class="qa-back"><a href="#qa-tools/list">← ทะเบียนเครื่องมือ</a></div>
-      <div class="qa-card qa-detail"><div class="qa-photos">${(t.photos || []).length ? t.photos.map(f => `<a href="${fileUrl(f.p)}" target="_blank" rel="noopener"><img src="${fileUrl(f.p)}" alt=""></a>`).join("") : thumb(t, "qa-th xl")}</div>
+      <div class="qa-card qa-detail"><div class="qa-photos">${(t.photos || []).length ? t.photos.map(f => `<a href="${esc(docHref(f))}" target="_blank" rel="noopener" class="qa-thw"><img src="${esc(docHref(f))}"${f.url ? ' class="qa-web"' : ""} referrerpolicy="no-referrer" alt="">${f.url ? `<i class="qa-webtag">รูปตัวอย่างจากอินเทอร์เน็ต</i>` : ""}</a>`).join("") : thumb(t, "qa-th xl")}</div>
         <div class="qa-dinfo"><div class="sub mono">${esc(t.asset_no)}</div><h2>${esc(t.name)}</h2><div class="qa-tags">${stChip(t)}${t.needs_cal ? chip("🎯 สอบเทียบ " + c.l, c.c) : ""}</div>
           ${l ? `<div class="qa-loanbox">👤 <b>${esc(l.borrower_name)}</b> ยืมตั้งแต่ ${fmtT(l.out_at)} · กำหนดคืน <b>${fmt(l.due_back)}</b>${days(l.due_back) < 0 ? " " + chip("เกินกำหนด", "s-bad") : ""}<div class="sub">${esc([l.job_no, l.customer, l.site, l.purpose].filter(Boolean).join(" · "))}</div>${l.status === "return_requested" ? `<div>${chip("แจ้งคืนแล้ว รอผู้ดูแลรับคืน", "s-loan")}</div>` : ""}</div>` : ""}
           ${t.retire_reason && t.status === "retire_pending" ? `<div class="qa-warnbox">ขอจำหน่าย: ${esc(t.retire_reason)}</div>` : ""}
@@ -322,7 +324,7 @@
   function dlgTool(t) {
     const x = t || { needs_cal: true, cal_interval_m: 12, photos: [], docs: [] };
     const photos = (x.photos || []).slice(), docs = (x.docs || []).slice();
-    const files = () => `<div class="qa-files">${photos.map((f, i) => `<span class="qa-f"><img src="${fileUrl(f.p)}" alt=""><button type="button" data-rm="p${i}" title="ลบ">×</button></span>`).join("")}
+    const files = () => `<div class="qa-files">${photos.map((f, i) => `<span class="qa-f"><img src="${esc(docHref(f))}" referrerpolicy="no-referrer" alt=""><button type="button" data-rm="p${i}" title="ลบ">×</button></span>`).join("")}
       <label class="qa-add">📷 เพิ่มรูป<input type="file" id="tPh" accept="image/*" multiple hidden></label></div>
       <div class="qa-docs">${docs.map((f, i) => `<span class="qa-doc">📎 ${esc(f.name)} <button type="button" data-rm="d${i}">×</button></span>`).join("")}<label class="qa-add">📎 แนบเอกสาร (PDF / รูป)<input type="file" id="tDoc" accept="application/pdf,image/*" multiple hidden></label></div>`;
     const m = dialog(t ? "✏️ แก้ไขเครื่องมือ" : "+ เพิ่มเครื่องมือ", `<div class="qa-form">
@@ -621,7 +623,7 @@
 .qa-btn{padding:8px 15px;border-radius:9px;border:1px solid var(--rak);background:var(--rak);color:#fff;font:inherit;font-size:13.5px;cursor:pointer;white-space:nowrap}.qa-btn:hover{background:var(--rak-dark)}.qa-btn:disabled{opacity:.5}
 .qa-btn.ghost{background:#fff;color:var(--ink,#1f2328);border-color:#d6dae0}.qa-btn.ghost:hover{border-color:var(--rak-line);background:var(--blush)}.qa-btn.danger{color:#c92a2a}.qa-btn.sm{padding:5px 11px;font-size:12.5px}
 .qa-lnk{background:none;border:0;color:var(--rak);cursor:pointer;font:inherit;font-size:12.5px}
-.qa-vsw{margin-left:auto;display:inline-flex;border:1px solid #dee2e6;border-radius:8px;overflow:hidden}.qa-vsw button{border:0;background:#fff;padding:6px 11px;font-size:16px;line-height:1;cursor:pointer;color:#6b7280}.qa-vsw button.on{background:var(--rak,#65a30d);color:#fff}.qa-rows td{vertical-align:middle}.qa-rows td a{color:inherit;text-decoration:none}.qa-rows tbody tr:hover{background:#f8faf5}.qa-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.qa-th.qa-web,.qa-photos img.qa-web{object-fit:contain;background:#fff;border:1px solid #f1f3f5}.qa-thw{position:relative;display:inline-block;flex:none}.qa-webtag{position:absolute;left:3px;bottom:3px;background:rgba(0,0,0,.55);color:#fff;font-style:normal;font-size:9.5px;padding:1px 5px;border-radius:5px;line-height:1.4;pointer-events:none}.qa-vsw{margin-left:auto;display:inline-flex;border:1px solid #dee2e6;border-radius:8px;overflow:hidden}.qa-vsw button{border:0;background:#fff;padding:6px 11px;font-size:16px;line-height:1;cursor:pointer;color:#6b7280}.qa-vsw button.on{background:var(--rak,#65a30d);color:#fff}.qa-rows td{vertical-align:middle}.qa-rows td a{color:inherit;text-decoration:none}.qa-rows tbody tr:hover{background:#f8faf5}.qa-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
 .qa-tcard{position:relative;display:flex;gap:12px;align-items:flex-start;background:#fff;border:1px solid var(--line,#e3e6ea);border-radius:14px;padding:12px}.qa-tcard:hover{border-color:var(--rak-line)}
 .qa-tlink{display:flex;gap:12px;text-decoration:none;color:inherit;flex:1;min-width:0}.qa-tbody{min-width:0;display:flex;flex-direction:column;gap:3px}.qa-tbody b{font-size:14.5px}
 .qa-tags{display:flex;gap:4px;flex-wrap:wrap;margin:2px 0}.qa-pick{position:absolute;top:6px;left:6px;z-index:1}.qa-pick input{width:16px;height:16px}
