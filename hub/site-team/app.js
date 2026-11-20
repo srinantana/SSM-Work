@@ -201,7 +201,7 @@
     return `<div class="stm-tiles">${tiles.map(([l, v, k, ic]) => `<div class="stm-tile t-${k}"><i>${ic}</i><div><b>${v}</b><span>${l}</span></div></div>`).join("")}</div>
       <div class="stm-bar2"><input type="search" id="stQ" placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัส" value="${esc(S.q)}">
         <select id="stU"><option value="">ทุกทีม</option>${UNITS.map(([u, l]) => `<option value="${u}"${S.unit === u ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
-        <span class="muted">ใส่ / แก้ประกันได้ที่ปุ่มแก้ไขของแต่ละคน (ประกันเดินทาง · เลขกรมธรรม์ · เริ่ม · หมดอายุ)</span></div>
+        ${ce ? `<button class="stm-btn" data-a="ins-add">+ เพิ่มประกันเดินทาง</button>` : ""}<span class="muted">หรือแก้ที่ปุ่มแก้ไขของแต่ละคน</span></div>
       <div class="stm-card c-ins"><h3><i>🛡️</i>ประกันเดินทางรายปี <span class="muted">(${ann.length} คน)</span></h3>
         ${ann.length ? `<div class="stm-scroll"><table class="stm-t"><thead><tr><th>ชื่อ</th><th>Name (ตาม Passport)</th><th>ทีม</th>${ce ? "<th>เลขกรมธรรม์</th>" : ""}<th>เริ่ม</th><th>หมดอายุ</th><th>สถานะ</th>${ce ? "<th></th>" : ""}</tr></thead><tbody>
         ${ann.map(({ r, st }) => `<tr><td>${esc(label(r))}<div class="sub">${esc(r.code || "")}</div></td><td>${esc(r.p.name_en || r.name_en || "")}</td><td>${unitBadge(r.unit)}</td>${ce ? `<td class="mono">${esc(r.p.insurance_policy || "—")}${r.p.insurance_file ? ` <a href="${esc(r.p.insurance_file)}" target="_blank" rel="noopener" title="เปิดกรมธรรม์">📎</a>` : ""}</td>` : ""}
@@ -212,6 +212,42 @@
           ${ps.length ? `<div class="stm-vchips" style="margin-top:6px">${ps.map(r => { const a = annualCover(r.p, t); return `<span class="stm-cchip ${a && a.ok ? "st-ok" : "st-warn"}" title="${esc(a ? a.l : "ไม่มีประกันรายปี")}">${a && a.ok ? "🛡️" : "🧾"} ${esc(label(r))}</span>`; }).join("")}</div>
           <p class="sub">${need.length ? `<b class="bad">ต้องซื้อรายเที่ยว ${need.length} คน</b>` : "✅ ทุกคนมีประกันรายปีครอบคลุมแล้ว"} · 🛡️ มีรายปี ${ps.length - need.length} คน</p>` : `<p class="sub muted">ยังไม่ได้เลือกคน</p>`}
           <div class="stm-acts">${ce ? `<button class="stm-lnk" data-a="trip-xlsx" data-id="${t.id}">⬇ รายชื่อทำประกัน (Excel)</button>` : ""}</div></div>`).join("") : `<p class="stm-empty">🧳 ยังไม่มีทริปที่กำลังจะถึง</p>`}</div>`;
+  }
+  /* add / change one person's travel insurance from the insurance tab */
+  function insForm() {
+    const ps = people().filter(r => r.active).sort((a, b) => String(a.name_th).localeCompare(String(b.name_th), "th"));
+    const optL = r => label(r) + (r.code ? " · " + r.code : "");
+    const last = people().map(r => r.p).filter(p => p.insurance_type === "annual" && p.insurance_expiry).sort((a, b) => String(b.insurance_expiry).localeCompare(String(a.insurance_expiry)))[0] || {};
+    const m = document.createElement("div"); m.className = "stm-modal";
+    m.innerHTML = `<div class="stm-dlg"><h3>🛡️ เพิ่มประกันเดินทาง</h3><div class="stm-form">
+      <label class="wide">พนักงาน *<input id="iWho" list="iPeople" placeholder="พิมพ์ชื่อ / ชื่อเล่น / รหัส แล้วเลือก"><datalist id="iPeople">${ps.map(r => `<option value="${esc(optL(r))}">${esc(r.unit + (r.p.insurance_type === "annual" ? " · มีรายปีแล้ว" : ""))}</option>`).join("")}</datalist></label>
+      <p class="wide sub" id="iPick"></p>
+      <label>ประเภท<select id="iType"><option value="annual">รายปี</option><option value="trip">รายเที่ยว</option></select></label>
+      <label>เลขกรมธรรม์<input id="iPol" placeholder="${esc(last.insurance_policy ? last.insurance_policy.replace(/\d+$/, "…") : "")}"></label>
+      <label>ประกันเริ่ม<input id="iStart" type="date" value="${esc(last.insurance_start || "")}"></label>
+      <label>ประกันหมดอายุ<input id="iEnd" type="date" value="${esc(last.insurance_expiry || "")}"></label>
+      <label class="wide">ลิงก์กรมธรรม์ (Google Drive)<input id="iFile" type="url" placeholder="วางลิงก์ Google Drive"></label>
+    </div><div class="stm-err" id="iErr"></div>
+    <div class="stm-acts"><button class="stm-btn" data-a="i-save">บันทึก</button> <button class="stm-btn ghost" data-a="i-more">บันทึก + เพิ่มคนต่อ</button> <button class="stm-btn ghost" data-a="i-close">ยกเลิก</button></div></div>`;
+    document.body.appendChild(m);
+    const g = id => m.querySelector("#" + id).value.trim();
+    const who = () => { const k = g("iWho"); return ps.find(r => optL(r) === k) || ps.find(r => [label(r), r.name_th, r.code].includes(k)); };
+    m.querySelector("#iWho").addEventListener("input", () => { const r = who(), el = m.querySelector("#iPick");
+      el.innerHTML = r ? `✅ ${esc(label(r))} · ${unitBadge(r.unit)}${r.p.insurance_type === "annual" ? ` · <span class="bad">มีรายปีอยู่แล้ว ${esc(r.p.insurance_policy || "")} ถึง ${fmt(r.p.insurance_expiry)} — จะถูกแทนที่</span>` : ""}` : ""; });
+    m.addEventListener("click", async e => {
+      const a = e.target.closest("[data-a]")?.dataset.a; if (e.target === m || a === "i-close") return m.remove();
+      if (a !== "i-save" && a !== "i-more") return;
+      const r = who(); if (!r) return m.querySelector("#iErr").textContent = "เลือกพนักงานจากรายการก่อน";
+      if (g("iStart") && g("iEnd") && g("iEnd") < g("iStart")) return m.querySelector("#iErr").textContent = "วันหมดอายุต้องไม่ก่อนวันเริ่ม";
+      const body = { insurance_type: g("iType"), insurance_policy: g("iPol"), insurance_start: g("iStart"), insurance_expiry: g("iEnd"), insurance_file: g("iFile") };
+      if (r.pid) body.id = r.pid; else if (r.worker) body.worker_id = r.worker.id;
+      try {
+        const j = await post("person", body); D.people = D.people.filter(x => x.id !== j.person.id).concat(j.person); toast("บันทึกประกันของ " + label(r) + " แล้ว"); draw();
+        if (a === "i-more") { ["iWho", "iPol", "iFile"].forEach(id => m.querySelector("#" + id).value = ""); m.querySelector("#iPick").innerHTML = ""; m.querySelector("#iErr").textContent = ""; m.querySelector("#iWho").focus(); }
+        else m.remove();
+      } catch (x) { m.querySelector("#iErr").textContent = x.message; }
+    });
+    m.querySelector("#iWho").focus();
   }
   function vVisas() {
     const ce = D.canEdit, all = visaRows(), cs = [...new Set(all.map(x => x.country))].sort();
@@ -677,6 +713,7 @@
     }
     if (a === "trip-del") { if (!confirm("ลบทริปนี้?")) return; try { await post("trip-delete", { id: +ds.id }); S.trip = null; D.trips = D.trips.filter(x => x.id !== +ds.id); draw(); } catch (x) { toast(x.message, 1); } return; }
     if (a === "cmat-full") { S.cFull = !S.cFull; document.body.classList.toggle("stm-noscroll", S.cFull); return draw(); }
+    if (a === "ins-add") return insForm();
     if (a === "cert-new") return certForm(null);
     if (a === "cert-edit") return certForm((D.certs || []).find(c => c.id === +ds.id));
     if (a === "imp-cancel") { S.imp = null; return draw(); }
