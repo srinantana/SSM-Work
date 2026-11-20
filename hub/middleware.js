@@ -1103,7 +1103,17 @@ async function qaApi(cfg, req, url, prof) {
   const who = prof.username || prof.email, whoName = prof.nameTh || prof.name || who;
   const H = { ...authHeaders(cfg.service), prefer: 'return=representation' };
   const rest = async (path, method, body) => { const r = await fetch(cfg.url + path, { method, headers: H, body: body && JSON.stringify(body) }); const d = await r.json().catch(() => null); return { ok: r.ok, status: r.status, data: d }; };
-  const log = (tool_id, action, detail) => fetch(cfg.url + QA_G, { method: 'POST', headers: authHeaders(cfg.service), body: JSON.stringify({ tool_id, by: whoName, action, detail: mpStr(detail, 500) }) }).catch(() => null);
+  // cal_id ties a calibration record's history together (database/qa_tools-003.sql); falls back to a plain entry if that column is missing
+  const log = async (tool_id, action, detail, cal_id) => {
+    const body = { tool_id, by: whoName, action, detail: mpStr(detail, 500) };
+    const post = (b) => fetch(cfg.url + QA_G, { method: 'POST', headers: authHeaders(cfg.service), body: JSON.stringify(b) }).catch(() => null);
+    const r = cal_id ? await post({ ...body, cal_id }) : await post(body);
+    if (cal_id && r && !r.ok) await post(body);
+  };
+  const RES_TH = { pass: 'ผ่าน', adjusted: 'ปรับตั้งแล้วผ่าน', fail: 'ไม่ผ่าน' };
+  const calDiff = (a, b) => [['cal_date', 'วันที่สอบเทียบ'], ['lab', 'Lab'], ['cert_no', 'เลขที่ใบรับรอง'], ['result', 'ผล'], ['next_due', 'ครบกำหนด'], ['cost', 'ค่าใช้จ่าย'], ['note', 'หมายเหตุ']]
+    .filter(([k]) => String(a[k] ?? '') !== String(b[k] ?? '')).map(([k, l]) => `${l}: ${k === 'result' ? RES_TH[a[k]] || '-' : a[k] ?? '-'} → ${k === 'result' ? RES_TH[b[k]] || '-' : b[k] ?? '-'}`)
+    .concat(JSON.stringify((a.docs || []).map((x) => x.url || x.p)) !== JSON.stringify((b.docs || []).map((x) => x.url || x.p)) ? ['ลิงก์ / ไฟล์ใบรับรอง'] : []).join(' · ');
   const tool = async (id) => { const r = await rest(`${QA_T}?id=eq.${Number(id) || 0}&select=*`, 'GET'); return r.ok && r.data && r.data[0]; };
   const setTool = (id, row) => rest(`${QA_T}?id=eq.${id}`, 'PATCH', { ...row, updated_by: who, updated_at: new Date().toISOString() });
   if (req.method === 'GET') {
@@ -1118,7 +1128,13 @@ async function qaApi(cfg, req, url, prof) {
       return json({ me: { username: who, name: whoName, canManage: manage, canApprove: approve }, tools, loans, cals, holds: holds || [] });
     }
     if (p === 'log') {
-      const id = Number(url.searchParams.get('tool')) || 0;
+      const id = Number(url.searchParams.get('tool')) || 0, cal = Number(url.searchParams.get('cal')) || 0;
+      if (cal) {   // one calibration record's history; entries logged before cal_id existed are matched by tool + calibration actions
+        const a = await restAll(cfg, `${QA_G}?select=*&cal_id=eq.${cal}&order=at.asc&limit=200`);
+        const b = await restAll(cfg, `${QA_G}?select=*&tool_id=eq.${id}&cal_id=is.null&or=(action.like.*สอบเทียบ*,action.like.*ทวนสอบ*)&order=at.asc&limit=200`)
+          || await restAll(cfg, `${QA_G}?select=*&tool_id=eq.${id}&or=(action.like.*สอบเทียบ*,action.like.*ทวนสอบ*)&order=at.asc&limit=200`);
+        return json({ log: a || [], older: (b || []).filter((x) => x.cal_id == null) });
+      }
       const rows = await restAll(cfg, `${QA_G}?select=*&tool_id=eq.${id}&order=at.desc&limit=200`);
       return json({ log: rows || [] });
     }
@@ -1244,7 +1260,7 @@ async function qaApi(cfg, req, url, prof) {
       const r = await rest(QA_C, 'POST', { tool_id: t.id, sent_date: qaDay(d.sent_date) || today, lab: mpStr(d.lab, 120) || null, note: mpStr(d.note, 500) || null, status: 'sent', created_by: who });
       if (!r.ok) return json({ error: 'supabase' }, 502);
       await setTool(t.id, { status: 'calibration' });
-      log(t.id, 'ส่งสอบเทียบ', [d.lab, d.sent_date].filter(Boolean).join(' · '));
+      log(t.id, 'ส่งสอบเทียบ', [d.lab, d.sent_date].filter(Boolean).join(' · '), r.data && r.data[0] && r.data[0].id);
       return json({ ok: true, cal: r.data[0] });
     }
     const calDate = qaDay(d.cal_date); if (!calDate) return json({ error: 'ใส่วันที่สอบเทียบ' }, 400);
@@ -1252,11 +1268,13 @@ async function qaApi(cfg, req, url, prof) {
     const row = { cal_date: calDate, cert_no: mpStr(d.cert_no, 80) || null, result, next_due: qaDay(d.next_due) || (result === 'fail' ? null : addMonthsIso(calDate, t.cal_interval_m || 12)),
       cost: qaNum(d.cost), lab: mpStr(d.lab, 120) || null, docs: qaFiles(d.docs, who), note: mpStr(d.note, 500) || null, status: 'pending_verify', updated_at: now };
     const id = Number(d.id) || 0;
+    const prev = id ? ((await rest(`${QA_C}?id=eq.${id}&tool_id=eq.${t.id}&select=*`, 'GET')).data || [])[0] : null;
     const r = id ? await rest(`${QA_C}?id=eq.${id}&tool_id=eq.${t.id}&status=in.(sent,rejected,pending_verify,pending_approval)`, 'PATCH', row)
                  : await rest(QA_C, 'POST', { ...row, tool_id: t.id, sent_date: qaDay(d.sent_date), created_by: who });
     if (!r.ok || !r.data || !r.data[0]) return json({ error: 'บันทึกไม่สำเร็จ' }, 502);
     if (t.status !== 'calibration') await setTool(t.id, { status: 'calibration' });
-    log(t.id, 'บันทึกผลสอบเทียบ (รอทวนสอบ)', `${{ pass: 'ผ่าน', adjusted: 'ปรับตั้งแล้วผ่าน', fail: 'ไม่ผ่าน' }[result]} · ${calDate}${row.cert_no ? ' · ใบรับรอง ' + row.cert_no : ''}`);
+    if (prev && prev.cal_date) log(t.id, 'แก้ไขผลสอบเทียบ (รอทวนสอบใหม่)', calDiff(prev, r.data[0]) || 'บันทึกซ้ำ ไม่มีการเปลี่ยนแปลง', r.data[0].id);
+    else log(t.id, 'บันทึกผลสอบเทียบ (รอทวนสอบ)', `${RES_TH[result]} · ${calDate}${row.cert_no ? ' · ใบรับรอง ' + row.cert_no : ''}`, r.data[0].id);
     return json({ ok: true, cal: r.data[0] });
   }
   if (p === 'cal-verify') {                             // QA Engineer (custodian) — internal verification, form FM-QA-10
@@ -1273,7 +1291,12 @@ async function qaApi(cfg, req, url, prof) {
     const r = await rest(`${QA_C}?id=eq.${c.id}`, 'PATCH', { verify, status: 'pending_approval', approved_by: null, approved_at: null, approve_note: null, updated_at: now });
     if (!r.ok) return json({ error: r.status === 400 ? 'ยังไม่มีช่องทวนสอบ — ให้ Admin รัน database/qa_tools-002.sql' : 'บันทึกไม่สำเร็จ' }, 502);
     const fails = points.filter((x) => !x.ok).length;
-    log(c.tool_id, 'ทวนสอบผลสอบเทียบ (รออนุมัติ)', `${verify.no ? 'Verify No. ' + verify.no + ' · ' : ''}${points.length} จุด · ${fails ? 'ไม่ผ่าน ' + fails + ' จุด' : 'ผ่านทุกจุด'}`);
+    const vSum = `${verify.no ? 'Verify No. ' + verify.no + ' · ' : ''}${points.length} จุด · ${fails ? 'ไม่ผ่าน ' + fails + ' จุด' : 'ผ่านทุกจุด'}`;
+    if (c.verify) {
+      const o = c.verify, ch = [['no', 'Verify No.'], ['date', 'วันที่'], ['ref_cert', 'Ref. Cer'], ['criteria', 'เกณฑ์'], ['note', 'บันทึกเพิ่มเติม'], ['protect', 'มาตรการป้องกัน']].filter(([k]) => String(o[k] || '') !== String(verify[k] || '')).map(([, l]) => l)
+        .concat(JSON.stringify(o.points || []) !== JSON.stringify(points) ? ['จุดสอบเทียบ'] : []);
+      log(c.tool_id, 'แก้ไขการทวนสอบ (รออนุมัติ)', `${vSum}${ch.length ? ' · แก้: ' + ch.join(', ') : ''}`, c.id);
+    } else log(c.tool_id, 'ทวนสอบผลสอบเทียบ (รออนุมัติ)', vSum, c.id);
     return json({ ok: true });
   }
   if (p === 'cal-approve') {                            // approver
@@ -1284,7 +1307,7 @@ async function qaApi(cfg, req, url, prof) {
     if (ok && !c.verify) return json({ error: 'ยังไม่ได้ทวนสอบ (FM-QA-10) — ให้ QA Engineer ทวนสอบก่อนอนุมัติ' }, 409);
     await rest(`${QA_C}?id=eq.${c.id}`, 'PATCH', { status: ok ? 'approved' : 'rejected', approved_by: whoName, approved_at: now, approve_note: mpStr(d.note, 300) || null, updated_at: now });
     if (ok) await setTool(c.tool_id, { last_cal_date: c.cal_date, next_cal_due: c.next_due, status: c.result === 'fail' ? 'repair' : 'available' });
-    log(c.tool_id, ok ? 'อนุมัติผลสอบเทียบ' : 'ไม่อนุมัติผลสอบเทียบ', (ok ? `ครบกำหนดครั้งถัดไป ${c.next_due || '-'}` : '') + (d.note ? ' · ' + mpStr(d.note, 200) : ''));
+    log(c.tool_id, ok ? 'อนุมัติผลสอบเทียบ' : 'ไม่อนุมัติผลสอบเทียบ', (ok ? `ครบกำหนดครั้งถัดไป ${c.next_due || '-'}` : '') + (d.note ? ' · ' + mpStr(d.note, 200) : ''), c.id);
     return json({ ok: true });
   }
   if (p === 'retire') {                                 // custodian asks, approver confirms
