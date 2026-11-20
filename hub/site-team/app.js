@@ -204,7 +204,7 @@
         <span class="muted">ใส่ / แก้ประกันได้ที่ปุ่มแก้ไขของแต่ละคน (ประกันเดินทาง · เลขกรมธรรม์ · เริ่ม · หมดอายุ)</span></div>
       <div class="stm-card c-ins"><h3><i>🛡️</i>ประกันเดินทางรายปี <span class="muted">(${ann.length} คน)</span></h3>
         ${ann.length ? `<div class="stm-scroll"><table class="stm-t"><thead><tr><th>ชื่อ</th><th>Name (ตาม Passport)</th><th>ทีม</th>${ce ? "<th>เลขกรมธรรม์</th>" : ""}<th>เริ่ม</th><th>หมดอายุ</th><th>สถานะ</th>${ce ? "<th></th>" : ""}</tr></thead><tbody>
-        ${ann.map(({ r, st }) => `<tr><td>${esc(label(r))}<div class="sub">${esc(r.code || "")}</div></td><td>${esc(r.p.name_en || r.name_en || "")}</td><td>${unitBadge(r.unit)}</td>${ce ? `<td class="mono">${esc(r.p.insurance_policy || "—")}</td>` : ""}
+        ${ann.map(({ r, st }) => `<tr><td>${esc(label(r))}<div class="sub">${esc(r.code || "")}</div></td><td>${esc(r.p.name_en || r.name_en || "")}</td><td>${unitBadge(r.unit)}</td>${ce ? `<td class="mono">${esc(r.p.insurance_policy || "—")}${r.p.insurance_file ? ` <a href="${esc(r.p.insurance_file)}" target="_blank" rel="noopener" title="เปิดกรมธรรม์">📎</a>` : ""}</td>` : ""}
           <td>${fmt(r.p.insurance_start)}</td><td>${fmt(r.p.insurance_expiry)}</td><td><span class="stm-st ${st[2]}">${st[1]}</span></td>${ce ? `<td><button class="stm-lnk" data-a="edit" data-k="${esc(r.key)}">แก้ไข</button></td>` : ""}</tr>`).join("")}
         </tbody></table></div>` : `<p class="stm-empty">🛡️ ยังไม่มีใครมีประกันรายปี</p>`}</div>
       <div class="stm-card c-trip"><h3><i>✈️</i>ทริปที่กำลังจะถึง — ใครต้องซื้อประกันรายเที่ยว</h3>
@@ -503,6 +503,8 @@
   function personForm(r) {
     const p = r ? r.p : {}, w = r && r.worker;
     const f = (id, l, v, type = "text", extra = "") => `<label>${l}<input id="${id}" type="${type}" value="${esc(v ?? "")}"${extra}></label>`;
+    /* link field: paste a Google Drive link, 📎 เปิด opens it in a new tab */
+    const lnk = (id, l, v) => `<label>${l}<span class="stm-lnkf"><input id="${id}" type="url" placeholder="วางลิงก์ Google Drive" value="${esc(v ?? "")}"><a class="stm-btn ghost stm-open" data-open="${id}" href="${esc(v || "#")}" target="_blank" rel="noopener"${v ? "" : " hidden"}>📎 เปิด</a></span></label>`;
     const sel = (id, l, opts, v) => `<label>${l}<select id="${id}">${opts.map(([k, t]) => `<option value="${k}"${(v || "") === k ? " selected" : ""}>${t}</option>`).join("")}</select></label>`;
     const m = document.createElement("div"); m.className = "stm-modal";
     m.innerHTML = `<div class="stm-dlg"><h3>${w ? esc(label(r)) + ` <span class="muted">${esc(w.unit)} · ${esc(w.emp_code || w.id)}</span>` : (r ? "แก้ไข" : "เพิ่มคน (ไม่อยู่ใน Manpower)")}</h3>
@@ -516,7 +518,7 @@
         ${f("pNo", "เลข Passport", p.passport_no)}
         ${f("pIss", "วันออก Passport", p.passport_issue, "date")}
         ${f("pExp", "วันหมดอายุ Passport", p.passport_expiry, "date")}
-        ${f("pFile", "ลิงก์สแกน (Google Drive)", p.passport_file, "url")}
+        ${lnk("pFile", "ลิงก์สแกน Passport (Google Drive)", p.passport_file)}
         ${sel("pRen", "สถานะต่ออายุ", RENEW, p.renewal_status)}
         ${f("pCost", "ค่าใช้จ่ายต่ออายุ (บาท)", p.renewal_cost, "number", ' min="0" step="1"')}
         ${f("pRenN", "หมายเหตุต่ออายุ", p.renewal_note)}
@@ -524,6 +526,7 @@
         ${f("pPol", "เลขกรมธรรม์", p.insurance_policy)}
         ${f("pInsS", "ประกันเริ่ม", p.insurance_start, "date")}
         ${f("pInsE", "ประกันหมดอายุ", p.insurance_expiry, "date")}
+        ${lnk("pInsF", "ลิงก์กรมธรรม์ (Google Drive)", p.insurance_file)}
         <label class="wide">หมายเหตุ<input id="pNote" value="${esc(p.note || "")}"></label>
         <div class="wide stm-visas"><div class="stm-vh">วีซ่า (แยกตามประเทศ) <button type="button" class="stm-lnk" data-a="v-add">+ เพิ่มวีซ่า</button></div><div id="pVisas"></div>
           ${p.visa_note ? `<div class="sub">บันทึกเดิม: ${esc(p.visa_note)}</div>` : ""}<datalist id="stCountries">${COUNTRIES.map(c => `<option value="${esc(c)}">`).join("")}</datalist></div>
@@ -532,6 +535,8 @@
       <div class="stm-acts"><button class="stm-btn" data-a="p-save">บันทึก</button>${r && !w && r.pid ? ` <button class="stm-btn danger" data-a="p-del">ลบ</button>` : ""} <button class="stm-btn ghost" data-a="p-close">ยกเลิก</button></div></div>`;
     document.body.appendChild(m);
     const v = id => { const e = m.querySelector("#" + id); return e ? e.value.trim() : undefined; };
+    m.querySelectorAll("[data-open]").forEach(a => { const i = m.querySelector("#" + a.dataset.open);
+      i.addEventListener("input", () => { const u = i.value.trim(), ok = /^https?:\/\//.test(u); a.hidden = !ok; a.href = ok ? u : "#"; }); });
     const vBox = m.querySelector("#pVisas");
     const vRow = (x = {}) => { const d = document.createElement("div"); d.className = "stm-vrow";
       d.innerHTML = `<input data-v="country" list="stCountries" placeholder="ประเทศ" value="${esc(x.country || "")}"><input data-v="type" placeholder="ประเภท เช่น Business / Work" value="${esc(x.type || "")}">
@@ -549,7 +554,7 @@
       if (a !== "p-save") return;
       const body = { id: r ? r.pid : 0, worker_id: w ? w.id : null, name_en: v("pEn").toUpperCase(), sex: v("pSex"), national_id: v("pId"), birth_date: v("pDob"), nationality: v("pNat"),
         passport_no: v("pNo"), passport_issue: v("pIss"), passport_expiry: v("pExp"), passport_file: v("pFile"), visas: readVisas(), renewal_status: v("pRen"),
-        renewal_cost: v("pCost"), renewal_note: v("pRenN"), insurance_type: v("pIns"), insurance_policy: v("pPol"), insurance_start: v("pInsS"), insurance_expiry: v("pInsE"), note: v("pNote") };
+        renewal_cost: v("pCost"), renewal_note: v("pRenN"), insurance_type: v("pIns"), insurance_policy: v("pPol"), insurance_file: v("pInsF"), insurance_start: v("pInsS"), insurance_expiry: v("pInsE"), note: v("pNote") };
       if (!w) Object.assign(body, { name_th: v("pTh"), emp_code: v("pCode"), team: v("pTeam"), active: m.querySelector("#pAct").checked });
       if (body.national_id && !thaiIdOk(body.national_id.replace(/\D/g, "")) && !confirm("เลขบัตรประชาชนไม่ผ่านการตรวจหลักสุดท้าย — บันทึกต่อไหม?")) return;
       try { await post("person", body); m.remove(); toast("บันทึกแล้ว"); load(true); } catch (x) { m.querySelector("#pErr").textContent = x.message; }
@@ -706,6 +711,7 @@ select.warn{border-color:#fab005}select.bad{border-color:#fa5252}
 .stm-modal{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;z-index:200;overflow:auto;padding:40px 12px}.stm-dlg{background:#fff;border-radius:14px;padding:18px 20px;max-width:860px;width:100%}.stm-dlg h3{margin:0 0 12px}
 .stm-qv{margin-top:10px;padding:10px 12px;background:#fafbfc;border:1px solid #eef0f3;border-radius:12px;overflow:auto}.stm-qv .stm-t{margin-bottom:6px}
 .stm-grid .stm-card.c-ins,.stm-card.c-ins{border-top:4px solid #339af0}.c-ins h3 i{background:#e7f5ff}
+.stm-lnkf{display:flex;gap:6px;align-items:center;width:100%}.stm-lnkf input{flex:1 1 auto;width:auto!important;min-width:0}.stm-open{white-space:nowrap;padding:7px 10px;font-size:12.5px;text-decoration:none}
 /* certificates */
 .stm-grid .stm-card.c-cert,.stm-card.c-cert{border-top-color:#f06595}.c-cert h3 i{background:#fff0f6}
 .stm-cchip{display:inline-flex;gap:3px;align-items:center;font-size:11px;padding:1px 7px;border-radius:999px;white-space:nowrap}
