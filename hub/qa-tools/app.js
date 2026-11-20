@@ -10,7 +10,7 @@
   const MS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
   const CATS = [["measuring", "📏 เครื่องมือวัด"], ["electrical", "⚡ เครื่องมือไฟฟ้า / มิเตอร์"], ["power", "🔌 เครื่องมือช่าง (ไฟฟ้า)"], ["hand", "🔧 เครื่องมือช่าง (มือ)"], ["lifting", "🏗 ยก / รอก / สลิง"], ["safety", "🦺 อุปกรณ์ความปลอดภัย"], ["other", "📦 อื่นๆ"]];
   const CAT_L = Object.fromEntries(CATS);
-  const ST = { available: ["ว่าง", "s-ok"], on_loan: ["ถูกยืม", "s-loan"], calibration: ["ส่งสอบเทียบ", "s-cal"], repair: ["ซ่อม / ชำรุด", "s-warn"], lost: ["สูญหาย", "s-bad"], retire_pending: ["รออนุมัติจำหน่าย", "s-off"], retired: ["จำหน่ายแล้ว", "s-off"] };
+  const ST = { available: ["ยืมได้", "s-ok"], on_loan: ["ถูกยืม", "s-loan"], calibration: ["ส่งสอบเทียบ", "s-cal"], repair: ["ซ่อม / ชำรุด", "s-warn"], lost: ["สูญหาย", "s-bad"], retire_pending: ["รออนุมัติจำหน่าย", "s-off"], retired: ["จำหน่ายแล้ว", "s-off"] };
   const RES = { pass: "ผ่าน", adjusted: "ปรับตั้งแล้วผ่าน", fail: "ไม่ผ่าน" };
   const COND = { ok: "ปกติ", damaged: "ชำรุด", missing_parts: "อุปกรณ์ไม่ครบ" };
   const TABS = [["", "ภาพรวม"], ["list", "ทะเบียนเครื่องมือ"], ["loans", "ยืม-คืน"], ["cal", "สอบเทียบ"]];
@@ -43,7 +43,7 @@
     return { k: "ok", l: fmt(t.next_cal_due), c: "s-ok", n };
   }
   const chip = (l, c) => `<span class="qa-chip ${c}">${esc(l)}</span>`;
-  const stChip = t => chip(...(ST[t.status] || [t.status, "s-off"]));
+  const stChip = t => t.status === "available" && !t.lendable ? chip("ใช้งานได้", "s-ok") : t.status === "available" && calState(t).k === "over" ? chip("ห้ามยืม / ห้ามใช้", "s-bad") : chip(...(ST[t.status] || [t.status, "s-off"]));
   const active = t => !["retired"].includes(t.status);
   const canBorrow = t => t.lendable && t.status === "available" && calState(t).k !== "over";
   const normName = s => String(s || "").replace(/^(นาย|นางสาว|นาง|น\.ส\.)\s*/, "").replace(/\s+/g, "");
@@ -128,7 +128,7 @@
     const cs = ts.map(t => [t, calState(t)]);
     const over = cs.filter(([, c]) => c.k === "over"), soon = cs.filter(([, c]) => c.k === "soon");
     const pending = D.cals.filter(c => c.status === "pending_approval").length + D.tools.filter(t => t.status === "retire_pending").length;
-    const tiles = [["🧰", "เครื่องมือทั้งหมด", ts.length, "", "list"], ["✅", "ว่าง พร้อมใช้", ts.filter(canBorrow).length, "ok", "list"], ["🤝", "ถูกยืมอยู่", open.length, "loan", "loans"],
+    const tiles = [["🧰", "เครื่องมือทั้งหมด", ts.length, "", "list"], ["✅", "ยืมได้", ts.filter(canBorrow).length, "ok", "list"], ["🤝", "ถูกยืมอยู่", open.length, "loan", "loans"],
       ["⏰", "เกินกำหนดคืน", late.length, late.length ? "bad" : "", "loans"], ["🎯", "สอบเทียบใน " + DUE_SOON + " วัน", soon.length, soon.length ? "warn" : "", "cal"], ["⛔", "เลยกำหนดสอบเทียบ", over.length, over.length ? "bad" : "", "cal"]];
     const noDue = cs.filter(([, c]) => c.k === "unk").length;
     if (noDue) tiles.push(["❔", "ยังไม่มีวันครบสอบเทียบ", noDue, "warn", "cal"]);
@@ -147,13 +147,13 @@
   function filters() {
     return `<div class="qa-bar"><input type="search" id="qaQ" placeholder="🔍 ค้นหา รหัส / ชื่อ / ยี่ห้อ / ขนาด / ผู้ถือครอง" value="${esc(S.q)}">
       <select id="qaCat"><option value="">ทุกประเภท</option>${CATS.map(([k, l]) => `<option value="${k}"${S.cat === k ? " selected" : ""}>${l}</option>`).join("")}</select>
-      <select id="qaDept"><option value="">ทุกแผนก</option>${[...new Set(D.tools.map(t => t.department).filter(Boolean))].sort().map(d => `<option${S.dept === d ? " selected" : ""}>${esc(d)}</option>`).join("")}</select><select id="qaSt"><option value="">ทุกสถานะ</option>${Object.entries(ST).map(([k, [l]]) => `<option value="${k}"${S.st === k ? " selected" : ""}>${l}</option>`).join("")}<option value="calover"${S.st === "calover" ? " selected" : ""}>เลยกำหนดสอบเทียบ</option><option value="calsoon"${S.st === "calsoon" ? " selected" : ""}>สอบเทียบใน ${DUE_SOON} วัน</option></select>`;
+      <select id="qaDept"><option value="">ทุกแผนก</option>${[...new Set(D.tools.map(t => t.department).filter(Boolean))].sort().map(d => `<option${S.dept === d ? " selected" : ""}>${esc(d)}</option>`).join("")}</select><select id="qaSt"><option value="">ทุกสถานะ</option>${Object.entries(ST).map(([k, [l]]) => `<option value="${k}"${S.st === k ? " selected" : ""}>${l}</option>`).join("")}<option value="inuse"${S.st === "inuse" ? " selected" : ""}>ใช้งานได้ (มีผู้ถือครองประจำ)</option><option value="calover"${S.st === "calover" ? " selected" : ""}>เลยกำหนดสอบเทียบ</option><option value="calsoon"${S.st === "calsoon" ? " selected" : ""}>สอบเทียบใน ${DUE_SOON} วัน</option></select>`;
   }
   function filtered() {
     const q = S.q.toLowerCase();
     return D.tools.filter(t => (S.st === "retired" || t.status !== "retired")
       && (!S.cat || t.category === S.cat) && (!S.dept || t.department === S.dept)
-      && (!S.st || t.status === S.st || (S.st === "calover" && calState(t).k === "over") || (S.st === "calsoon" && calState(t).k === "soon"))
+      && (!S.st || (S.st === "available" ? t.status === "available" && t.lendable : t.status === S.st) || (S.st === "inuse" && t.status === "available" && !t.lendable) || (S.st === "calover" && calState(t).k === "over") || (S.st === "calsoon" && calState(t).k === "soon"))
       && (!q || [t.asset_no, t.fixed_asset_no, t.name, t.brand, t.model, t.serial_no, t.owner_name, t.department, t.location, t.spec].some(v => String(v || "").toLowerCase().includes(q))));
   }
   function vList() {
@@ -318,7 +318,7 @@
       ${fld("tBrand", "ยี่ห้อ", x.brand)}${fld("tModel", "รุ่น", x.model)}${fld("tSn", "Serial No.", x.serial_no)}
       ${fld("tSpec", "ขนาด / ช่วงวัด / ความละเอียด", x.spec)}${fld("tOwner", "ผู้ถือครอง", x.owner_name)}${fld("tDept", "แผนก", x.department, "text", ' list="qaDepts"')}${fld("tLoc", "ที่เก็บ", x.location)}
       ${fld("tBuy", "วันที่เริ่มใช้ (ใช้คำนวณอายุ)", x.purchase_date, "date")}${fld("tPrice", "ราคา (บาท)", x.price, "number", ' min="0"')}
-      ${t && ["available", "repair", "lost"].includes(x.status) ? sel("tSt", "สถานะ", [["available", "ว่าง"], ["repair", "ซ่อม / ชำรุด"], ["lost", "สูญหาย"]], x.status) : ""}
+      ${t && ["available", "repair", "lost"].includes(x.status) ? sel("tSt", "สถานะ", [["available", "ใช้งานได้ / ยืมได้"], ["repair", "ซ่อม / ชำรุด"], ["lost", "สูญหาย"]], x.status) : ""}
       <label class="qa-ck"><input type="checkbox" id="tLend"${x.lendable ? " checked" : ""}> เครื่องมือกลาง ให้ยืมได้</label>
       <label class="qa-ck"><input type="checkbox" id="tCal"${x.needs_cal ? " checked" : ""}> ต้องสอบเทียบ</label>
       ${fld("tInt", "สอบเทียบทุก (เดือน)", x.cal_interval_m, "number", ' min="1" max="120"')}${fld("tLast", "สอบเทียบล่าสุด", x.last_cal_date, "date")}${fld("tNext", "ครบกำหนดครั้งถัดไป (ว่าง = คำนวณให้)", x.next_cal_due, "date")}
@@ -346,7 +346,7 @@
     dialog(`🔁 เบิก / เปลี่ยนผู้ถือครอง: ${esc(t.asset_no)} · ${esc(t.name)}`, `<p>ผู้ถือครองตอนนี้: <b>${esc(t.owner_name || "คลัง QA")}</b>${t.department ? " · " + esc(t.department) : ""}</p><div class="qa-form">
       ${fld("hName", "ผู้ถือครองใหม่ (เว้นว่าง = คืนเข้าคลัง QA)", "")}${fld("hDept", "แผนก", "", "text", ' list="qaDepts2"')}${fld("hDate", "วันที่", TODAY(), "date")}
       ${sel("hWhy", "สาเหตุ", [["", "—"], ["เบิกใหม่", "เบิกใหม่"], ["ลาออก", "ลาออก"], ["ชำรุด", "ชำรุด"], ["สเกลไม่ชัด", "สเกลไม่ชัด"], ["โอนย้าย", "โอนย้ายแผนก / คน"], ["อื่นๆ", "อื่นๆ"]], "")}
-      ${["available", "repair", "lost"].includes(t.status) ? sel("hSt", "สถานะเครื่องมือ", [["available", "ว่าง / ใช้งานได้"], ["repair", "ซ่อม / ชำรุด"], ["lost", "สูญหาย"]], t.status) : ""}
+      ${["available", "repair", "lost"].includes(t.status) ? sel("hSt", "สถานะเครื่องมือ", [["available", "ใช้งานได้ / ยืมได้"], ["repair", "ซ่อม / ชำรุด"], ["lost", "สูญหาย"]], t.status) : ""}
       <label class="wide">หมายเหตุ<input id="hNote"></label></div><datalist id="qaDepts2">${depts().map(d => `<option value="${esc(d)}">`).join("")}</datalist>
       <p class="sub">บันทึกแทนชีต “เบิก/คืนเครื่องมือ” — ดูย้อนหลังได้ที่แท็บ ยืม-คืน และบันทึกการเปลี่ยนแปลงของเครื่องมือ · ถ้าชำรุดจนใช้ไม่ได้ ให้กด “ขอจำหน่าย” ต่อ</p>`,
       async v => { await post("holder", { id: t.id, owner_name: v("hName"), department: v("hDept"), date: v("hDate"), reason: v("hWhy"), status: v("hSt"), note: v("hNote") }); await refresh("บันทึกแล้ว"); });
@@ -363,7 +363,7 @@
       ${fld("rDate", "วันที่สอบเทียบ *", c.cal_date || TODAY(), "date")}${fld("rLab", "หน่วยงาน (Lab)", c.lab || lastLab(t))}${fld("rCert", "เลขที่ใบรับรอง (Certificate No.)", c.cert_no)}
       ${sel("rRes", "ผล *", [["", "— เลือก —"], ...Object.entries(RES)], c.result)}${fld("rNext", "ครบกำหนดครั้งถัดไป (ว่าง = +" + (t.cal_interval_m || 12) + " เดือน)", c.next_due, "date")}${fld("rCost", "ค่าใช้จ่าย (บาท)", c.cost, "number", ' min="0"')}
       <label class="wide">หมายเหตุ<input id="rNote" value="${esc(c.note || "")}"></label></div><div class="qa-docs" id="cDocs">${dl()}</div>
-      <p class="sub">บันทึกแล้วจะส่งให้ดิวอนุมัติ — อนุมัติแล้ววันครบกำหนดใหม่จึงมีผล และเครื่องมือกลับมาเป็น “ว่าง”</p>`,
+      <p class="sub">บันทึกแล้วจะส่งให้ดิวอนุมัติ — อนุมัติแล้ววันครบกำหนดใหม่จึงมีผล และเครื่องมือกลับมาใช้งานได้</p>`,
       async v => { await post("cal-result", { tool_id: t.id, id: calId || 0, cal_date: v("rDate"), lab: v("rLab"), cert_no: v("rCert"), result: v("rRes"), next_due: v("rNext"), cost: v("rCost"), note: v("rNote"), docs }); await refresh("บันทึกผลแล้ว รออนุมัติ"); }, "บันทึก + ส่งอนุมัติ");
     const box = m.querySelector("#cDocs");
     const rebind = () => { box.querySelectorAll("[data-rm]").forEach(b => b.onclick = () => { docs.splice(+b.dataset.rm, 1); box.innerHTML = dl(); rebind(); });
