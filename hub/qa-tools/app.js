@@ -151,13 +151,13 @@
   function filters() {
     return `<div class="qa-bar"><input type="search" id="qaQ" placeholder="🔍 ค้นหา รหัส / ชื่อ / ยี่ห้อ / ขนาด / ผู้ถือครอง" value="${esc(S.q)}">
       <select id="qaCat"><option value="">ทุกประเภท</option>${CATS.map(([k, l]) => `<option value="${k}"${S.cat === k ? " selected" : ""}>${l}</option>`).join("")}</select>
-      <select id="qaDept"><option value="">ทุกแผนก</option>${[...new Set(D.tools.map(t => t.department).filter(Boolean))].sort().map(d => `<option${S.dept === d ? " selected" : ""}>${esc(d)}</option>`).join("")}</select><select id="qaSt"><option value="">ทุกสถานะ</option>${Object.entries(ST).map(([k, [l]]) => `<option value="${k}"${S.st === k ? " selected" : ""}>${l}</option>`).join("")}<option value="inuse"${S.st === "inuse" ? " selected" : ""}>ใช้งานได้ (มีผู้ถือครองประจำ)</option><option value="calover"${S.st === "calover" ? " selected" : ""}>เลยกำหนดสอบเทียบ</option><option value="calsoon"${S.st === "calsoon" ? " selected" : ""}>สอบเทียบใน ${DUE_SOON} วัน</option></select>`;
+      <select id="qaDept"><option value="">ทุกแผนก</option>${[...new Set(D.tools.map(t => t.department).filter(Boolean))].sort().map(d => `<option${S.dept === d ? " selected" : ""}>${esc(d)}</option>`).join("")}</select><select id="qaSt"><option value="">ทุกสถานะ</option>${Object.entries(ST).map(([k, [l]]) => `<option value="${k}"${S.st === k ? " selected" : ""}>${l}</option>${k === "available" ? `<option value="blocked"${S.st === "blocked" ? " selected" : ""}>ห้ามยืม / ห้ามใช้ (เลยกำหนดสอบเทียบ)</option>` : ""}`).join("")}<option value="inuse"${S.st === "inuse" ? " selected" : ""}>ใช้งานได้ (มีผู้ถือครองประจำ)</option><option value="calover"${S.st === "calover" ? " selected" : ""}>เลยกำหนดสอบเทียบ</option><option value="calsoon"${S.st === "calsoon" ? " selected" : ""}>สอบเทียบใน ${DUE_SOON} วัน</option></select>`;
   }
   function filtered() {
     const q = S.q.toLowerCase();
     return D.tools.filter(t => (S.st === "retired" || t.status !== "retired")
       && (!S.cat || t.category === S.cat) && (!S.dept || t.department === S.dept)
-      && (!S.st || (S.st === "available" ? t.status === "available" && t.lendable : t.status === S.st) || (S.st === "inuse" && t.status === "available" && !t.lendable) || (S.st === "calover" && calState(t).k === "over") || (S.st === "calsoon" && calState(t).k === "soon"))
+      && (!S.st || (S.st === "available" ? canBorrow(t) : S.st === "blocked" ? t.status === "available" && t.lendable && calState(t).k === "over" : t.status === S.st) || (S.st === "inuse" && t.status === "available" && !t.lendable) || (S.st === "calover" && calState(t).k === "over") || (S.st === "calsoon" && calState(t).k === "soon"))
       && (!q || [t.asset_no, t.fixed_asset_no, t.name, t.brand, t.model, t.serial_no, t.owner_name, t.department, t.location, t.spec].some(v => String(v || "").toLowerCase().includes(q))));
   }
   function vList() {
