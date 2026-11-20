@@ -57,7 +57,7 @@
     if (ERR) { ROOT.innerHTML = `<div class="cd-card cd-err">${esc(ERR)}</div>`; return; }
     if (!D) { ROOT.innerHTML = `<div class="cd-card">กำลังโหลด…</div>`; return; }
     const newN = D.candidates.filter(isNew).length;
-    const tabs = `<div class="cd-tabs"><a href="#candidates" class="${S.page !== "tests" ? "on" : ""}">ผู้สมัคร${newN ? ` <b class="cd-dot">${newN}</b>` : ""}</a><a href="#candidates/tests" class="${S.page === "tests" ? "on" : ""}">แบบทดสอบ · ลิงก์สมัคร</a>${me().canEdit ? `<span class="cd-role">ดิว / นุ่น — แก้ไขได้</span>` : ""}</div>`;
+    const tabs = `<div class="cd-tabs"><a href="#candidates" class="${S.page !== "tests" ? "on" : ""}">ผู้สมัคร${newN ? ` <b class="cd-dot">${newN}</b>` : ""}</a><a href="#candidates/tests" class="${S.page === "tests" ? "on" : ""}">แบบทดสอบ · ลิงก์สมัคร</a>${me().trialEditor ? `<span class="cd-role">🧪 สิทธิ์เท่าดิว (เฉพาะโหมดทดลองใช้)</span>` : me().canEdit ? `<span class="cd-role">ดิว / นุ่น — แก้ไขได้</span>` : ""}</div>`;
     const trial = D.tests.some(t => t.trial);
     const banner = trial ? `<div class="cd-trial"><div>🧪 <b>โหมดทดลองใช้</b> — ทดลองส่งแบบทดสอบ ให้คะแนน แนบไฟล์ได้ตามสบาย ข้อมูลทั้งหมดล้างได้ก่อนเปิดใช้งานจริง · หน้าสมัครจะขึ้นป้าย “ทดลองระบบ”</div>${me().canEdit ? `<div><button class="cd-btn ghost sm" data-a="reset">🧹 ล้างข้อมูลทดลองทั้งหมด</button> <button class="cd-btn sm" data-a="golive">🚀 เปิดใช้งานจริง</button></div>` : ""}</div>` : "";
     ROOT.innerHTML = tabs + banner + (S.page === "c" ? vCand() : S.page === "tests" ? vTests() : vList());
