@@ -1127,6 +1127,11 @@ async function qaApi(cfg, req, url, prof) {
       if (!tools || !loans || !cals) return json({ error: 'no_table' }, 503);
       return json({ me: { username: who, name: whoName, canManage: manage, canApprove: approve }, tools, loans, cals, holds: holds || [] });
     }
+    if (p === 'audit') {   // every QA Tools action by every user — ดิว (approver) only
+      if (!approve) return json({ error: 'ดูประวัติการทำรายการได้เฉพาะดิว' }, 403);
+      const rows = await restAll(cfg, `${QA_G}?select=*&order=at.desc,id.desc`, 5000);
+      return json({ log: rows || [] });
+    }
     if (p === 'log') {
       const id = Number(url.searchParams.get('tool')) || 0, cal = Number(url.searchParams.get('cal')) || 0;
       if (cal) {   // one calibration record's history; entries logged before cal_id existed are matched by tool + calibration actions
