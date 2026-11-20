@@ -1394,9 +1394,9 @@ function stClean(d) {
 // Writes to site_team_people; if a newer column is not there yet (database/site_team-002 / -003.sql not run), retry without it.
 async function stWrite(u, method, H, row) {
   let r = await fetch(u, { method, headers: H, body: JSON.stringify(row) });
-  for (let i = 0; i < 2 && !r.ok && r.status === 400; i++) {
+  for (let i = 0; i < 3 && !r.ok && r.status === 400; i++) {
     const t = await r.clone().text().catch(() => '');
-    const col = ['team', 'visas'].find((k) => k in row && new RegExp(`'${k}'|"${k}"|\\b${k}\\b`).test(t));
+    const col = ['team', 'visas', 'kind', 'status'].find((k) => k in row && new RegExp(`'${k}'|"${k}"|\\b${k}\\b`).test(t));
     if (!col) break;
     const { [col]: _drop, ...rest } = row; row = rest;
     r = await fetch(u, { method, headers: H, body: JSON.stringify(row) });
@@ -1517,8 +1517,20 @@ async function siteTeamApi(cfg, req, url, prof) {
         people: (Array.isArray(d.people) ? d.people : []).map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 200), updated_at: now };
       const id = Number(d.id) || 0;
       if (row.job_no) row.job_no = row.job_no.toUpperCase().replace(/\s+/g, '');
-      const manual = /^(IJ|IS|IN|SO|WR)/.test(row.job_no || '');   // Site survey (IJ) / Service (IS, IN, SO, WR): number typed in
-      if (manual && !/^(IJ|IS|IN|SO|WR)[A-Z0-9-]{2,30}$/.test(row.job_no)) return json({ error: 'เลข IJ / IS / IN / SO / WR ไม่ถูกต้อง' }, 400);
+      // kind: install = Job from Get Award · survey / service = number typed in, any format (Dew, 20 Nov 2026)
+      row.kind = ['install', 'survey', 'service'].includes(d.kind) ? d.kind : /^IJ/.test(row.job_no || '') ? 'survey' : /^(IS|IN|SO|WR)/.test(row.job_no || '') ? 'service' : 'install';
+      const manual = row.kind !== 'install';
+      if (manual && !/^[A-Z0-9][A-Z0-9/._-]{1,39}$/.test(row.job_no || '')) return json({ error: 'ใส่เลขงานก่อน' }, 400);
+      // status: draft may include people without a passport; confirmed needs every person's passport valid 6 months after return
+      row.status = d.status === 'confirmed' ? 'confirmed' : 'draft';
+      if (row.status === 'confirmed') {
+        if (!row.people.length) return json({ error: 'เลือกคนก่อน Confirm trip' }, 400);
+        if (!to) return json({ error: 'ใส่วันกลับก่อน Confirm trip' }, 400);
+        const ps = (await restAll(cfg, `/rest/v1/site_team_people?select=id,passport_no,passport_expiry&id=in.(${row.people.join(',')})`)) || [];
+        const need = new Date(to + 'T00:00:00Z'); need.setUTCMonth(need.getUTCMonth() + 6);
+        const bad = row.people.filter((pid) => { const p = ps.find((x) => x.id === pid); return !p || !p.passport_no || !p.passport_expiry || new Date(p.passport_expiry + 'T00:00:00Z') < need; });
+        if (bad.length) return json({ error: `Confirm ไม่ได้ — Passport ยังไม่ครบ / ไม่ผ่าน 6 เดือน ${bad.length} คน (บันทึกเป็น Draft ได้)` }, 400);
+      }
       if (!manual && (!id || row.job_no)) {   // Job installation: only a Job that got the award with a Budget (Site Expense)
         const job = (await stAwardedJobs(cfg)).find((j) => j.jo === row.job_no);
         const old = id ? ((await restAll(cfg, `/rest/v1/site_team_trips?select=job_no&id=eq.${id}`)) || [])[0] : null;
@@ -1526,9 +1538,9 @@ async function siteTeamApi(cfg, req, url, prof) {
         if (job) Object.assign(row, { title: job.name || job.jo, customer: job.customer || null });
       }
       const r = id
-        ? await fetch(cfg.url + `/rest/v1/site_team_trips?id=eq.${id}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) })
-        : await fetch(cfg.url + '/rest/v1/site_team_trips', { method: 'POST', headers: H, body: JSON.stringify({ ...row, created_by: who }) });
-      return r.ok ? json({ ok: true, trip: (await r.json())[0] }) : json({ error: 'supabase' }, 502);
+        ? await stWrite(cfg.url + `/rest/v1/site_team_trips?id=eq.${id}`, 'PATCH', H, row)
+        : await stWrite(cfg.url + '/rest/v1/site_team_trips', 'POST', H, { ...row, created_by: who });
+      return r.ok ? json({ ok: true, trip: { kind: row.kind, ...(await r.json())[0] } }) : json({ error: 'supabase' }, 502);
     }
     if (path === '/api/site-team/trip-delete') {
       const id = Number(d.id) || 0; if (!id) return json({ error: 'input' }, 400);

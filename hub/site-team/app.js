@@ -311,9 +311,9 @@
     try { const j = await post("cert", { ...c, ...patch }); D.certs = D.certs.filter(x => x.id !== id).concat(j.cert); toast("บันทึกแล้ว"); draw(); } catch (x) { toast(x.message, 1); }
   }
   function tripLine(t) {
-    const ps = tripPeople(t), bad = ps.filter(x => !x.okTravel).length;
-    return `<div class="stm-trip"><span class="stm-st st-none">${esc(kindL(t))}</span> <b>${esc(t.title)}</b> <span class="muted">${esc([t.job_no, t.customer].filter(Boolean).join(" · "))}${t.country ? " · " + flag(cKey(t.country)) + " " + esc(t.country) : ""}</span>
-      <div class="sub">${fmt(t.date_from)}${t.date_to && t.date_to !== t.date_from ? " – " + fmt(t.date_to) : ""} · ${ps.length} คน · ประกัน${INS_L[t.insurance_type] || ""}${bad ? ` · <span class="bad">Passport ไม่ผ่าน ${bad} คน</span>` : ""}</div></div>`;
+    const ps = tripPeople(t), bad = ps.filter(x => !x.okTravel).length, ts = TRIP_ST[t.status] || TRIP_ST.draft;
+    return `<div class="stm-trip"><span class="stm-st ${ts[1]}">${ts[0]}</span> <span class="stm-st st-none">${esc(kindL(t))}</span> <b>${esc(t.title)}</b> <span class="muted">${esc([t.job_no, t.customer].filter(Boolean).join(" · "))}${t.country ? " · " + flag(cKey(t.country)) + " " + esc(t.country) : ""}</span>
+      <div class="sub">${fmt(t.date_from)}${t.date_to && t.date_to !== t.date_from ? " – " + fmt(t.date_to) : ""} · ${ps.length} คน · ประกัน${INS_L[t.insurance_type] || ""}${bad ? ` · <span class="bad">Passport ยังไม่ครบ / ไม่ผ่าน ${bad} คน</span>` : ""}</div></div>`;
   }
 
   function filterBar(extra = "") {
@@ -381,6 +381,7 @@
   /* trip kinds (Dew, 17 Nov 2026): installation = Job from Get Award · survey = IJ typed in · service = IS / IN / SO / WR typed in.
      The kind is not stored: it follows the Job no. prefix. */
   const KINDS = [["install", "Job installation (จาก Get Award)"], ["survey", "Site survey (เลข IJ)"], ["service", "Service (เลข IS / IN / SO / WR)"]];
+  const TRIP_ST = { draft: ["📝 Draft", "st-none"], confirmed: ["✅ Confirmed", "st-ok"] };
   const KIND_RE = { survey: /^IJ/i, service: /^(IS|IN|SO|WR)/i };
   const kindOf = t => t.kind || (KIND_RE.survey.test(t.job_no || "") ? "survey" : KIND_RE.service.test(t.job_no || "") ? "service" : "install");
   const kindL = t => (KINDS.find(k => k[0] === kindOf(t)) || [, ""])[1].split(" (")[0];
@@ -397,9 +398,11 @@
     const picked = tripPeople(t);
     const dis = ce ? "" : " disabled";
     const kind = kindOf(t), manual = kind !== "install";
+    const noPass = picked.filter(r => !r.p.passport_no || !r.p.passport_expiry).length, notOk = picked.filter(r => !r.okTravel).length;
+    const canConfirm = picked.length && back && !notOk;
     const cList = `<datalist id="stCountries2">${COUNTRIES.map(c => `<option value="${esc(c)}">`).join("")}</datalist>`;
     const head = manual
-      ? `<label>${kind === "survey" ? "เลข IJ" : "เลข IS / IN / SO / WR"} *<input id="tJob" value="${esc(t.job_no || "")}" placeholder="${kind === "survey" ? "IJ…" : "IS… / IN… / SO… / WR…"}"${dis}></label>
+      ? `<label>${kind === "survey" ? "เลข IJ" : "เลข IS / IN / SO / WR"} *<input id="tJob" value="${esc(t.job_no || "")}" placeholder="เช่น 0021742026"${dis}></label>
         <label>งาน / โปรเจค *<input id="tTitle" value="${esc(t.title || "")}"${dis}></label>
         <label>ลูกค้า<input id="tCus" data-customer value="${esc(t.customer || "")}"${dis}></label>
         <label>ประเทศ<input id="tCountry" list="stCountries2" value="${esc(t.country || "")}"${dis}>${cList}</label>`
@@ -412,7 +415,7 @@
         : `<p class="wide muted">ยังไม่มี Job ที่ Get Award และมี Budget ใน Site Expense — Job installation สร้างได้หลัง Get Award (Site survey / Service กรอกเลขเองได้)</p>`);
     const vCell = r => { if (!t.country) return ""; const x = visaFor(r.p, t.country); if (!x) return `<td><span class="stm-st st-none">ไม่มีวีซ่า ${esc(cKey(t.country))}</span></td>`;
       const e = parse(x.expiry), ok = !e || !back || e >= back; return `<td><span class="stm-st ${ok ? "st-ok" : "st-bad"}">วีซ่า${x.expiry ? (ok ? " ถึง " : " หมด ") + fmt(x.expiry) : ""}</span></td>`; };
-    return `<div class="stm-card"><h3>${t.id ? "แก้ไขทริป" : "Create new trip"}</h3>
+    return `<div class="stm-card"><h3>${t.id ? "แก้ไขทริป" : "Create new trip"} <span class="stm-st ${(TRIP_ST[t.status] || TRIP_ST.draft)[1]}">${(TRIP_ST[t.status] || TRIP_ST.draft)[0]}</span></h3>
       <div class="stm-form">
         <label class="wide">ประเภททริป *<select id="tKind"${dis}>${KINDS.map(([k, l]) => `<option value="${k}"${kind === k ? " selected" : ""}>${l}</option>`).join("")}</select></label>
         ${head}
@@ -422,10 +425,11 @@
         <label class="wide">หมายเหตุ<input id="tNote" value="${esc(t.note || "")}"${dis}></label>
       </div>
       <h4>เลือกคน (${sel.size}) ${need ? `<span class="muted">— Passport ต้องหมดอายุหลัง ${fmt(iso(need))}</span>` : `<span class="muted">— ใส่วันกลับเพื่อตรวจ Passport</span>`}</h4>
-      ${picked.length ? `<div class="stm-chips">${picked.map(r => `<span class="stm-chip ${r.okTravel ? "" : "bad"}">${esc(label(r))}${r.okTravel ? "" : " ⚠"}</span>`).join("")}</div>` : ""}
-      ${ce ? filterBar(`<select id="stTc"><option value="">🎓 ทุก Certificate</option>${COURSES.map(([k, l, ic]) => `<option value="${k}"${S.tCert === k ? " selected" : ""}>${ic} ต้องมี ${esc(l)}</option>`).join("")}</select>`) + `<div class="stm-scroll stm-pick"><table class="stm-t"><tbody>${rs.map(r => { const [k, l] = chk(r); const can = !!r.pid;
-        return `<tr><td><label class="stm-ck"><input type="checkbox" data-pick="${r.pid}"${sel.has(r.pid) ? " checked" : ""}${can ? "" : " disabled title=\"ยังไม่มีข้อมูล Passport\""}> ${esc(label(r))}</label></td><td>${unitBadge(r.unit)}</td><td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${k === "ok" ? "st-ok" : k === "bad" ? "st-bad" : "st-none"}">${l}</span></td>${vCell(r)}<td><div class="stm-vchips">${(TI.byKey.get(r.key) || []).filter(c => ["ok", "due", "unk"].includes(certSt(c)[0])).map(certChip).join("")}</div></td></tr>`; }).join("")}</tbody></table></div>` : ""}
-      <div class="stm-acts">${ce ? `<button class="stm-btn" data-a="trip-save">บันทึก</button>${t.id ? ` <button class="stm-btn ghost" data-a="trip-xlsx" data-id="${t.id}">⬇ รายชื่อทำประกัน</button> <button class="stm-btn danger" data-a="trip-del" data-id="${t.id}">ลบทริป</button>` : ""}` : ""} <button class="stm-btn ghost" data-a="trip-close">กลับ</button></div></div>`;
+      ${picked.length ? `<div class="stm-chips">${picked.map(r => `<span class="stm-chip ${r.okTravel ? "" : "bad"}" title="${r.okTravel ? "Passport ผ่าน" : !r.p.passport_no ? "ยังไม่มี Passport" : "Passport ไม่ผ่าน " + TRAVEL_MONTHS + " เดือน"}">${esc(label(r))}${r.okTravel ? "" : !r.p.passport_no ? " · ไม่มี Passport" : " ⚠"}</span>`).join("")}</div>
+        ${notOk ? `<p class="sub bad">⚠️ ${noPass ? `ยังไม่มี Passport ${noPass} คน` : ""}${noPass && notOk > noPass ? " · " : ""}${notOk > noPass ? `Passport ไม่ผ่าน ${TRAVEL_MONTHS} เดือน ${notOk - noPass} คน` : ""} — บันทึกเป็น Draft ได้ · Confirm ได้เมื่อครบทุกคน</p>` : ""}` : ""}
+      ${ce ? filterBar(`<select id="stTc"><option value="">🎓 ทุก Certificate</option>${COURSES.map(([k, l, ic]) => `<option value="${k}"${S.tCert === k ? " selected" : ""}>${ic} ต้องมี ${esc(l)}</option>`).join("")}</select>`) + `<div class="stm-scroll stm-pick"><table class="stm-t"><tbody>${rs.map(r => { const [k, l] = chk(r);
+        return `<tr><td><label class="stm-ck"><input type="checkbox" data-pick="${r.pid || "w:" + (r.worker ? r.worker.id : "")}"${r.pid && sel.has(r.pid) ? " checked" : ""}> ${esc(label(r))}</label></td><td>${unitBadge(r.unit)}</td><td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${k === "ok" ? "st-ok" : k === "bad" ? "st-bad" : "st-none"}">${l}</span></td>${vCell(r)}<td><div class="stm-vchips">${(TI.byKey.get(r.key) || []).filter(c => ["ok", "due", "unk"].includes(certSt(c)[0])).map(certChip).join("")}</div></td></tr>`; }).join("")}</tbody></table></div>` : ""}
+      <div class="stm-acts">${ce ? `<button class="stm-btn ghost" data-a="trip-save" data-st="draft">💾 บันทึก Draft</button> <button class="stm-btn" data-a="trip-save" data-st="confirmed"${canConfirm ? "" : ` disabled title="Confirm ได้เมื่อทุกคนมี Passport ผ่าน ${TRAVEL_MONTHS} เดือน และใส่วันกลับแล้ว"`}>✅ Confirm trip</button>${t.id ? ` <button class="stm-btn ghost" data-a="trip-xlsx" data-id="${t.id}">⬇ รายชื่อทำประกัน</button> <button class="stm-btn danger" data-a="trip-del" data-id="${t.id}">ลบทริป</button>` : ""}` : ""} <button class="stm-btn ghost" data-a="trip-close">กลับ</button></div></div>`;
   }
   async function tripXlsx(t) {
     let X; try { X = await loadXLSX(); } catch (e) { return toast(e.message, 1); }
@@ -566,9 +570,12 @@
     on("stS", "change", e => { S.st = e.target.value; readTrip(); draw(); });
     on("impFile", "change", e => e.target.files[0] && readImport(e.target.files[0]));
     ROOT.querySelectorAll("[data-imp]").forEach(s => s.addEventListener("change", () => { const r = S.imp[+s.dataset.imp]; if (s.value.startsWith("+")) { r.worker_id = ""; r.team = s.value.slice(1); } else { r.worker_id = s.value; r.team = ""; } draw(); }));
-    ROOT.querySelectorAll("[data-pick]").forEach(c => c.addEventListener("change", () => {
-      readTrip(); const id = +c.dataset.pick, set = new Set((S.trip.people || []).map(Number));
-      c.checked ? set.add(id) : set.delete(id); S.trip.people = [...set]; draw();
+    ROOT.querySelectorAll("[data-pick]").forEach(c => c.addEventListener("change", async () => {
+      readTrip(); let id = c.dataset.pick;
+      if (id.startsWith("w:")) {   // on the Manpower board but no Site Team row yet (no passport) — create one so the trip can hold them
+        try { const j = await post("person", { worker_id: id.slice(2) }); D.people = D.people.concat(j.person); id = j.person.id; } catch (x) { c.checked = false; return toast(x.message, 1); }
+      }
+      const set = new Set((S.trip.people || []).map(Number)); c.checked ? set.add(+id) : set.delete(+id); S.trip.people = [...set]; draw();
     }));
     ["tFrom", "tTo"].forEach(id => on(id, "change", () => { readTrip(); draw(); }));
     on("tJobSel", "change", e => { readTrip(); pickJob(e.target.value); draw(); });
@@ -586,7 +593,7 @@
     const all = () => people();
     if (a === "edit") return personForm(all().find(r => r.key === ds.k));
     if (a === "add") return personForm(null);
-    if (a === "trip-new") { S.trip = { people: [], insurance_type: "trip" }; S.q = ""; return draw(); }
+    if (a === "trip-new") { S.trip = { people: [], insurance_type: "trip", kind: "install", status: "draft" }; S.q = ""; return draw(); }
     if (a === "trip-edit" || a === "trip-view") { S.trip = JSON.parse(JSON.stringify(D.trips.find(t => t.id === +ds.id))); S.q = ""; return draw(); }
     if (a === "trip-close") { S.trip = null; return draw(); }
     if (a === "trip-xlsx") { readTrip(); const t = S.trip && S.trip.id === +ds.id ? S.trip : D.trips.find(x => x.id === +ds.id); return tripXlsx(t); }
@@ -594,11 +601,11 @@
       readTrip(); const t = S.trip;
       const k = kindOf(t);
       if (k === "install" && !t.job_no) return toast("เลือก Job ที่ Get Award แล้วก่อน", 1);
-      if (k !== "install" && !KIND_RE[k].test(t.job_no || "")) return toast(k === "survey" ? "ใส่เลข IJ (ขึ้นต้นด้วย IJ)" : "ใส่เลขขึ้นต้นด้วย IS / IN / SO / WR", 1);
+      if (k !== "install" && !t.job_no) return toast("ใส่เลขงานก่อน", 1);
       if (!t.title) return toast("ใส่ชื่องาน / โปรเจคก่อน", 1);
-      const bad = tripPeople(t).filter(r => !r.okTravel);
-      if (bad.length && !confirm(`Passport ของ ${bad.map(label).join(", ")} ไม่ผ่านเงื่อนไข ${TRAVEL_MONTHS} เดือน — บันทึกต่อไหม?`)) return;
-      try { const j = await post("trip", t); S.trip = null; toast("บันทึกทริปแล้ว"); D.trips = D.trips.filter(x => x.id !== j.trip.id).concat(j.trip); draw(); } catch (x) { toast(x.message, 1); }
+      const st = ds.st === "confirmed" ? "confirmed" : "draft", bad = tripPeople(t).filter(r => !r.okTravel);
+      if (st === "confirmed" && (bad.length || !tripPeople(t).length)) return toast(bad.length ? `Confirm ไม่ได้ — Passport ยังไม่ครบ / ไม่ผ่าน: ${bad.map(label).join(", ")}` : "เลือกคนก่อน Confirm", 1);
+      try { const j = await post("trip", { ...t, kind: k, status: st }); S.trip = null; toast(st === "confirmed" ? "Confirm trip แล้ว ✅" : "บันทึก Draft แล้ว"); D.trips = D.trips.filter(x => x.id !== j.trip.id).concat(j.trip); draw(); } catch (x) { toast(x.message, 1); }
       return;
     }
     if (a === "trip-del") { if (!confirm("ลบทริปนี้?")) return; try { await post("trip-delete", { id: +ds.id }); S.trip = null; D.trips = D.trips.filter(x => x.id !== +ds.id); draw(); } catch (x) { toast(x.message, 1); } return; }
