@@ -13,11 +13,11 @@
   const ST = { available: ["ยืมได้", "s-ok"], on_loan: ["ถูกยืม", "s-loan"], calibration: ["ส่งสอบเทียบ", "s-cal"], repair: ["ซ่อม / ชำรุด", "s-warn"], lost: ["สูญหาย", "s-bad"], retire_pending: ["รออนุมัติจำหน่าย", "s-off"], retired: ["จำหน่ายแล้ว", "s-off"] };
   const RES = { pass: "ผ่าน", adjusted: "ปรับตั้งแล้วผ่าน", fail: "ไม่ผ่าน" };
   const COND = { ok: "ปกติ", damaged: "ชำรุด", missing_parts: "อุปกรณ์ไม่ครบ" };
-  const TABS = [["", "ภาพรวม"], ["list", "ทะเบียนเครื่องมือ"], ["loans", "ยืม-คืน"], ["cal", "สอบเทียบ"], ["history", "ประวัติสอบเทียบ"]];
+  const TABS = [["", "ภาพรวม"], ["list", "ทะเบียนเครื่องมือ"], ["loans", "ยืม-คืน"], ["cal", "สอบเทียบ"]];
   const DUE_SOON = 30;   // days before the calibration due date to start warning
 
   let ROOT = null, D = null, ERR = "", LOADING = null;
-  const S = { page: "", tool: 0, q: "", cat: "", dept: "", st: "", imp: null, sel: new Set(), hq: "", hst: "", hy: "", view: (() => { try { return localStorage.getItem("qaView") || "grid"; } catch (e) { return "grid"; } })() };
+  const S = { page: "", tool: 0, q: "", cat: "", dept: "", st: "", imp: null, sel: new Set(), aq: "", au: "", aa: "", am: "", audit: null, view: (() => { try { return localStorage.getItem("qaView") || "grid"; } catch (e) { return "grid"; } })() };
 
   /* ---------- helpers ---------- */
   const pad = n => String(n).padStart(2, "0");
@@ -114,11 +114,11 @@
     if (ERR) { ROOT.innerHTML = `<div class="qa-card qa-err">${esc(ERR)}</div>`; return; }
     if (!D) { ROOT.innerHTML = `<div class="qa-card">กำลังโหลด…</div>`; return; }
     const m = me();
-    const tabs = TABS.slice(); if (m.canManage) tabs.push(["import", "⬆ นำเข้า Excel"]);
+    const tabs = TABS.slice(); if (m.canApprove) tabs.push(["audit", "📜 ประวัติการทำรายการ"]); if (m.canManage) tabs.push(["import", "⬆ นำเข้า Excel"]);
     const pend = D.cals.filter(c => c.status === "pending_approval" || (m.canManage && c.status === "pending_verify")).length + D.tools.filter(t => t.status === "retire_pending").length;
     const role = m.canApprove ? "ผู้อนุมัติ" : m.canManage ? "ผู้ดูแลเครื่องมือ" : "";
     const head = `<div class="qa-tabs">${tabs.map(([id, l]) => `<a href="#qa-tools${id ? "/" + id : ""}" class="${S.page === id ? "on" : ""}">${l}${id === "cal" && m.canApprove && pend ? ` <b class="qa-dot">${pend}</b>` : ""}</a>`).join("")}${role ? `<span class="qa-role">${role}</span>` : ""}</div>`;
-    const page = S.page === "tool" ? vTool() : ({ "": vDash, list: vList, loans: vLoans, cal: vCal, history: vHist, import: vImport }[S.page] || vDash)();
+    const page = S.page === "tool" ? vTool() : ({ "": vDash, list: vList, loans: vLoans, cal: vCal, audit: vAudit, import: vImport }[S.page] || vDash)();
     ROOT.innerHTML = head + page;
     bind();
   }
@@ -302,7 +302,7 @@
   }
   const fld = (id, l, val, type = "text", extra = "") => `<label>${l}<input id="${id}" type="${type}" value="${esc(val ?? "")}"${extra}></label>`;
   const sel = (id, l, opts, val) => `<label>${l}<select id="${id}">${opts.map(([k, t]) => `<option value="${k}"${String(val ?? "") === k ? " selected" : ""}>${t}</option>`).join("")}</select></label>`;
-  async function refresh(msg) { toast(msg); await load(true); }
+  async function refresh(msg) { toast(msg); S.audit = null; await load(true); }
 
   function dlgBorrow(t) {
     const m = me();
@@ -391,30 +391,38 @@
   function dlgNote(title, label, cb, saveLabel) { dialog(title, `<div class="qa-form"><label class="wide">${label}<input id="nNote"></label></div>`, async v => cb(v("nNote")), saveLabel); }
 
   /* ---------- labels / excel ---------- */
-  /* ---------- ประวัติสอบเทียบ: every calibration record — result, edits, verification, approval ---------- */
-  const CST = [["sent", "ส่งแล้ว รอผล"], ["pending_verify", "รอทวนสอบ"], ["pending_approval", "รออนุมัติ"], ["approved", "อนุมัติแล้ว"], ["rejected", "ไม่อนุมัติ"]];
-  const calYear = c => String(c.cal_date || c.sent_date || c.created_at || "").slice(0, 4);
-  function vHist() {
-    const years = [...new Set(D.cals.map(calYear).filter(Boolean))].sort().reverse();
-    const q = S.hq.trim().toLowerCase();
-    const rows = D.cals.filter(c => {
-      const t = tById(c.tool_id) || {};
-      return (!S.hst || c.status === S.hst) && (!S.hy || calYear(c) === S.hy)
-        && (!q || [t.asset_no, t.name, c.lab, c.cert_no, c.verify && c.verify.no, c.approved_by, c.verify && c.verify.name].some(x => String(x || "").toLowerCase().includes(q)));
-    }).sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)));
-    return `<div class="qa-card"><div class="qa-bar"><input id="qaHq" placeholder="🔍 รหัส / ชื่อเครื่องมือ / ใบรับรอง / Verify No. / ผู้อนุมัติ" value="${esc(S.hq)}">
-      <select id="qaHst"><option value="">ทุกสถานะ</option>${CST.map(([k, l]) => `<option value="${k}"${S.hst === k ? " selected" : ""}>${l}</option>`).join("")}</select>
-      <select id="qaHy"><option value="">ทุกปี</option>${years.map(y => `<option${S.hy === y ? " selected" : ""}>${y}</option>`).join("")}</select></div>
-      <p class="sub">${rows.length} รายการ · เรียงตามแก้ไขล่าสุด · กด 📜 เพื่อดูไทม์ไลน์ บันทึกผล → แก้ไข → ทวนสอบ → อนุมัติ</p>
-      <div class="qa-scroll"><table class="qa-t"><thead><tr><th>เครื่องมือ</th><th>สอบเทียบ</th><th>Lab / ใบรับรอง</th><th>ผล</th><th>ทวนสอบ</th><th>อนุมัติ</th><th>แก้ไขล่าสุด</th><th></th></tr></thead><tbody>
-      ${rows.map(c => { const t = tById(c.tool_id) || {}, v = c.verify; return `<tr><td><a href="#qa-tools/tool/${t.id}">${esc(t.name || "?")}</a><div class="sub mono">${esc(t.asset_no || "")}</div></td>
-        <td>${c.cal_date ? fmt(c.cal_date) : `<span class="sub">ส่ง ${fmt(c.sent_date)}</span>`}</td>
-        <td>${esc(c.lab || "")}${c.cert_no ? `<div class="sub">${esc(c.cert_no)}</div>` : ""}${(c.docs || []).map(f => ` <a target="_blank" rel="noopener" href="${esc(docHref(f))}">${f.url ? "🔗" : "📎"}</a>`).join("")}</td>
-        <td>${c.result ? chip(RES[c.result], c.result === "fail" ? "s-bad" : "s-ok") : ""}</td>
-        <td>${v ? `<span class="mono">${esc(v.no || "")}</span><div class="sub">${esc(v.name || "")} · ${fmt(v.date)}</div>` : `<span class="sub">—</span>`}</td>
-        <td>${calStatus(x0(c))}${c.approved_at ? `<div class="sub">${fmtT(c.approved_at)}</div>` : ""}</td>
-        <td class="sub">${fmtT(c.updated_at || c.created_at)}</td>
-        <td><button class="qa-lnk" data-a="cal-view" data-id="${c.id}">📜 ประวัติ</button>${v ? ` <button class="qa-lnk" data-a="cal-print" data-id="${c.id}">🖨</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">ไม่พบรายการ</td></tr>`}
+  /* ---------- ประวัติการทำรายการ: every action by every user (qa_tool_log) — ดิว only ---------- */
+  function loadAudit(force) {
+    if (S.audit && !force) return;
+    S.audit = { loading: true, log: [] };
+    fetch("/api/qa-tools/audit", { cache: "no-store" }).then(r => r.json().then(j => ({ ok: r.ok, j })))
+      .then(({ ok, j }) => { S.audit = ok ? { log: j.log || [] } : { err: j.error || "โหลดไม่สำเร็จ", log: [] }; if (S.page === "audit") draw(); })
+      .catch(() => { S.audit = { err: "โหลดไม่สำเร็จ", log: [] }; if (S.page === "audit") draw(); });
+  }
+  function vAudit() {
+    if (!me().canApprove) return `<div class="qa-card muted">ดูได้เฉพาะดิว</div>`;
+    loadAudit();
+    const A = S.audit || { loading: true, log: [] };
+    if (A.loading) return `<div class="qa-card muted">กำลังโหลดประวัติ…</div>`;
+    if (A.err) return `<div class="qa-card qa-warnbox">${esc(A.err)}</div>`;
+    const L = A.log, users = [...new Set(L.map(x => x.by).filter(Boolean))].sort(), acts = [...new Set(L.map(x => x.action).filter(Boolean))].sort();
+    const months = [...new Set(L.map(x => String(x.at || "").slice(0, 7)).filter(Boolean))].sort().reverse();
+    const q = S.aq.trim().toLowerCase();
+    const rows = L.filter(x => { const t = tById(x.tool_id) || {};
+      return (!S.au || x.by === S.au) && (!S.aa || x.action === S.aa) && (!S.am || String(x.at || "").startsWith(S.am))
+        && (!q || [t.asset_no, t.name, x.by, x.action, x.detail].some(v => String(v || "").toLowerCase().includes(q))); });
+    const mLabel = ym => { const [y, mo] = ym.split("-"); return MS[+mo - 1] + " " + y; };
+    const show = rows.slice(0, 500);
+    return `<div class="qa-card"><div class="qa-bar"><input id="qaAq" placeholder="🔍 รหัส / ชื่อเครื่องมือ / ผู้ทำ / รายละเอียด" value="${esc(S.aq)}">
+      <select id="qaAu"><option value="">ทุกคน</option>${users.map(u => `<option${S.au === u ? " selected" : ""}>${esc(u)}</option>`).join("")}</select>
+      <select id="qaAa"><option value="">ทุกรายการ</option>${acts.map(a => `<option${S.aa === a ? " selected" : ""}>${esc(a)}</option>`).join("")}</select>
+      <select id="qaAm"><option value="">ทุกเดือน</option>${months.map(ym => `<option value="${ym}"${S.am === ym ? " selected" : ""}>${mLabel(ym)}</option>`).join("")}</select>
+      <button class="qa-btn ghost" data-a="audit-reload">↻ โหลดใหม่</button></div>
+      <p class="sub">${rows.length.toLocaleString()} รายการ${rows.length > show.length ? ` · แสดง ${show.length} ล่าสุด — กรองเพิ่มเพื่อดูที่เหลือ` : ""} · ทุกการทำรายการของทุกคนในเมนู QA Tools (ยืม-คืน, เพิ่ม / แก้ไขเครื่องมือ, สอบเทียบ, ทวนสอบ, อนุมัติ, ลบ) · ดูได้เฉพาะดิว</p>
+      <div class="qa-scroll"><table class="qa-t"><thead><tr><th>เมื่อ</th><th>ผู้ทำ</th><th>รายการ</th><th>เครื่องมือ</th><th>รายละเอียด</th><th></th></tr></thead><tbody>
+      ${show.map(x => { const t = tById(x.tool_id), c = x.cal_id && D.cals.find(k => k.id === x.cal_id); return `<tr><td class="sub" style="white-space:nowrap">${fmtT(x.at)}</td><td>${esc(x.by || "")}</td><td><b>${esc(x.action || "")}</b></td>
+        <td>${t ? `<a href="#qa-tools/tool/${t.id}">${esc(t.asset_no)}</a><div class="sub">${esc(t.name)}</div>` : `<span class="sub">${x.tool_id ? "#" + x.tool_id : "—"}</span>`}</td>
+        <td class="sub">${esc(x.detail || "")}</td><td>${c ? `<button class="qa-lnk" data-a="cal-view" data-id="${c.id}" title="ดูรายการสอบเทียบนี้">🎯</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="6" class="muted">ไม่พบรายการ</td></tr>`}
       </tbody></table></div></div>`;
   }
   const x0 = c => ({ ...c, approve_note: "" });   // status chip without the note (shown in the detail)
@@ -552,9 +560,10 @@
     on("qaCat", "change", e => { S.cat = e.target.value; draw(); });
     on("qaDept", "change", e => { S.dept = e.target.value; draw(); });
     on("qaSt", "change", e => { S.st = e.target.value; draw(); });
-    on("qaHq", "input", e => { S.hq = e.target.value; draw(); const q = ROOT.querySelector("#qaHq"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); });
-    on("qaHst", "change", e => { S.hst = e.target.value; draw(); });
-    on("qaHy", "change", e => { S.hy = e.target.value; draw(); });
+    on("qaAq", "input", e => { S.aq = e.target.value; draw(); const q = ROOT.querySelector("#qaAq"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); });
+    on("qaAu", "change", e => { S.au = e.target.value; draw(); });
+    on("qaAa", "change", e => { S.aa = e.target.value; draw(); });
+    on("qaAm", "change", e => { S.am = e.target.value; draw(); });
     on("qaImp", "change", e => e.target.files[0] && readImport(e.target.files[0]));
     ROOT.querySelectorAll("[data-sel]").forEach(c => c.addEventListener("change", () => { c.checked ? S.sel.add(+c.dataset.sel) : S.sel.delete(+c.dataset.sel); draw(); }));
     ROOT.querySelectorAll("[data-a]").forEach(b => b.addEventListener("click", () => act(b.dataset.a, b.dataset)));
@@ -582,6 +591,7 @@
       if (a === "label") return printLabels([t.id]);
       if (a === "labels") return printLabels([...S.sel]);
       if (a === "view") { S.view = ds.v === "rows" ? "rows" : "grid"; try { localStorage.setItem("qaView", S.view); } catch (e) { /* private mode */ } return draw(); }
+      if (a === "audit-reload") { loadAudit(true); return draw(); }
       if (a === "sel-all") { filtered().forEach(x => S.sel.add(x.id)); return draw(); }
       if (a === "sel-none") { S.sel.clear(); return draw(); }
       if (a === "xlsx") return exportXlsx("list");
@@ -639,7 +649,7 @@
     mount(el, sub) {
       if (!document.getElementById("qaCss")) { const s = document.createElement("style"); s.id = "qaCss"; s.textContent = CSS; document.head.appendChild(s); }
       ROOT = el; const parts = String(sub || "").split("/");
-      const pg = parts[0] === "tool" ? "tool" : (TABS.some(t => t[0] === parts[0]) || parts[0] === "import" ? parts[0] : "");
+      const pg = parts[0] === "tool" ? "tool" : (TABS.some(t => t[0] === parts[0]) || parts[0] === "import" || parts[0] === "audit" ? parts[0] : "");
       if (pg !== "import") S.imp = null;
       S.page = pg; S.tool = pg === "tool" ? +parts[1] || 0 : 0;
       draw(); load();
