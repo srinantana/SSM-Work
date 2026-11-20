@@ -314,7 +314,7 @@
     sorted.forEach((x, i) => { if (x.end < x.start) warn.push(`${x.name || "phase"}: วันสิ้นสุดก่อนวันเริ่ม`); if (i && x.start < sorted[i - 1].end) warn.push(`${sorted[i - 1].name} กับ ${x.name} ช่วงเวลาซ้อนกัน`); });
     const gaps = sorted.slice(1).map((x, i) => span(sorted[i].end, x.start)).filter(g => g > 1);
     const row = (x, i) => ed
-      ? `<tr data-ph="${x.id}"><td class="c se-no">${i + 1}</td><td><input class="se-in" data-pk="name" value="${esc(x.name || "")}" placeholder="เช่น Phase 1 Installation"></td><td><input class="se-in" type="date" data-pk="start" value="${esc(x.start || "")}"></td><td><input class="se-in" type="date" data-pk="end" value="${esc(x.end || "")}"></td><td class="c"><b>${phDays(x) || "–"}</b></td><td><button class="se-x" data-phdel aria-label="ลบ phase">${IC.x}</button></td></tr>`
+      ? `<tr data-ph="${x.id}" data-rg><td class="c se-no">${i + 1}</td><td><input class="se-in" data-pk="name" value="${esc(x.name || "")}" placeholder="เช่น Phase 1 Installation"></td><td><input class="se-in" type="date" data-pk="start" data-r="s" value="${esc(x.start || "")}" aria-label="วันเริ่ม"></td><td><input class="se-in" type="date" data-pk="end" data-r="e" value="${esc(x.end || "")}" min="${x.start ? addDays(x.start, 1) : ""}" aria-label="วันสิ้นสุด"></td><td class="c"><b>${phDays(x) || "–"}</b></td><td><button class="se-x" data-phdel aria-label="ลบ phase">${IC.x}</button></td></tr>`
       : `<tr><td class="c se-no">${i + 1}</td><td>${esc(x.name || "–")}</td><td>${fmtD(x.start)}</td><td>${fmtD(x.end)}</td><td class="c"><b>${phDays(x) || "–"}</b></td><td></td></tr>`;
     return `<details class="se-grp se-wp" ${open ? "open" : ""}><summary class="se-grp-h"><b>📅 Working period</b><span class="se-hint">${ph.length} phase · ทำงานจริง ${daysOf(p) || "–"} วัน${dated.length ? ` · ${fmtD(p.start)} – ${fmtD(p.end)}` : ""}${gaps.length ? ` · มีช่วงว่างระหว่าง phase ${gaps.length} ช่วง` : ""}</span></summary>
       <div class="tbl"><table class="se-dt se-wpt"><colgroup><col style="width:40px"><col><col style="width:150px"><col style="width:150px"><col style="width:70px"><col style="width:36px"></colgroup>
@@ -330,6 +330,8 @@
       const x = p.phases.find(y => y.id === tr.dataset.ph); if (!x) return;
       tr.querySelectorAll("[data-pk]").forEach(inp => inp.onchange = () => {
         x[inp.dataset.pk] = inp.value.trim();
+        if (inp.dataset.pk === "start" && x.start && x.end && x.end <= x.start) { x.end = addDays(x.start, 1); toast(`วันสิ้นสุดเลื่อนเป็น ${fmtD(x.end)} (ต้องหลังวันเริ่ม)`); }
+        if (inp.dataset.pk === "end" && x.start && x.end && x.end <= x.start) { x.end = addDays(x.start, 1); toast(`วันสิ้นสุดต้องหลังวันเริ่ม · ปรับเป็น ${fmtD(x.end)}`); }
         if (inp.dataset.pk !== "name") p.lines.forEach(l => { if (l.kind === "mp" && l.phase === x.id && l.days_auto !== false) l.days = phDays(x) || l.days; });
         after();
       });
@@ -396,7 +398,7 @@
     if (p.lines.some(l => !known.has(l.phase))) rows.push([`<span class="se-phn all">∑</span>ทั้งโปรเจค`, l => !known.has(l.phase), null, null]);
     sec.innerHTML = `
       <a class="se-back" href="#site-expense/${encodeURIComponent(p.id)}/estimate">${IC.back}สรุป Estimate ทุกหมวด</a>
-      <div class="se-catnav"><a href="${href("period")}" class="on">${IC.cal}<span>Working period</span></a>${CATS.map(x => `<a href="${href(x.code)}">${x.ic}<span>${esc(x.name)}</span></a>`).join("")}</div>
+      <div class="se-catnav"><a href="${href("period")}" class="on">${IC.cal}<span>Working period</span></a>${CATS.map(x => `<a href="${href(x.code)}">${x.ic}<span>${esc(x.name)}</span></a>`).join("")}${fullBtn()}</div>
       <div class="se-sec-h"><h3 class="se-cat-h">${IC.cal}Working period <small>ช่วงทำงานแต่ละ phase · ไม่จำเป็นต้องต่อเนื่องกัน</small></h3>${ed ? `<span class="badge live">แก้ไขได้</span>` : `<span class="badge off">อ่านอย่างเดียว</span>`}</div>
       ${wpPanel(p, ed, true)}
       <div class="se-grp"><div class="se-grp-h"><b>💰 ค่าใช้จ่ายแยกตาม phase × หมวด</b><span class="se-hint">กดตัวเลขเพื่อไปกรอกในหมวดนั้น</span></div>
@@ -507,7 +509,7 @@
     const canAdd = p.status === "locked" && p.list === "active" && can("actual"), canChk = p.list === "active" && can("check");
     sec.innerHTML = `
       <a class="se-back" href="#site-expense/${encodeURIComponent(p.id)}/estimate">${IC.back}สรุป Estimate ทุกหมวด</a>
-      <div class="se-catnav"><a href="${href("period")}" class="${code === "period" ? "on" : ""}">${IC.cal}<span>Working period</span></a>${CATS.map(x => `<a href="${href(x.code)}" class="${x.code === c.code ? "on" : ""}">${x.ic}<span>${esc(x.name)}</span></a>`).join("")}</div>
+      <div class="se-catnav"><a href="${href("period")}" class="${code === "period" ? "on" : ""}">${IC.cal}<span>Working period</span></a>${CATS.map(x => `<a href="${href(x.code)}" class="${x.code === c.code ? "on" : ""}">${x.ic}<span>${esc(x.name)}</span></a>`).join("")}${fullBtn()}</div>
       <div class="se-sec-h"><h3 class="se-cat-h">${c.ic}${esc(c.name)} <small>${esc(c.th)}</small></h3>${ed ? `<span class="badge live">แก้ไขได้</span>` : `<span class="badge off">${p.status === "locked" ? "🔒 ล็อกเป็น Budgetary แล้ว" : "อ่านอย่างเดียว"}</span>`}</div>
       <div class="se-kpis">${kpi("Estimate", baht(est))}${kpi("Budget", bud == null ? "—" : baht(bud))}${kpi("Actual", baht(act))}${kpi("คงเหลือ", bud == null ? "—" : baht(bud - act), bud != null && bud - act < 0 ? "over" : "")}</div>
       ${byPhase ? "" : `<div class="se-alert">ยังไม่ได้แบ่ง Working period · <a href="${href("period")}">กำหนด phase</a> แล้วค่าใช้จ่ายทุกหมวดจะแยกตาม phase ได้</div>`}
@@ -577,7 +579,37 @@
 
   const CSS4 = `
 .se-click{cursor:pointer}.se-click:hover td{background:var(--blush)}.se-click .se-go{color:var(--rak);font-size:12.5px;white-space:nowrap;font-weight:600}
-.se-catnav{display:flex;flex-wrap:wrap;gap:6px}
+.se-catnav{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.se-fsb{margin-left:auto;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 12px;font:inherit;font-size:13px;color:#3d4450;cursor:pointer}.se-fsb:hover{border-color:var(--rak);color:var(--rak)}
+.se-full{position:fixed;inset:0;z-index:45;background:#f5f6f8;overflow:auto;padding:12px 16px 24px}
+.se-full .se-back,.se-full .se-ph,.se-full .se-next,.se-full .se-pbar,.se-full .se-off,.se-full .se-role{display:none}
+.se-full .se-pg{gap:10px}.se-full .tbl{max-height:none}
+.se-full .se-dt thead th{position:sticky;top:0;z-index:2;background:#f7f8fa}
+.se-fullbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px 14px;font-size:14px}.se-fullbar>span:nth-child(2){color:#4b5260}.se-fullbar-t{margin-left:auto;font-weight:700;font-variant-numeric:tabular-nums}
+.se-pg{display:grid;gap:14px}
+.se-pbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
+.se-ptabs{display:inline-flex;gap:4px;background:#eceef2;border-radius:11px;padding:4px}
+.se-ptabs .se-tab{display:inline-flex;align-items:center;gap:7px;padding:8px 16px;border-radius:8px;text-decoration:none;color:#4b5260;font-size:14px;border:0;background:none;box-shadow:none;min-height:0}
+.se-ptabs .se-tab .se-ci{width:17px;height:17px}.se-ptabs .se-tab b{font-weight:500}
+.se-ptabs .se-tab[aria-current="page"]{background:#fff;color:var(--rak);box-shadow:0 1px 3px rgba(0,0,0,.1)}.se-ptabs .se-tab[aria-current="page"] b{font-weight:700}
+.se-pbar .se-steps{margin:0;font-size:12.5px}
+.se-next{display:flex;align-items:center;gap:12px;background:var(--blush,#fff7ed);border:1px solid var(--rak-line,#fdba74);border-radius:14px;padding:12px 16px}
+.se-next-ic{font-size:22px;line-height:1}.se-next-x{display:grid;gap:2px;min-width:0;flex:1}.se-next-x b{font-size:15px}.se-next-x small{color:#5d6572;font-size:13px}
+.se-next .se-btn{flex:none;text-decoration:none}
+.se-me{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px 16px;display:grid;gap:10px}
+.se-me-h{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 14px}.se-me-hi{font-size:16px}.se-me-r{color:#6b7280;font-size:12.5px}
+.se-me-t{display:flex;flex-wrap:wrap;gap:8px}
+.se-me-c{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:#fafbfc;border-radius:12px;padding:8px 14px;font:inherit;font-size:14px;cursor:pointer;color:#2f3540}
+.se-me-c b{font-size:20px;line-height:1;font-variant-numeric:tabular-nums}.se-me-c:hover{border-color:var(--rak);box-shadow:0 2px 8px -4px rgba(0,0,0,.2)}
+.se-me-c.amb b{color:#b45309}.se-me-c.red b{color:#c70404}.se-me-c.grn b{color:#15803d}.se-me-c.blu b{color:#1d4ed8}.se-me-c.gray b{color:#4b5563}
+.se-me-ok{color:#15803d;font-size:14px}
+.se-me-f{color:#6b7280;font-size:12.5px;border-top:1px dashed var(--line);padding-top:8px}.se-me-f b{color:#3d4450;font-weight:600}
+.se-tools .se-q{flex:1;min-width:220px}.se-tools .se-new{margin-left:0}
+.se-chip small{margin-left:5px;font-size:11px;color:#8a919c;font-variant-numeric:tabular-nums}.se-chip.on small{color:inherit;opacity:.8}
+[data-rg].se-rg-on input[type=date]{border-color:var(--rak);background:var(--blush,#fff7ed)}
+[data-rg] input[type=date].se-rg-cur{box-shadow:0 0 0 3px var(--rak-line,#fdba74);background:#fff}
+.se-rgpair{display:contents}
+@media (max-width:640px){.se-ks{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px}.se-k{padding:10px 12px!important;gap:8px!important}.se-k .se-k-ic{display:none!important}.se-k b{font-size:18px!important}.se-ptabs .se-tab{font-size:13px;gap:4px}.se-ptabs .se-tab .se-tic{display:none}.se-next{flex-wrap:wrap}.se-next .se-btn{width:100%;justify-content:center}.se-ptabs{width:100%}.se-ptabs .se-tab{flex:1;justify-content:center;padding:8px 6px}.se-fsb{margin-left:0}}
 .se-catnav a{display:inline-flex;align-items:center;gap:6px;text-decoration:none;border:1px solid var(--line);border-radius:999px;padding:5px 12px 5px 9px;font-size:13px;color:#3d4450;background:#fff}
 .se-catnav a .se-ci{width:16px;height:16px}.se-catnav a:hover{border-color:var(--rak-line,#f0b9b9)}.se-catnav a.on{background:var(--rak);border-color:var(--rak);color:#fff;font-weight:600}
 .se-cat-h{display:flex;align-items:center;gap:8px}.se-cat-h .se-ci{width:22px;height:22px;color:var(--rak)}.se-cat-h small{font-weight:400;color:var(--muted);font-size:13px}
@@ -760,6 +792,18 @@
     return m;
   }
 
+  /* ---------- date ranges: any [data-rg] holding a [data-r=s] start and [data-r=e] end date ---------- */
+  const rangeOf = t => { const g = t && t.closest && t.closest("[data-rg]"); if (!g) return null; const a = g.querySelector('input[data-r="s"]'), b = g.querySelector('input[data-r="e"]'); return a && b ? { g, a, b } : null; };
+  const paintRange = r => { r.b.min = r.a.value ? addDays(r.a.value, 1) : ""; r.g.classList.toggle("se-rg-has", !!(r.a.value && r.b.value)); };
+  document.addEventListener("focusin", e => { if (e.target.type !== "date") return; const r = rangeOf(e.target); if (!r) return; paintRange(r); r.g.classList.add("se-rg-on"); e.target.classList.add("se-rg-cur"); });
+  document.addEventListener("focusout", e => { if (e.target.type !== "date") return; const r = rangeOf(e.target); e.target.classList.remove("se-rg-cur"); if (r) setTimeout(() => { if (!r.g.contains(document.activeElement)) r.g.classList.remove("se-rg-on"); }, 0); });
+  document.addEventListener("change", e => {
+    if (e.target.type !== "date" || e.target.closest("tr[data-ph]")) return; // the Working period table fixes its own dates
+    const r = rangeOf(e.target); if (!r) return;
+    if (r.a.value && r.b.value && r.b.value <= r.a.value) { r.b.value = addDays(r.a.value, 1); toast(`วันสิ้นสุดต้องหลังวันเริ่ม · ปรับเป็น ${fmtD(r.b.value)}`); }
+    paintRange(r);
+  }, true);
+
   /* ---------- overview ---------- */
   let VIEW = { list: "active", status: "all", q: "" };
   const OPEN = new Set();
@@ -771,24 +815,20 @@
     el.innerHTML = `
       <div class="se-ov">
         ${roleBar()}
-        <div class="se-wf"><span class="se-wf-t">${IC.flow}<b>Workflow</b></span>
-          <span class="se-pill p-red">${IC.plus}SC creates new project</span><span class="ar">→</span>
-          <span class="se-pill p-amb">${IC.eye}Sent for approval</span><span class="ar">→</span>
-          <span class="se-pill p-grn">${IC.check}ดิว หรือ บี approve</span><span class="ar">→</span>
-          <span class="se-pill p-blu">${IC.lock}Open Job → Budgetary</span></div>
+        ${myTasks(act)}
         <div class="se-ks">
           ${kpi(CATS[0].ic, "Active Projects", act.length)}
           ${kpi(IC.money, "Total Planned", baht(act.reduce((a, p) => a + plannedOf(p), 0)))}
           ${kpi(IC.check, "Approved Budget", baht(act.filter(p => p.status === "approved" || p.status === "locked").reduce((a, p) => a + plannedOf(p), 0)))}
           ${kpi(IC.clock, "Waiting Approval", act.filter(p => p.status === "requested" || p.status === "reviewed").length)}
         </div>
-        <div class="se-row">
-          <div class="se-seg">${[["active", "Active", ""], ["archived", "Archived", IC.box], ["trash", "Trash", IC.trash]].map(([k, t, ic]) => `<button class="se-sb ${VIEW.list === k ? "on" : ""}" data-list="${k}">${ic}${t}${k !== "active" && cnt(k) ? ` <small>${cnt(k)}</small>` : ""}</button>`).join("")}</div>
-          ${can("create") ? `<button class="se-new" data-new>${IC.plus}New Project</button>` : `<span class="se-hint">สร้างโปรเจคได้เฉพาะ ${namesWith("create")}</span>`}
+        <div class="se-row se-tools">
+          <label class="se-q">${IC.search}<input id="seQ" placeholder="ค้นหา IJ / Job no. / ลูกค้า / ชื่องาน / เมือง" value="${esc(VIEW.q)}" aria-label="ค้นหาโปรเจค"></label>
+          ${can("create") ? `<button class="se-new" data-new>${IC.plus}New Project</button>` : ""}
         </div>
-        <div class="se-row">
-          <label class="se-q">${IC.search}<input id="seQ" placeholder="Search IJ, Job no., customer, city..." value="${esc(VIEW.q)}" aria-label="ค้นหาโปรเจค"></label>
-          <div class="se-chips">${FILTERS.map(([k, t]) => `<button class="se-chip ${VIEW.status === k ? "on" : ""}" data-st="${k}">${t}</button>`).join("")}</div>
+        <div class="se-row se-filters">
+          <div class="se-seg">${[["active", "Active", ""], ["archived", "Archived", IC.box], ["trash", "Trash", IC.trash]].map(([k, t, ic]) => `<button class="se-sb ${VIEW.list === k ? "on" : ""}" data-list="${k}">${ic}${t}${k !== "active" && cnt(k) ? ` <small>${cnt(k)}</small>` : ""}</button>`).join("")}</div>
+          <div class="se-chips">${FILTERS.map(([k, t, f]) => { const n = DB.projects.filter(p => p.list === VIEW.list && (!f || f.includes(p.status))).length; return `<button class="se-chip ${VIEW.status === k ? "on" : ""}" data-st="${k}">${t}<small>${n}</small></button>`; }).join("")}</div>
         </div>
         <div id="seList" class="se-list"></div>
       </div>`;
@@ -803,10 +843,25 @@
     };
     wireRole(el, () => overview(el));
     el.querySelectorAll("[data-list]").forEach(b => b.onclick = () => { VIEW.list = b.dataset.list; overview(el); });
-    el.querySelectorAll("[data-st]").forEach(b => b.onclick = () => { VIEW.status = b.dataset.st; overview(el); });
+    el.querySelectorAll("[data-st]").forEach(b => b.onclick = () => { VIEW.status = b.dataset.st; VIEW.list = b.dataset.list || VIEW.list; overview(el); });
     el.querySelector("#seQ").oninput = e => { VIEW.q = e.target.value; draw(); };
     const nb = el.querySelector("[data-new]"); if (nb) nb.onclick = () => projectForm(null);
     draw();
+  }
+
+  // What the signed-in person can act on right now; each chip filters the list
+  function myTasks(act) {
+    const n = sts => act.filter(p => sts.includes(p.status)).length;
+    const t = [];
+    if (can("approve")) t.push(["requested", "รอคุณอนุมัติ", n(["requested", "reviewed"]), "amb"]);
+    if (can("create")) { t.push(["draft", "กำลังร่าง", n(["draft"]), "gray"]); t.push(["revise", "ถูกส่งกลับให้แก้", n(["revise"]), "red"]); }
+    if (can("award")) t.push(["approved", "รอ Get Award", n(["approved"]), "grn"]);
+    if (can("actual")) t.push(["locked", "บันทึก Actual ได้", n(["locked"]), "blu"]);
+    const live = t.filter(x => x[2]);
+    const role = [can("create") && "สร้าง/แก้ Estimate", can("approve") && "อนุมัติ", can("award") && "Get Award", can("actual") && "บันทึก Actual"].filter(Boolean);
+    return `<div class="se-me"><div class="se-me-h"><span class="se-me-hi">👋 สวัสดี <b>${esc(who())}</b></span><span class="se-me-r">${role.length ? "สิทธิ์ของคุณ: " + role.join(" · ") : "ดูข้อมูลอย่างเดียว"}</span></div>
+      ${t.length ? `<div class="se-me-t">${live.length ? live.map(([k, l, c, cls]) => `<button class="se-me-c ${cls}" data-st="${k}" data-list="active"><b>${c}</b><span>${l}</span></button>`).join("") : `<span class="se-me-ok">✅ ไม่มีงานค้างสำหรับคุณ</span>`}</div>` : ""}
+      <div class="se-me-f">ขั้นตอน: <b>SC ร่าง Estimate</b> → <b>ดิว / บี อนุมัติ</b> → <b>ดิว Get Award</b> (ได้ Job no. + Budget) → <b>ทีมหน้างานบันทึก Actual</b></div></div>`;
   }
 
   function card(p) {
@@ -825,7 +880,7 @@
   /* ---------- new / edit project ---------- */
   function projectForm(p) {
     const v = p || { ij: "", name: "", customer: "", city: "", start: "", end: "", phases: [] };
-    const phaseRow = (x = {}) => `<div class="se-phr" data-id="${esc(x.id || "")}"><input placeholder="ชื่อ phase เช่น Installation" value="${esc(x.name || "")}" data-k="name"><input type="date" value="${esc(x.start || "")}" data-k="start"><input type="date" value="${esc(x.end || "")}" data-k="end"><button class="se-x" data-delph aria-label="ลบ phase">${IC.x}</button></div>`;
+    const phaseRow = (x = {}) => `<div class="se-phr" data-rg data-id="${esc(x.id || "")}"><input placeholder="ชื่อ phase เช่น Installation" value="${esc(x.name || "")}" data-k="name"><input type="date" value="${esc(x.start || "")}" data-k="start" data-r="s" aria-label="วันเริ่ม"><input type="date" value="${esc(x.end || "")}" data-k="end" data-r="e" aria-label="วันสิ้นสุด"><button class="se-x" data-delph aria-label="ลบ phase">${IC.x}</button></div>`;
     const m = modal(p ? "แก้ไขข้อมูลโปรเจค" : "New Project", `
       <div class="se-fgrid">
         <label>IJ no. *<input id="fIj" value="${esc(v.ij)}" placeholder="IJ2611001"></label>
@@ -835,8 +890,8 @@
         <label>จังหวัดปลายทาง (ราคารถ · ค่าเดินทาง)${destSelect("fDest", v.destination)}</label>
         <label class="se-ctry">ประเทศ (งานต่างประเทศ)${countrySelect("fCountry", p ? p.country || "" : "")}</label>
         <label>เบี้ยเลี้ยง (ประเภทประเทศ)${allowSelect("fAllow", p ? allowTier(p) : "")}</label>
-        <label>Start<input id="fStart" type="date" value="${esc(v.start)}"></label>
-        <label>End<input id="fEnd" type="date" value="${esc(v.end)}"></label>
+        <span class="se-rgpair" data-rg><label>วันเริ่ม<input id="fStart" type="date" data-r="s" value="${esc(v.start)}"></label>
+        <label>วันสิ้นสุด<input id="fEnd" type="date" data-r="e" value="${esc(v.end)}"></label></span>
       </div>
       <div class="se-phs"><b>Project Timeline (phase)</b><div id="fPh">${(v.phases.length ? v.phases : [{}]).map(phaseRow).join("")}</div><button class="se-btn" data-addph>${IC.plus}เพิ่ม phase</button></div>`,
       mm => {
@@ -878,7 +933,7 @@
     const srcPh = phasesOf(src).length ? src.phases : (src.start ? [{ id: "ph" + uid(), name: "Phase 1", start: src.start, end: src.end }] : []);
     const base = src.start || (srcPh[0] && srcPh[0].start) || "";
     const nLines = (src.lines || []).length;
-    const phRow = x => `<div class="se-phr" data-id="${esc(x.id)}"><input value="${esc(x.name)}" data-k="name" aria-label="ชื่อ phase"><input type="date" value="${esc(x.start || "")}" data-k="start" aria-label="เริ่ม"><input type="date" value="${esc(x.end || "")}" data-k="end" aria-label="สิ้นสุด"><button class="se-x" data-delph aria-label="ลบ phase">${IC.x}</button></div>`;
+    const phRow = x => `<div class="se-phr" data-rg data-id="${esc(x.id)}"><input value="${esc(x.name)}" data-k="name" aria-label="ชื่อ phase"><input type="date" value="${esc(x.start || "")}" data-k="start" data-r="s" aria-label="เริ่ม"><input type="date" value="${esc(x.end || "")}" data-k="end" data-r="e" aria-label="สิ้นสุด"><button class="se-x" data-delph aria-label="ลบ phase">${IC.x}</button></div>`;
     const m = modal("Duplicate เป็น Estimate ใหม่", `
       <div class="se-dupsrc">${IC.copy}<span>ต้นแบบ <b>${esc(src.ij)}</b>${src.jo ? ` · Job ${esc(src.jo)}` : ""} · ${esc(src.name)} · ${baht(totalOf(src))}<small>${nLines} รายการ Estimate · ${srcPh.length} phase · ${peopleOf(src)} คน</small></span></div>
       <div class="se-fgrid">
@@ -932,6 +987,36 @@
     { id: "estimate", no: "2", name: "Estimate", th: "ประเมินจาก Scope of Work", ic: "📝" },
     { id: "actual", no: "3", name: "Actual record", th: "บันทึกค่าใช้จ่ายจริงจากหน้างาน", ic: "🧾" },
   ];
+  // One clear "what to do now" line for the signed-in person (nothing for people who can only look)
+  function nextStep(p, href) {
+    if (p.list !== "active") return "";
+    const box = (ic, t, d, act) => `<div class="se-next"><span class="se-next-ic">${ic}</span><span class="se-next-x"><b>${t}</b><small>${d}</small></span>${act}</div>`;
+    const go = (h, l) => `<a class="se-btn primary" href="${h}">${l}</a>`;
+    if ((p.status === "draft" || p.status === "revise") && can("create"))
+      return box(p.status === "revise" ? "✏️" : "📝", p.status === "revise" ? "ถูกส่งกลับให้แก้ไข" : "ขั้นต่อไป: กรอก Estimate", "ใส่ Working period และค่าใช้จ่ายแต่ละหมวด แล้วกด “ส่งขออนุมัติ” ในหน้า Estimate", go(href("estimate"), "ไปกรอก Estimate"));
+    if ((p.status === "requested" || p.status === "reviewed") && can("approve"))
+      return box("⏳", "รอคุณอนุมัติ", "ตรวจยอดแต่ละหมวด แล้วกดอนุมัติ หรือส่งกลับให้ SC แก้", go(href("estimate"), "ตรวจและอนุมัติ"));
+    if (p.status === "approved" && can("award"))
+      return box("🏆", "พร้อม Get Award", "ใส่ Job no. และยอด Budget control จากฝ่ายบริหารโครงการ", `<button class="se-btn primary" data-award>Get Award</button>`);
+    if (p.status === "locked" && can("actual"))
+      return box("🧾", "บันทึกค่าใช้จ่ายจริงได้", "บันทึก Actual รายวันจากหน้างาน เทียบกับ Budget", go(href("actual"), "บันทึก Actual"));
+    return "";
+  }
+
+  // Full screen for the category pages: the whole page goes full screen (survives re-draws), Site Expense covers it
+  let FULL = false;
+  function setFull(on) {
+    FULL = on;
+    try {
+      if (on && !document.fullscreenElement && document.documentElement.requestFullscreen) document.documentElement.requestFullscreen().catch(() => {});
+      if (!on && document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    } catch (e) {}
+  }
+  document.addEventListener("fullscreenchange", () => { if (!document.fullscreenElement && FULL) { FULL = false; window.dispatchEvent(new HashChangeEvent("hashchange")); } });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && FULL && !document.fullscreenElement && !document.querySelector(".se-modal")) { FULL = false; window.dispatchEvent(new HashChangeEvent("hashchange")); } });
+  document.addEventListener("click", e => { const b = e.target.closest && e.target.closest("[data-full]"); if (!b) return; e.preventDefault(); setFull(!FULL); window.dispatchEvent(new HashChangeEvent("hashchange")); });
+  const fullBtn = () => `<button type="button" class="se-fsb" data-full title="${FULL ? "ออกจากเต็มจอ (Esc)" : "ขยายตารางเต็มจอ"}">${FULL ? "✕ ออกจากเต็มจอ" : "⛶ ขยายเต็มจอ"}</button>`;
+
   function project(el, p, secId, catCode) {
     const isCat = secId === "cat" && (catCode === "period" || CATS.some(c => c.code === catCode));
     const cur = isCat ? SECS[1] : SECS.find(s => s.id === secId) || SECS[0];
@@ -942,8 +1027,10 @@
     const at = p.status === "revise" ? 0 : p.status === "reviewed" ? 1 : order.indexOf(p.status);
     const stepper = steps.map(([k, t], i) => `<span class="se-step ${i < at ? "done" : i === at ? "now" : ""}"><i>${i < at ? "✓" : i + 1}</i>${t}</span>`).join('<span class="se-arr">→</span>');
     const listNote = p.list !== "active" ? `<div class="se-off">${p.list === "trash" ? "🗑️ โปรเจคนี้อยู่ใน Trash" : "📦 โปรเจคนี้ถูก Archive"} · <button class="se-link" data-restore>กู้คืนเป็น Active</button></div>` : "";
+    el.classList.toggle("se-full", FULL && isCat);
+    if (FULL && !isCat) setFull(false);
     el.innerHTML = `
-      <div style="display:grid;gap:16px">
+      <div class="se-pg">
         <a class="se-back" href="#site-expense">${IC.back}Overview all project</a>
         ${roleBar()}
         ${listNote}
@@ -955,15 +1042,16 @@
           ${docsBox(p)}
           <div class="se-ph-a">${p.status === "approved" && p.list === "active" ? (can("award") ? `<button class="se-btn award" data-award>🏆 Get Award</button>` : `<span class="se-hint" style="margin-right:auto">รอ ${namesWith("award")} กด Get Award และกำหนด Budget control</span>`) : ""}${editable(p) ? `<button class="se-btn" data-edit>${IC.edit}แก้ไขข้อมูล</button>` : ""}${can("create") ? `<button class="se-btn" data-dup>${IC.copy}Duplicate เป็น Estimate ใหม่</button>` : ""}${p.list === "active" ? `<button class="se-btn" data-arch>${IC.box}Archive</button><button class="se-btn danger" data-trash>${IC.trash}Trash</button>` : ""}</div>
         </div>
-        <div class="se-steps">${stepper}</div>
-        <nav class="se-tabs" aria-label="Section ของโปรเจค">${SECS.map(s => `<a class="se-tab" href="${href(s.id)}" ${s.id === cur.id ? 'aria-current="page"' : ""}><span class="n">${s.ic}</span><b>${s.no}. ${esc(s.name)}</b><small>${esc(s.th)}</small></a>`).join("")}</nav>
+        ${nextStep(p, href)}
+        <div class="se-pbar"><nav class="se-ptabs" aria-label="Section ของโปรเจค">${SECS.map(s => `<a class="se-tab" href="${href(s.id)}" ${s.id === cur.id ? 'aria-current="page"' : ""} title="${esc(s.th)}"><span class="se-tic">${s.ic}</span><b>${esc(s.name.replace(/ record$/, ""))}</b></a>`).join("")}</nav><div class="se-steps">${stepper}</div></div>
+        ${FULL && isCat ? `<div class="se-fullbar"><b>${esc(p.ij)}</b><span>${esc(p.name)}</span>${p.jo ? `<span class="se-jobchip">Job ${esc(p.jo)}</span>` : ""}<span class="se-st ${st.cls}">${st.th}</span><span class="se-fullbar-t">${baht(plannedOf(p))}</span></div>` : ""}
         <section class="se-sec" id="seSec"></section>
       </div>`;
     const redraw = () => project(el, p, isCat ? "cat" : cur.id, catCode);
     wireRole(el, redraw);
     const on = (sel, fn) => { const b = el.querySelector(sel); if (b) b.onclick = fn; };
     on("[data-edit]", () => projectForm(p));
-    on("[data-award]", () => getAward(p));
+    el.querySelectorAll("[data-award]").forEach(b => b.onclick = () => getAward(p));
     on("[data-dup]", () => dupForm(p));
     on("[data-arch]", () => { p.list = "archived"; save(); toast("ย้ายไป Archived แล้ว"); redraw(); });
     on("[data-trash]", () => { if (confirm("ย้ายโปรเจคนี้ไป Trash?")) { p.list = "trash"; save(); toast("ย้ายไป Trash แล้ว"); location.hash = "#site-expense"; } });
@@ -1256,6 +1344,7 @@ td.neg,.neg{color:var(--rak);font-weight:600}
     }
     loadRates(() => { if (el.isConnected && !document.querySelector(".se-modal")) mount(el, sub); }); // re-draw once with Supabase rates
     const [pid, sec, code] = (sub || "").split("/").map(decodeURIComponent);
+    if (!(pid && sec === "cat")) { el.classList.remove("se-full"); if (FULL) setFull(false); }
     if (!pid) return overview(el);
     const p = DB.projects.find(x => x.id === pid);
     if (!p) { el.innerHTML = `<div class="empty">ไม่พบโปรเจคนี้ · <a class="open" href="#site-expense">กลับ Overview</a></div>`; return; }
