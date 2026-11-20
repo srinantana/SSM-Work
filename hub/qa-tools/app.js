@@ -409,13 +409,21 @@
       </tbody></table></div></div>`;
   }
   const x0 = c => ({ ...c, approve_note: "" });   // status chip without the note (shown in the detail)
+  function dlgCalDelete(c, t) {   // ดิว only (checked again by the API)
+    dialog(`🗑 ลบรายการสอบเทียบ: ${esc(t.asset_no || "")} · ${esc(t.name || "")}`, `<p>ลบรายการ ${c.cal_date ? "สอบเทียบ " + fmt(c.cal_date) : "ส่งสอบเทียบ " + fmt(c.sent_date)} ${esc(c.lab || "")}${c.verify ? " · รวมการทวนสอบ " + esc(c.verify.no || "") : ""} — ลบแล้วกู้คืนไม่ได้</p>
+      ${c.status === "approved" ? `<p class="qa-warnbox">รายการนี้อนุมัติแล้ว — วันสอบเทียบล่าสุด / ครบกำหนดของเครื่องมือจะกลับไปใช้รายการที่อนุมัติก่อนหน้า (ถ้ามี)</p>` : ""}
+      <div class="qa-form"><label class="wide">เหตุผลที่ลบ *<input id="dReason" placeholder="เช่น บันทึกผิดเครื่อง / ซ้ำ"></label></div>
+      <p class="sub">ไทม์ไลน์ของเครื่องมือจะบันทึกว่าใครลบ เมื่อไร และข้อมูลที่ลบ</p>`,
+      async v => { if (!v("dReason")) throw new Error("ใส่เหตุผลที่ลบ"); await post("cal-delete", { id: c.id, reason: v("dReason") }); await refresh("ลบรายการสอบเทียบแล้ว"); }, "🗑 ยืนยันลบ");
+  }
   function dlgCalView(c) {
     if (!c) return toast("ไม่พบรายการ", 1);
     const t = tById(c.tool_id) || {}, v = c.verify, m = me();
     const kv = rows => `<table class="qa-kv">${rows.filter(r => r[1]).map(([k, val]) => `<tr><th>${k}</th><td>${val}</td></tr>`).join("")}</table>`;
     const acts = [m.canManage && ["sent", "rejected", "pending_verify", "pending_approval"].includes(c.status) ? `<button class="qa-btn sm ghost" data-v="edit">✏️ แก้ไขผลสอบเทียบ</button>` : "",
       m.canManage && c.cal_date && ["pending_verify", "pending_approval", "rejected"].includes(c.status) ? `<button class="qa-btn sm ghost" data-v="verify">🔎 ${v ? "แก้ไขการทวนสอบ" : "ทวนสอบ"}</button>` : "",
-      v ? `<button class="qa-btn sm ghost" data-v="print">🖨 FM-QA-10</button>` : ""].filter(Boolean).join(" ");
+      v ? `<button class="qa-btn sm ghost" data-v="print">🖨 FM-QA-10</button>` : "",
+      m.canApprove ? `<button class="qa-btn sm ghost danger" data-v="delete">🗑 ลบรายการนี้</button>` : ""].filter(Boolean).join(" ");
     const mdl = dialog(`📜 ประวัติสอบเทียบ: ${esc(t.asset_no || "")} · ${esc(t.name || "")}`, `
       <div class="qa-tags">${calStatus(x0(c))}</div>${acts ? `<div class="qa-acts">${acts}</div>` : ""}
       <h4>🎯 ผลสอบเทียบ</h4>${kv([["ส่งสอบเทียบ", fmt(c.sent_date)], ["วันที่สอบเทียบ", fmt(c.cal_date)], ["หน่วยงาน (Lab)", esc(c.lab || "")], ["เลขที่ใบรับรอง", esc(c.cert_no || "")],
@@ -426,7 +434,7 @@
         + kv([["บันทึกเพิ่มเติม", esc(v.note || "")], ["มาตรการป้องกัน", esc(v.protect || "")]]) : `<p class="muted">ยังไม่ได้ทวนสอบ</p>`}
       <h4>✍️ อนุมัติ</h4>${c.approved_at ? kv([["ผล", c.status === "approved" ? chip("อนุมัติ", "s-ok") : chip("ไม่อนุมัติ", "s-bad")], ["โดย", esc(c.approved_by || "")], ["เมื่อ", fmtT(c.approved_at)], ["หมายเหตุ", esc(c.approve_note || "")]]) : `<p class="muted">ยังไม่อนุมัติ</p>`}
       <h4>🕑 ไทม์ไลน์</h4><div id="vTl" class="sub">กำลังโหลด…</div>`, async () => {}, "ปิด");
-    mdl.querySelectorAll("[data-v]").forEach(b => b.onclick = () => { mdl.remove(); const k = b.dataset.v; if (k === "edit") dlgCalResult(t, c.id); else if (k === "verify") dlgVerify(c); else printVerify(c); });
+    mdl.querySelectorAll("[data-v]").forEach(b => b.onclick = () => { mdl.remove(); const k = b.dataset.v; if (k === "edit") dlgCalResult(t, c.id); else if (k === "verify") dlgVerify(c); else if (k === "delete") dlgCalDelete(c, t); else printVerify(c); });
     const item = x => `<div class="qa-log"><b>${esc(x.action)}</b> · ${esc(x.by || "")} · ${fmtT(x.at)}${x.detail ? `<div>${esc(x.detail)}</div>` : ""}</div>`;
     fetch(`/api/qa-tools/log?tool=${c.tool_id}&cal=${c.id}`, { cache: "no-store" }).then(r => r.json()).then(j => {
       const a = j.log || [], o = j.older || [];
