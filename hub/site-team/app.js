@@ -293,6 +293,15 @@
     const byKey = new Map(); for (const x of rows) if (x.r) { if (!byKey.has(x.r.key)) byKey.set(x.r.key, []); byKey.get(x.r.key).push(x.c); }
     return { rows, byKey };
   }
+  /* one certificate per course for display: drop resigned and renewed (ต่ออายุแล้ว) ones, keep the best of the rest */
+  function liveCerts(list) {
+    const rank = c => ({ ok: 3, unk: 2, due: 1 })[certSt(c)[0]] || 0, by = new Map();
+    for (const c of (list || []).filter(c => c.status !== "resign" && c.renew_status !== "done")) {
+      const o = by.get(c.course);
+      if (!o || rank(c) > rank(o) || (rank(c) === rank(o) && String(c.issue || "") > String(o.issue || ""))) by.set(c.course, c);
+    }
+    return [...by.values()].sort((a, b) => COURSES.findIndex(x => x[0] === a.course) - COURSES.findIndex(x => x[0] === b.course));
+  }
   const hasCert = (list, course) => (list || []).some(c => c.course === course && ["ok", "due", "unk"].includes(certSt(c)[0]));
   const certChip = c => { const [k, , cls] = certSt(c); return `<span class="stm-cchip ${cls}" title="${esc(courseL(c) + (c.expiry ? " · หมด " + fmt(c.expiry) : "") + (c.cert_no ? " · " + c.cert_no : ""))}">${courseI(c)} ${esc(courseL(c))}${k === "due" ? " ⏰" : k === "exp" ? " ✕" : ""}</span>`; };
   function certCard() {
@@ -314,8 +323,8 @@
     const ppl = people().filter(r => r.active && (!S.unit || r.unit === S.unit) && match(r.name_th, r) && (!S.cc || hasCert(byKey.get(r.key), S.cc)));
     const outsiders = S.cOnly ? [] : [...new Map(rows.filter(x => !x.r && x.c.status !== "resign" && match(x.c.holder_name)).map(x => [thNorm(x.c.holder_name), x.c.holder_name])).values()]
       .filter(n => !S.cc || hasCert(rows.filter(x => !x.r && thNorm(x.c.holder_name) === thNorm(n)).map(x => x.c), S.cc));
-    const cell = (list, k) => { const cs = (list || []).filter(c => c.course === k); if (!cs.length) return `<td class="stm-cx"></td>`;
-      const c = cs.sort((a, b) => String(b.expiry || "9").localeCompare(String(a.expiry || "9")))[0], [st, l, cls] = certSt(c);
+    const cell = (list, k) => { const c = liveCerts(list).find(x => x.course === k) || (list || []).filter(x => x.course === k).sort((a, b) => String(b.issue || "").localeCompare(String(a.issue || "")))[0]; if (!c) return `<td class="stm-cx"></td>`;
+      const [st, l, cls] = certSt(c);
       const sym = st === "exp" ? "✕" : st === "due" ? "⏰" : st === "resign" ? "–" : "✓";
       return `<td class="stm-cx"><button class="stm-cdot ${cls}" ${ce ? `data-a="cert-edit" data-id="${c.id}"` : "disabled"} title="${esc(courseL(c) + " · " + l + (c.cert_no ? " · " + c.cert_no : ""))}">${sym}</button></td>`; };
     const head = `<tr><th>ชื่อ</th><th>ทีม</th>${used.map(([k, l, ic]) => `<th class="stm-ch" title="${esc(l)}"><span>${ic}</span><small>${esc(l)}</small></th>`).join("")}</tr>`;
@@ -425,7 +434,7 @@
         <td class="mono">${ce ? esc(fmtId(r.p.national_id)) : (r.pid ? "•••••••••" : "")}</td>
         <td>${ce ? (r.p.birth_date ? fmt(r.p.birth_date) + ` <span class="muted">(${age(r.p.birth_date)})</span>` : "") : ""}</td>
         <td class="mono">${ce ? esc(r.p.passport_no || "") : esc(mask(r.p.passport_no || ""))}${ce && r.p.passport_file ? ` <a href="${esc(r.p.passport_file)}" target="_blank" rel="noopener" title="เปิดสแกน">📄</a>` : ""}</td>
-        <td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${ST_CLS[r.st]}">${r.stL}</span>${(CI.byKey.get(r.key) || []).filter(c => c.status !== "resign").length ? `<div class="stm-vchips">${CI.byKey.get(r.key).filter(c => c.status !== "resign").map(certChip).join("")}</div>` : ""}${visas(r.p).length ? `<div class="stm-vchips">${visas(r.p).map(visaChip).join("")}</div>` : r.p.visa_note ? `<div class="sub">${esc(r.p.visa_note)}</div>` : ""}</td>
+        <td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${ST_CLS[r.st]}">${r.stL}</span>${(cs => cs.length ? `<div class="stm-vchips">${cs.map(certChip).join("")}</div>` : "")(liveCerts(CI.byKey.get(r.key)))}${visas(r.p).length ? `<div class="stm-vchips">${visas(r.p).map(visaChip).join("")}</div>` : r.p.visa_note ? `<div class="sub">${esc(r.p.visa_note)}</div>` : ""}</td>
         ${ce ? `<td><button class="stm-lnk" data-a="edit" data-k="${esc(r.key)}">แก้ไข</button></td>` : ""}</tr>`).join("") || `<tr><td colspan="9" class="muted">ไม่พบรายชื่อ</td></tr>`}
       </tbody></table></div><div class="muted stm-cnt">${rs.length} คน</div>`;
   }
@@ -517,7 +526,7 @@
       ${picked.length ? `<div class="stm-chips">${picked.map(r => `<span class="stm-chip ${r.okTravel ? "" : "bad"}" title="${r.okTravel ? "Passport ผ่าน" : !r.p.passport_no ? "ยังไม่มี Passport" : "Passport ไม่ผ่าน " + TRAVEL_MONTHS + " เดือน"}">${esc(label(r))}${r.okTravel ? "" : !r.p.passport_no ? " · ไม่มี Passport" : " ⚠"}</span>`).join("")}</div>
         ${notOk ? `<p class="sub bad">⚠️ ${noPass ? `ยังไม่มี Passport ${noPass} คน` : ""}${noPass && notOk > noPass ? " · " : ""}${notOk > noPass ? `Passport ไม่ผ่าน ${TRAVEL_MONTHS} เดือน ${notOk - noPass} คน` : ""} — บันทึกเป็น Draft ได้ · Confirm ได้เมื่อครบทุกคน</p>` : ""}` : ""}
       ${ce ? filterBar(`<select id="stTc"><option value="">🎓 ทุก Certificate</option>${COURSES.map(([k, l, ic]) => `<option value="${k}"${S.tCert === k ? " selected" : ""}>${ic} ต้องมี ${esc(l)}</option>`).join("")}</select>`) + `<div class="stm-scroll stm-pick"><table class="stm-t"><tbody>${rs.map(r => { const [k, l] = chk(r);
-        return `<tr><td><label class="stm-ck"><input type="checkbox" data-pick="${r.pid || "w:" + (r.worker ? r.worker.id : "")}"${r.pid && sel.has(r.pid) ? " checked" : ""}> ${esc(label(r))}</label></td><td>${unitBadge(r.unit)}</td><td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${k === "ok" ? "st-ok" : k === "bad" ? "st-bad" : "st-none"}">${l}</span></td>${vCell(r)}${insTd(r.p, t)}<td><div class="stm-vchips">${(TI.byKey.get(r.key) || []).filter(c => ["ok", "due", "unk"].includes(certSt(c)[0])).map(certChip).join("")}</div></td></tr>`; }).join("")}</tbody></table></div>` : ""}
+        return `<tr><td><label class="stm-ck"><input type="checkbox" data-pick="${r.pid || "w:" + (r.worker ? r.worker.id : "")}"${r.pid && sel.has(r.pid) ? " checked" : ""}> ${esc(label(r))}</label></td><td>${unitBadge(r.unit)}</td><td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${k === "ok" ? "st-ok" : k === "bad" ? "st-bad" : "st-none"}">${l}</span></td>${vCell(r)}${insTd(r.p, t)}<td><div class="stm-vchips">${liveCerts(TI.byKey.get(r.key)).filter(c => ["ok", "due", "unk"].includes(certSt(c)[0])).map(certChip).join("")}</div></td></tr>`; }).join("")}</tbody></table></div>` : ""}
       <div class="stm-acts">${ce ? `<button class="stm-btn ghost" data-a="trip-save" data-st="draft">💾 บันทึก Draft</button> <button class="stm-btn" data-a="trip-save" data-st="confirmed"${canConfirm ? "" : ` disabled title="Confirm ได้เมื่อทุกคนมี Passport ผ่าน ${TRAVEL_MONTHS} เดือน และใส่วันกลับแล้ว"`}>✅ Confirm trip</button>${t.id ? ` <button class="stm-btn ghost" data-a="trip-xlsx" data-id="${t.id}">⬇ รายชื่อทำประกัน</button> <button class="stm-btn danger" data-a="trip-del" data-id="${t.id}">ลบทริป</button>` : ""}` : ""} <button class="stm-btn ghost" data-a="trip-close">กลับ</button></div></div>`;
   }
   async function tripXlsx(t) {
