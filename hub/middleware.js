@@ -1299,6 +1299,21 @@ async function qaApi(cfg, req, url, prof) {
     } else log(c.tool_id, 'ทวนสอบผลสอบเทียบ (รออนุมัติ)', vSum, c.id);
     return json({ ok: true });
   }
+  if (p === 'cal-delete') {                             // approver only (ดิว) — remove a calibration record, with a reason
+    if (!approve) return json({ error: 'ลบรายการสอบเทียบได้เฉพาะดิว' }, 403);
+    const reason = mpStr(d.reason, 300); if (!reason) return json({ error: 'ใส่เหตุผลที่ลบ' }, 400);
+    const cr = await rest(`${QA_C}?id=eq.${Number(d.id) || 0}&select=*`, 'GET'); const c = cr.ok && cr.data && cr.data[0];
+    if (!c) return json({ error: 'ไม่พบรายการ' }, 404);
+    const del = await rest(`${QA_C}?id=eq.${c.id}`, 'DELETE'); if (!del.ok) return json({ error: 'ลบไม่สำเร็จ' }, 502);
+    // keep the tool consistent: dates come from the latest remaining approved record; status leaves 'calibration' when nothing is still open
+    const rest2 = ((await rest(`${QA_C}?tool_id=eq.${c.tool_id}&select=id,status,cal_date,next_due&order=cal_date.desc.nullslast`, 'GET')).data || []);
+    const t = await tool(c.tool_id), patch = {};
+    if (c.status === 'approved') { const a = rest2.find((x) => x.status === 'approved' && x.cal_date); if (a) { patch.last_cal_date = a.cal_date; patch.next_cal_due = a.next_due; } }
+    if (t && t.status === 'calibration' && !rest2.some((x) => ['sent', 'pending_verify', 'pending_approval', 'rejected'].includes(x.status))) patch.status = 'available';
+    if (Object.keys(patch).length) await setTool(c.tool_id, patch);
+    log(c.tool_id, 'ลบรายการสอบเทียบ', `${reason} · ${[c.cal_date ? 'สอบเทียบ ' + c.cal_date : 'ส่ง ' + (c.sent_date || '-'), c.lab, c.cert_no && 'ใบรับรอง ' + c.cert_no, c.result && RES_TH[c.result], c.verify && c.verify.no && 'Verify No. ' + c.verify.no, 'สถานะ ' + c.status].filter(Boolean).join(' · ')}`);
+    return json({ ok: true });
+  }
   if (p === 'cal-approve') {                            // approver
     if (!approve) return json({ error: 'อนุมัติได้เฉพาะผู้อนุมัติ' }, 403);
     const cr = await rest(`${QA_C}?id=eq.${Number(d.id) || 0}&select=*`, 'GET'); const c = cr.ok && cr.data && cr.data[0];
