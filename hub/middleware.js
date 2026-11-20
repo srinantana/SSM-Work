@@ -1593,10 +1593,8 @@ const SITE_EXPENSE = {
   actual:  ['teedanai.h', 'prakaikaew.p', 'sakkamon.c', 'nantana.s'],   // record site expenses
   check:   ['nantana.s'],                                               // check recorded actuals
 };
-// Opened only to these usernames for now (Dew, 13 Nov 2026). Everyone else on the view list sees the menu as "เร็วๆ นี้" and cannot open it.
-// To open Site Expense to the team, add their usernames here (or replace the check with SITE_EXPENSE.view).
-const SITE_EXPENSE_OPEN = ['nantana.s'];
-const siteExpenseOpen = (prof) => SITE_EXPENSE_OPEN.includes(String(prof.username || '').toLowerCase());
+// 20 Nov 2026: opened to everyone on the view list (rights per action stay in SITE_EXPENSE).
+const siteExpenseOpen = (prof) => SITE_EXPENSE.view.includes(String(prof.username || '').toLowerCase());
 const sitePerms = (prof) => Object.keys(SITE_EXPENSE).filter((k) => SITE_EXPENSE[k].includes(String(prof.username || '').toLowerCase()));
 // Non-admins see only the menus an admin has ticked for them; a new account starts with none. Site Expense: list above only.
 const effectiveMenus = (prof) => {
