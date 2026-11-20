@@ -1425,6 +1425,9 @@ function certClean(d) {
     renew_status: ['planned', 'booked', 'done'].includes(d.renew_status) ? d.renew_status : null, renew_date: stDate(d.renew_date), renew_note: mpStr(d.renew_note, 300) || null,
   };
   if (o.no_expiry) o.expiry = null;
+  if (o.expiry && !o.renew_due) {   // วันที่ต้องต่อ defaults to 3 months before expiry (จป may set another date)
+    const e = new Date(o.expiry + 'T00:00:00Z'); e.setUTCMonth(e.getUTCMonth() - 3); o.renew_due = e.toISOString().slice(0, 10);
+  }
   return o;
 }
 async function siteTeamApi(cfg, req, url, prof) {
