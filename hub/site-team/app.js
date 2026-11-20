@@ -308,8 +308,8 @@
   function liveCerts(list) {
     const rank = c => ({ ok: 3, unk: 2, due: 1 })[certSt(c)[0]] || 0, by = new Map();
     for (const c of (list || []).filter(c => c.status !== "resign" && c.renew_status !== "done")) {
-      const o = by.get(c.course);
-      if (!o || rank(c) > rank(o) || (rank(c) === rank(o) && String(c.issue || "") > String(o.issue || ""))) by.set(c.course, c);
+      const k = c.course === "OTHER" ? "OTHER:" + (c.course_name || "") : c.course, o = by.get(k);   // each "อื่นๆ" course name is its own course
+      if (!o || rank(c) > rank(o) || (rank(c) === rank(o) && String(c.issue || "") > String(o.issue || ""))) by.set(k, c);
     }
     return [...by.values()].sort((a, b) => COURSES.findIndex(x => x[0] === a.course) - COURSES.findIndex(x => x[0] === b.course));
   }
