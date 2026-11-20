@@ -174,26 +174,26 @@
     const webPh = ts.filter(t => (t.photos || []).length && !(t.photos || []).some(f => f.kind !== "web")).length, fa = ts.filter(t => t.fixed_asset_no).length, owner = ts.filter(t => t.owner_name || t.lendable).length;
     const kv = (l, v, extra = "") => `<div class="qa-kv2"><span>${l}</span><b>${v}</b>${extra}</div>`;
     return `<div class="qa-kpi">
-      <div class="qa-card qa-kc"><h3>🎯 ความพร้อมสอบเทียบ</h3>
+      <div class="qa-card qa-kc k4"><h3>🎯 ความพร้อมสอบเทียบ</h3>
         <div class="qa-ring t-${tone(comp)}" style="--p:${comp}"><b>${comp}%</b><span>อยู่ในกำหนด</span></div>
         <div class="qa-legend"><a href="#qa-tools/list" data-a="kpi" data-st="calsoon"><i class="d-warn"></i>ครบใน ${DUE_SOON} วัน <b>${soonN}</b></a><a href="#qa-tools/list" data-a="kpi" data-st="calover"><i class="d-bad"></i>เลยกำหนด <b>${overN}</b></a>${unkN ? `<a href="#qa-tools/cal"><i class="d-off"></i>ไม่มีวันครบ <b>${unkN}</b></a>` : ""}<span><i class="d-ok"></i>ในกำหนด <b>${okN - soonN}</b></span></div>
         <p class="sub">เครื่องมือที่ต้องสอบเทียบ ${num(need.length)} รายการ · เป้าหมาย ≥ 95%</p></div>
-      <div class="qa-card qa-kc"><h3>🏭 ความพร้อมรายแผนก</h3>
+      <div class="qa-card qa-kc k8"><h3>🏭 ความพร้อมรายแผนก</h3>
         <table class="qa-kt">${depRows.map(r => `<tr data-a="kpi" data-dept="${esc(r.d === "ไม่ระบุแผนก" ? "" : r.d)}" data-st="calover" title="ดูรายการเลยกำหนดของแผนกนี้"><td>${esc(r.d)}</td><td class="n">${r.n}</td><td class="w">${bar(r.p, 100, "t-" + tone(r.p))}</td><td class="n t-${tone(r.p)}">${r.p}%</td></tr>`).join("") || `<tr><td class="muted">ไม่มีข้อมูล</td></tr>`}</table>
         <p class="sub">จำนวน · % อยู่ในกำหนด — กดแถวเพื่อดูรายการเลยกำหนด</p></div>
-      <div class="qa-card qa-kc qa-wide"><h3>📅 ภาระงานสอบเทียบ 12 เดือนข้างหน้า</h3>
+      <div class="qa-card qa-kc k12"><h3>📅 ภาระงานสอบเทียบ 12 เดือนข้างหน้า</h3>
         <div class="qa-cols"><div class="qa-col over" title="เลยกำหนดแล้ว ${overN}"><b>${overN}</b><i style="height:${Math.round(overN * 100 / lmax)}%"></i><span>ค้าง</span></div>${load.map((n, i) => `<div class="qa-col${i === 0 ? " now" : ""}" title="${MS[months[i].getMonth()]} ${months[i].getFullYear()}: ${n}"><b>${n || ""}</b><i style="height:${Math.round(n * 100 / lmax)}%"></i><span>${MS[months[i].getMonth()]}${months[i].getMonth() === 0 || i === 0 ? "<br>" + String(months[i].getFullYear() + 543).slice(2) : ""}</span></div>`).join("")}</div>
         <p class="sub">จำนวนเครื่องมือที่ครบกำหนดแต่ละเดือน (แท่งแดง = เลยกำหนดแล้ว ต้องเคลียร์ก่อน)</p></div>
-      <div class="qa-card qa-kc"><h3>🧪 ผลสอบเทียบปี ${y + 543}</h3>
+      <div class="qa-card qa-kc k3"><h3>🧪 ผลสอบเทียบปี ${y + 543}</h3>
         <div class="qa-kgrid">${kv("สอบเทียบแล้ว", num(yc.length))}${kv("อนุมัติแล้ว", num(appr.length))}${kv("ผ่าน", num(res("pass")), `<em class="t-ok">${pct(res("pass"), yc.length)}%</em>`)}${kv("ปรับตั้งแล้วผ่าน", num(res("adjusted")))}${kv("ไม่ผ่าน", num(res("fail")), res("fail") ? `<em class="t-bad">ต้องประเมินผลกระทบ</em>` : "")}${kv("เวลาที่ Lab ใช้ (เฉลี่ย)", tat.length ? Math.round(tat.reduce((a, b) => a + b, 0) / tat.length) + " วัน" : "-")}</div>
         <div class="qa-kgrid">${kv("อยู่ที่ Lab", num(atLab))}${kv("รอทวนสอบ", num(waitV), waitV ? `<em class="t-warn">QA Engineer</em>` : "")}${kv("รออนุมัติ", num(waitA), waitA ? `<em class="t-warn">ดิว</em>` : "")}</div></div>
-      <div class="qa-card qa-kc"><h3>💰 ค่าสอบเทียบปี ${y + 543}</h3>
+      <div class="qa-card qa-kc k3"><h3>💰 ค่าสอบเทียบปี ${y + 543}</h3>
         <div class="qa-big">${num(cost)} <small>บาท</small></div>
         <table class="qa-kt">${Object.entries(labs).sort((a, b) => b[1] - a[1]).map(([l, v]) => `<tr><td>${esc(l)}</td><td class="w">${bar(v, cost)}</td><td class="n">${num(v)}</td></tr>`).join("") || `<tr><td class="muted">ยังไม่มีค่าใช้จ่ายที่บันทึก</td></tr>`}</table></div>
-      <div class="qa-card qa-kc"><h3>🤝 ยืม-คืน</h3>
+      <div class="qa-card qa-kc k3"><h3>🤝 ยืม-คืน</h3>
         <div class="qa-kgrid">${kv("ถูกยืมอยู่", num(open.length))}${kv("เกินกำหนดคืน", num(late.length), late.length ? `<em class="t-bad">ตาม</em>` : "")}${kv("ยืม 90 วันล่าสุด", num(recent.length))}${kv("ยืมเฉลี่ย", done.length ? dur.toFixed(1) + " วัน" : "-")}${kv("คืนตรงเวลา", done.length ? pct(done.length - lateRet, done.length) + "%" : "-")}</div>
         ${topRows.length ? `<h4>ยืมบ่อย (90 วัน)</h4><table class="qa-kt">${topRows.map(([t, n]) => `<tr><td><a href="#qa-tools/tool/${t.id}">${esc(t.asset_no)}</a> <span class="sub">${esc(t.name)}</span></td><td class="n">${n} ครั้ง</td></tr>`).join("")}</table>` : `<p class="sub">ยังไม่มีการยืมใน 90 วัน</p>`}</div>
-      <div class="qa-card qa-kc"><h3>🗂 คุณภาพข้อมูลทะเบียน</h3>
+      <div class="qa-card qa-kc k3"><h3>🗂 คุณภาพข้อมูลทะเบียน</h3>
         <div class="qa-kgrid">${kv("มีรูปจริง", pct(realPh, ts.length) + "%", `<em>${realPh}/${ts.length}${webPh ? " · รูปตัวอย่าง " + webPh : ""}</em>`)}${kv("มีรหัสทรัพย์สิน", pct(fa, ts.length) + "%", `<em>${fa}/${ts.length}</em>`)}${kv("มีผู้ถือครอง / เครื่องมือกลาง", pct(owner, ts.length) + "%", `<em>${owner}/${ts.length}</em>`)}${kv("อายุเฉลี่ย", ages.length ? (ages.reduce((a, b) => a + b, 0) / ages.length).toFixed(1) + " ปี" : "-")}${kv("อายุ ≥ 10 ปี", num(old10), old10 ? `<em class="t-warn">พิจารณาทดแทน</em>` : "")}</div></div>
     </div>`;
   }
@@ -682,7 +682,7 @@
 .qa-tile{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:10px;align-items:center;text-decoration:none;color:inherit;background:#fff;border:1px solid var(--line,#e3e6ea);border-radius:14px;padding:12px 14px;transition:transform .12s}
 .qa-tile:hover{transform:translateY(-2px);border-color:var(--rak-line)}.qa-tile i{grid-row:span 2;font-style:normal;font-size:22px;width:40px;height:40px;display:grid;place-items:center;background:var(--blush);border-radius:12px}
 .qa-tile b{font-size:24px;line-height:1}.qa-tile span{font-size:12px;color:#6b7280}.t-ok b{color:#2b8a3e}.t-loan b{color:#1c7ed6}.t-warn b{color:#d9480f}.t-bad b{color:#c92a2a}.t-bad i{background:#fff5f5}.t-warn i{background:#fff4e6}
-.qa-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}.qa-kpi .qa-card{margin:0}.qa-kc h3{margin:0 0 10px}.qa-kc h4{margin:12px 0 6px;font-size:13px}.qa-wide{grid-column:1/-1}
+.qa-kpi{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px;align-items:stretch}.qa-kpi .k3{grid-column:span 3}.qa-kpi .k4{grid-column:span 4}.qa-kpi .k8{grid-column:span 8}.qa-kpi .k12{grid-column:1/-1}@media(max-width:1000px){.qa-kpi .k3{grid-column:span 6}}@media(max-width:900px){.qa-kpi .k4,.qa-kpi .k8{grid-column:1/-1}}@media(max-width:640px){.qa-kpi .k3{grid-column:1/-1}}.qa-kc{display:flex;flex-direction:column}.qa-kc>.sub:last-child{margin-top:auto;padding-top:8px}.qa-kpi .qa-card{margin:0}.qa-kc h3{margin:0 0 10px}.qa-kc h4{margin:12px 0 6px;font-size:13px}.qa-wide{grid-column:1/-1}
 .qa-ring{--c:#2b8a3e;width:150px;height:150px;border-radius:50%;margin:6px auto 12px;display:grid;place-content:center;text-align:center;background:radial-gradient(closest-side,#fff 74%,transparent 75% 100%),conic-gradient(var(--c) calc(var(--p)*1%),#f1f3f5 0)}.qa-ring b{font-size:32px;line-height:1}.qa-ring span{font-size:12px;color:#6b7280}.qa-ring.t-warn{--c:#e8590c}.qa-ring.t-bad{--c:#c92a2a}
 .qa-legend{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;font-size:13px}.qa-legend a,.qa-legend span{color:inherit;text-decoration:none;display:flex;align-items:center;gap:6px}.qa-legend b{margin-left:auto}.qa-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}.d-ok{background:#2b8a3e}.d-warn{background:#e8590c}.d-bad{background:#c92a2a}.d-off{background:#adb5bd}
 .qa-kt{width:100%;min-width:0;border-collapse:collapse;font-size:13px;table-layout:fixed}.qa-kt td:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.qa-kt td{padding:5px 4px;border-bottom:1px solid #f5f5f5}.qa-kt tr[data-a]{cursor:pointer}.qa-kt tr[data-a]:hover{background:#f8faf5}.qa-kt .n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;width:56px}.qa-kt .w{width:38%}.qa-kpi .qa-card{overflow:hidden;min-width:0}
