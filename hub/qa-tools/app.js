@@ -17,7 +17,7 @@
   const DUE_SOON = 30;   // days before the calibration due date to start warning
 
   let ROOT = null, D = null, ERR = "", LOADING = null;
-  const S = { page: "", tool: 0, q: "", cat: "", st: "", imp: null, sel: new Set() };
+  const S = { page: "", tool: 0, q: "", cat: "", dept: "", st: "", imp: null, sel: new Set() };
 
   /* ---------- helpers ---------- */
   const pad = n => String(n).padStart(2, "0");
@@ -45,7 +45,9 @@
   const chip = (l, c) => `<span class="qa-chip ${c}">${esc(l)}</span>`;
   const stChip = t => chip(...(ST[t.status] || [t.status, "s-off"]));
   const active = t => !["retired"].includes(t.status);
-  const canBorrow = t => t.status === "available" && calState(t).k !== "over";
+  const canBorrow = t => t.lendable && t.status === "available" && calState(t).k !== "over";
+  const normName = s => String(s || "").replace(/^(นาย|นางสาว|นาง|น\.ส\.)\s*/, "").replace(/\s+/g, "");
+  const isMine = t => !!t.owner_name && normName(t.owner_name) === normName(me().name);
   const thumb = (t, cls = "qa-th") => t.photos && t.photos[0] ? `<img class="${cls}" loading="lazy" src="${fileUrl(t.photos[0].p)}" alt="">` : `<span class="${cls} qa-noimg">${(CAT_L[t.category] || "🧰").split(" ")[0]}</span>`;
 
   /* ---------- api ---------- */
@@ -128,28 +130,31 @@
     const pending = D.cals.filter(c => c.status === "pending_approval").length + D.tools.filter(t => t.status === "retire_pending").length;
     const tiles = [["🧰", "เครื่องมือทั้งหมด", ts.length, "", "list"], ["✅", "ว่าง พร้อมใช้", ts.filter(canBorrow).length, "ok", "list"], ["🤝", "ถูกยืมอยู่", open.length, "loan", "loans"],
       ["⏰", "เกินกำหนดคืน", late.length, late.length ? "bad" : "", "loans"], ["🎯", "สอบเทียบใน " + DUE_SOON + " วัน", soon.length, soon.length ? "warn" : "", "cal"], ["⛔", "เลยกำหนดสอบเทียบ", over.length, over.length ? "bad" : "", "cal"]];
+    const noDue = cs.filter(([, c]) => c.k === "unk").length;
+    if (noDue) tiles.push(["❔", "ยังไม่มีวันครบสอบเทียบ", noDue, "warn", "cal"]);
     if (m.canApprove || m.canManage) tiles.push(["✍️", "รออนุมัติ", pending, pending ? "warn" : "", "cal"]);
-    const mine = open.filter(l => l.borrower === m.username);
+    const mine = open.filter(l => l.borrower === m.username), myHeld = ts.filter(isMine);
     const row = (t, extra) => `<a class="qa-row" href="#qa-tools/tool/${t.id}">${thumb(t, "qa-th sm")}<span><b>${esc(t.name)}</b><span class="sub">${esc(t.asset_no)}</span></span><span class="qa-right">${extra}</span></a>`;
     return `<div class="qa-tiles">${tiles.map(([ic, l, n, k, href]) => `<a class="qa-tile t-${k}" href="#qa-tools/${href}"><i>${ic}</i><b>${n}</b><span>${l}</span></a>`).join("")}</div>
       <div class="qa-grid">
         <div class="qa-card"><h3>🤝 ที่ฉันยืมอยู่</h3>${mine.length ? mine.map(l => { const t = tById(l.tool_id); return t ? row(t, chip(l.status === "return_requested" ? "แจ้งคืนแล้ว" : "คืน " + fmt(l.due_back), l.status === "return_requested" ? "s-loan" : days(l.due_back) < 0 ? "s-bad" : "s-off")) : ""; }).join("") : `<p class="muted">ไม่มี · เปิด <a href="#qa-tools/list">ทะเบียนเครื่องมือ</a> แล้วกด “ยืม”</p>`}</div>
+        ${myHeld.length ? `<div class="qa-card"><h3>🧑‍🔧 เครื่องมือที่ฉันถือครอง (${myHeld.length})</h3>${myHeld.slice(0, 8).map(t => row(t, t.needs_cal ? chip(calState(t).l, calState(t).c) : "")).join("")}${myHeld.length > 8 ? `<a class="qa-more" href="#qa-tools/list" data-holder="1">ดูทั้งหมด ${myHeld.length} รายการ →</a>` : ""}</div>` : ""}
         <div class="qa-card"><h3>⏰ เกินกำหนดคืน</h3>${late.length ? late.map(l => { const t = tById(l.tool_id); return t ? row(t, `<span class="sub">${esc(l.borrower_name)}</span>${chip("เกิน " + (-days(l.due_back)) + " วัน", "s-bad")}`) : ""; }).join("") : `<p class="muted">ไม่มี 👍</p>`}</div>
         <div class="qa-card"><h3>🎯 ต้องสอบเทียบ</h3>${over.concat(soon).length ? over.concat(soon).sort((a, b) => a[1].n - b[1].n).slice(0, 10).map(([t, c]) => row(t, chip(c.l, c.c))).join("") : `<p class="muted">ไม่มีที่ครบกำหนดใน ${DUE_SOON} วัน</p>`}</div>
       </div>`;
   }
 
   function filters() {
-    return `<div class="qa-bar"><input type="search" id="qaQ" placeholder="🔍 ค้นหา รหัส / ชื่อ / ยี่ห้อ / S/N / ผู้รับผิดชอบ" value="${esc(S.q)}">
+    return `<div class="qa-bar"><input type="search" id="qaQ" placeholder="🔍 ค้นหา รหัส / ชื่อ / ยี่ห้อ / ขนาด / ผู้ถือครอง" value="${esc(S.q)}">
       <select id="qaCat"><option value="">ทุกประเภท</option>${CATS.map(([k, l]) => `<option value="${k}"${S.cat === k ? " selected" : ""}>${l}</option>`).join("")}</select>
-      <select id="qaSt"><option value="">ทุกสถานะ</option>${Object.entries(ST).map(([k, [l]]) => `<option value="${k}"${S.st === k ? " selected" : ""}>${l}</option>`).join("")}<option value="calover"${S.st === "calover" ? " selected" : ""}>เลยกำหนดสอบเทียบ</option><option value="calsoon"${S.st === "calsoon" ? " selected" : ""}>สอบเทียบใน ${DUE_SOON} วัน</option></select>`;
+      <select id="qaDept"><option value="">ทุกแผนก</option>${[...new Set(D.tools.map(t => t.department).filter(Boolean))].sort().map(d => `<option${S.dept === d ? " selected" : ""}>${esc(d)}</option>`).join("")}</select><select id="qaSt"><option value="">ทุกสถานะ</option>${Object.entries(ST).map(([k, [l]]) => `<option value="${k}"${S.st === k ? " selected" : ""}>${l}</option>`).join("")}<option value="calover"${S.st === "calover" ? " selected" : ""}>เลยกำหนดสอบเทียบ</option><option value="calsoon"${S.st === "calsoon" ? " selected" : ""}>สอบเทียบใน ${DUE_SOON} วัน</option></select>`;
   }
   function filtered() {
     const q = S.q.toLowerCase();
     return D.tools.filter(t => (S.st === "retired" || t.status !== "retired")
-      && (!S.cat || t.category === S.cat)
+      && (!S.cat || t.category === S.cat) && (!S.dept || t.department === S.dept)
       && (!S.st || t.status === S.st || (S.st === "calover" && calState(t).k === "over") || (S.st === "calsoon" && calState(t).k === "soon"))
-      && (!q || [t.asset_no, t.name, t.brand, t.model, t.serial_no, t.owner_name, t.location].some(v => String(v || "").toLowerCase().includes(q))));
+      && (!q || [t.asset_no, t.fixed_asset_no, t.name, t.brand, t.model, t.serial_no, t.owner_name, t.department, t.location, t.spec].some(v => String(v || "").toLowerCase().includes(q))));
   }
   function vList() {
     const m = me(), ts = filtered();
@@ -159,9 +164,9 @@
       <div class="qa-cards">${ts.map(t => { const c = calState(t), l = openLoan(t);
         return `<div class="qa-tcard"><label class="qa-pick"><input type="checkbox" data-sel="${t.id}"${S.sel.has(t.id) ? " checked" : ""}></label>
           <a href="#qa-tools/tool/${t.id}" class="qa-tlink">${thumb(t)}<div class="qa-tbody"><div class="sub mono">${esc(t.asset_no)}</div><b>${esc(t.name)}</b>
-          <div class="sub">${esc([t.brand, t.model].filter(Boolean).join(" "))}</div>
+          <div class="sub">${esc([t.brand, t.model, t.spec].filter(x => x && x !== "-").join(" · "))}</div>
           <div class="qa-tags">${stChip(t)}${t.needs_cal ? chip("🎯 " + c.l, c.c) : ""}</div>
-          ${l ? `<div class="sub">👤 ${esc(l.borrower_name)} · คืน ${fmt(l.due_back)}</div>` : t.owner_name ? `<div class="sub">ผู้รับผิดชอบ: ${esc(t.owner_name)}</div>` : ""}</div></a>
+          ${l ? `<div class="sub">👤 ยืมโดย ${esc(l.borrower_name)} · คืน ${fmt(l.due_back)}</div>` : t.lendable ? `<div class="sub">🧰 เครื่องมือกลาง ให้ยืมได้</div>` : t.owner_name ? `<div class="sub">🧑‍🔧 ${esc(t.owner_name)}${t.department ? " · " + esc(t.department) : ""}</div>` : ""}</div></a>
           ${canBorrow(t) ? `<button class="qa-btn sm" data-a="borrow" data-id="${t.id}">ยืม</button>` : ""}</div>`; }).join("") || `<p class="muted">ไม่พบเครื่องมือ${m.canManage && !D.tools.length ? " — เริ่มจาก “+ เพิ่มเครื่องมือ” หรือ “⬆ นำเข้า Excel”" : ""}</p>`}</div>`;
   }
 
@@ -171,9 +176,9 @@
     const c = calState(t), l = openLoan(t);
     const cals = D.cals.filter(x => x.tool_id === t.id), loans = D.loans.filter(x => x.tool_id === t.id);
     const pendCal = cals.find(x => x.status === "pending_approval"), sentCal = cals.find(x => x.status === "sent" || x.status === "rejected");
-    const info = [["รหัสทรัพย์สิน", `<span class="mono">${esc(t.asset_no)}</span>`], ["ประเภท", esc(CAT_L[t.category] || t.category || "")], ["ยี่ห้อ / รุ่น", esc([t.brand, t.model].filter(Boolean).join(" / "))],
-      ["Serial No.", `<span class="mono">${esc(t.serial_no || "")}</span>`], ["ช่วงวัด / Spec", esc(t.spec || "")], ["ที่เก็บ", esc(t.location || "")], ["ผู้รับผิดชอบ", esc(t.owner_name || "")],
-      ["วันที่ซื้อ", t.purchase_date ? fmt(t.purchase_date) + ` <span class="muted">(อายุ ${age(t.purchase_date)})</span>` : ""], ["ราคา", t.price != null ? Number(t.price).toLocaleString() + " บาท" : ""],
+    const info = [["รหัสเครื่องมือ", `<span class="mono">${esc(t.asset_no)}</span>`], ["รหัสทรัพย์สิน", t.fixed_asset_no ? `<span class="mono">${esc(t.fixed_asset_no)}</span>` : ""], ["ประเภท", esc(CAT_L[t.category] || t.category || "")], ["ยี่ห้อ / รุ่น", esc([t.brand, t.model].filter(Boolean).join(" / "))],
+      ["Serial No.", `<span class="mono">${esc(t.serial_no || "")}</span>`], ["ขนาด / ช่วงวัด", esc(t.spec || "")], ["ผู้ถือครอง", esc([t.owner_name, t.department].filter(Boolean).join(" · "))], ["ที่เก็บ", esc(t.location || "")],
+      ["ให้ยืม", t.lendable ? "เครื่องมือกลาง ให้ยืมได้" : ""], ["วันที่เริ่มใช้", t.purchase_date ? fmt(t.purchase_date) + ` <span class="muted">(อายุ ${age(t.purchase_date)})</span>` : ""], ["ราคา", t.price != null ? Number(t.price).toLocaleString() + " บาท" : ""],
       ["สอบเทียบ", t.needs_cal ? `ทุก ${t.cal_interval_m} เดือน · ล่าสุด ${fmt(t.last_cal_date) || "-"} · ครบกำหนด ${chip(c.l, c.c)}` : "ไม่ต้องสอบเทียบ"], ["หมายเหตุ", esc(t.note || "")]].filter(r => r[1]);
     const acts = [];
     if (canBorrow(t)) acts.push(`<button class="qa-btn" data-a="borrow" data-id="${t.id}">🤝 ยืม</button>`);
@@ -182,6 +187,7 @@
     if (l && m.canManage) acts.push(`<button class="qa-btn" data-a="receive" data-id="${l.id}">📥 รับคืน</button>`);
     if (m.canManage) {
       acts.push(`<button class="qa-btn ghost" data-a="edit" data-id="${t.id}">✏️ แก้ไข / รูป / เอกสาร</button>`);
+      if (!l && t.status !== "retired") acts.push(`<button class="qa-btn ghost" data-a="holder" data-id="${t.id}">🔁 เบิก / เปลี่ยนผู้ถือครอง</button>`);
       if (t.needs_cal && !l && t.status !== "calibration" && t.status !== "retired") acts.push(`<button class="qa-btn ghost" data-a="cal-send" data-id="${t.id}">🚚 ส่งสอบเทียบ</button>`);
       if (t.needs_cal && !pendCal && t.status !== "retired") acts.push(`<button class="qa-btn ghost" data-a="cal-result" data-id="${t.id}"${sentCal ? ` data-cal="${sentCal.id}"` : ""}>📄 บันทึกผลสอบเทียบ</button>`);
       if (!l && !["retire_pending", "retired"].includes(t.status)) acts.push(`<button class="qa-btn ghost danger" data-a="retire" data-id="${t.id}">🗑 ขอจำหน่าย</button>`);
@@ -215,7 +221,8 @@
           : (l.status === "return_requested" ? chip("แจ้งคืนแล้ว", "s-loan") + " " : "") + (m.canManage ? `<button class="qa-btn sm" data-a="receive" data-id="${l.id}">📥 รับคืน</button>` : l.borrower === m.username && l.status === "out" ? `<button class="qa-btn sm" data-a="ret-req" data-id="${l.id}">↩ แจ้งคืน</button>` : "")}</td></tr>`; };
     const head = `<thead><tr><th>เครื่องมือ</th><th>ผู้ยืม</th><th>งาน / ลูกค้า / ไซต์</th><th>ยืมเมื่อ</th><th>กำหนดคืน</th><th></th></tr></thead>`;
     return `<div class="qa-card qa-scroll"><h3>กำลังถูกยืม (${open.length})</h3><table class="qa-t">${head}<tbody>${open.map(tr).join("") || `<tr><td colspan="6" class="muted">ไม่มี</td></tr>`}</tbody></table></div>
-      <div class="qa-card qa-scroll"><h3>คืนแล้วล่าสุด</h3><table class="qa-t">${head}<tbody>${done.map(tr).join("") || `<tr><td colspan="6" class="muted">ยังไม่มี</td></tr>`}</tbody></table></div>`;
+      <div class="qa-card qa-scroll"><h3>🔁 เบิก / เปลี่ยนผู้ถือครองล่าสุด</h3>${(D.holds || []).length ? `<table class="qa-t"><thead><tr><th>เครื่องมือ</th><th>รายละเอียด</th><th>บันทึกโดย</th><th>เมื่อ</th></tr></thead><tbody>${D.holds.slice(0, 60).map(h => { const t = tById(h.tool_id) || {}; return `<tr><td><a href="#qa-tools/tool/${t.id}">${esc(t.asset_no || "")}</a> ${esc(t.name || "")}</td><td>${esc(h.detail || "")}</td><td>${esc(h.by || "")}</td><td>${fmtT(h.at)}</td></tr>`; }).join("")}</tbody></table>` : `<p class="muted">ยังไม่มี — ผู้ดูแลกด “🔁 เบิก / เปลี่ยนผู้ถือครอง” ในหน้าเครื่องมือ</p>`}</div>
+      <div class="qa-card qa-scroll"><h3>คืนแล้วล่าสุด (ยืม)</h3><table class="qa-t">${head}<tbody>${done.map(tr).join("") || `<tr><td colspan="6" class="muted">ยังไม่มี</td></tr>`}</tbody></table></div>`;
   }
 
   function vCal() {
@@ -236,14 +243,15 @@
   }
 
   /* import */
-  const COLMAP = { "รหัสทรัพย์สิน": "asset_no", "asset no": "asset_no", "asset no.": "asset_no", "รหัส": "asset_no", "code": "asset_no", "ชื่อเครื่องมือ": "name", "ชื่อ": "name", "รายการ": "name", "name": "name", "description": "name",
+  const COLMAP = { "รหัสเครื่องมือ": "asset_no", "รหัส": "asset_no", "tool code": "asset_no", "รหัสทรัพย์สิน": "fixed_asset_no", "asset no": "fixed_asset_no", "asset no.": "fixed_asset_no",
+    "รายชื่อเครื่องมือวัด": "name", "ผู้ถือครอง": "owner_name", "แผนก": "department", "หน่วยงาน": "department", "วันที่เริ่มใช้": "purchase_date", "ขนาด": "spec", "ให้ยืมได้": "lendable", "code": "asset_no", "ชื่อเครื่องมือ": "name", "ชื่อ": "name", "รายการ": "name", "name": "name", "description": "name",
     "ประเภท": "category", "category": "category", "ยี่ห้อ": "brand", "brand": "brand", "รุ่น": "model", "model": "model", "serial no.": "serial_no", "serial no": "serial_no", "s/n": "serial_no", "serial": "serial_no",
     "spec": "spec", "ช่วงวัด": "spec", "range": "spec", "ที่เก็บ": "location", "สถานที่เก็บ": "location", "location": "location", "ผู้รับผิดชอบ": "owner_name", "owner": "owner_name",
     "วันที่ซื้อ": "purchase_date", "purchase date": "purchase_date", "ราคา": "price", "price": "price", "ต้องสอบเทียบ": "needs_cal", "สอบเทียบทุก (เดือน)": "cal_interval_m", "ความถี่สอบเทียบ (เดือน)": "cal_interval_m",
     "สอบเทียบล่าสุด": "last_cal_date", "last calibration": "last_cal_date", "วันที่สอบเทียบล่าสุด": "last_cal_date", "ครบกำหนดสอบเทียบ": "next_cal_due", "next calibration": "next_cal_due", "due date": "next_cal_due", "หมายเหตุ": "note", "note": "note" };
   const toIso = v => { if (typeof v === "number" && v > 1000 && v < 80000) { const d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 864e5); return d.getUTCFullYear() + "-" + pad(d.getUTCMonth() + 1) + "-" + pad(d.getUTCDate()); }
     const s = String(v || "").trim(); if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10); const m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/.exec(s); if (m) { let y = +m[3]; if (y < 100) y += 2000; if (y > 2400) y -= 543; return y + "-" + pad(m[2]) + "-" + pad(m[1]); } return ""; };
-  const catOf = v => { const s = String(v || "").toLowerCase(); if (CATS.some(c => c[0] === s)) return s; if (/วัด|measur|gauge|caliper|เวอร์เนีย|ไมโคร|ตลับ|ระดับ/.test(s)) return "measuring"; if (/มิเตอร์|meter|ไฟฟ้า|electric|megger|insulation/.test(s)) return "electrical"; if (/สว่าน|เจียร|drill|grinder|power/.test(s)) return "power"; if (/รอก|สลิง|hoist|sling|ยก/.test(s)) return "lifting"; if (/safety|ปลอดภัย|harness/.test(s)) return "safety"; if (/ประแจ|ไขควง|hand|wrench/.test(s)) return "hand"; return s ? "other" : ""; };
+  const catOf = v => { const s = String(v || "").toLowerCase().trim(); if (CATS.some(c => c[0] === s)) return s; const lab = CATS.find(c => c[1].replace(/^\S+\s/, "").toLowerCase() === s); if (lab) return lab[0]; if (/วัด|measur|gauge|caliper|เวอร์เนีย|ไมโคร|ตลับ|ระดับ/.test(s)) return "measuring"; if (/มิเตอร์|meter|ไฟฟ้า|electric|megger|insulation/.test(s)) return "electrical"; if (/สว่าน|เจียร|drill|grinder|power/.test(s)) return "power"; if (/รอก|สลิง|hoist|sling|ยก/.test(s)) return "lifting"; if (/safety|ปลอดภัย|harness/.test(s)) return "safety"; if (/ประแจ|ไขควง|hand|wrench/.test(s)) return "hand"; return s ? "other" : ""; };
   async function readImport(file) {
     let X; try { X = await lib("xlsx"); } catch (e) { return toast(e.message, 1); }
     const wb = X.read(await file.arrayBuffer());
@@ -252,16 +260,16 @@
     if (hi < 0) return toast("ไม่พบหัวคอลัมน์ เช่น 'รหัสทรัพย์สิน' และ 'ชื่อเครื่องมือ'", 1);
     const cols = aoa[hi].map(c => COLMAP[String(c).trim().toLowerCase()] || null);
     S.imp = aoa.slice(hi + 1).map(r => { const o = {}; cols.forEach((k, i) => { if (k && r[i] !== "" && r[i] != null && !(k in o)) o[k] = r[i]; }); return o; })
-      .filter(o => o.asset_no || o.name).map(o => { for (const k of ["purchase_date", "last_cal_date", "next_cal_due"]) if (o[k] != null) o[k] = toIso(o[k]); if (o.category != null) o.category = catOf(o.category); o.asset_no = String(o.asset_no ?? "").trim(); o.name = String(o.name ?? "").trim(); return o; });
+      .filter(o => o.asset_no || o.name).map(o => { for (const k of ["purchase_date", "last_cal_date", "next_cal_due"]) if (o[k] != null) o[k] = toIso(o[k]); if (o.category != null) o.category = catOf(o.category); o.asset_no = String(o.asset_no ?? "").trim(); o.name = String(o.name ?? "").trim(); if (o.owner_name) o.owner_name = String(o.owner_name).replace(/\s+/g, " ").trim(); for (const k of ["brand", "model", "spec"]) if (String(o[k] ?? "").trim() === "-") delete o[k]; return o; });
     draw();
   }
   function vImport() {
     if (!S.imp) return `<div class="qa-card"><h3>⬆ นำเข้าทะเบียนเครื่องมือจาก Excel</h3>
-      <p>แถวหัวตารางควรมี <code>รหัสทรัพย์สิน</code> <code>ชื่อเครื่องมือ</code> และถ้ามี: <code>ประเภท</code> <code>ยี่ห้อ</code> <code>รุ่น</code> <code>Serial No.</code> <code>ช่วงวัด</code> <code>ที่เก็บ</code> <code>ผู้รับผิดชอบ</code> <code>วันที่ซื้อ</code> <code>ราคา</code> <code>ต้องสอบเทียบ</code> <code>สอบเทียบทุก (เดือน)</code> <code>สอบเทียบล่าสุด</code> <code>ครบกำหนดสอบเทียบ</code> <code>หมายเหตุ</code></p>
-      <p class="muted">รหัสทรัพย์สินที่มีอยู่แล้วจะอัปเดตทับ · รูปและใบรับรองเพิ่มทีหลังในหน้ารายละเอียด</p><input type="file" id="qaImp" accept=".xlsx,.xls,.csv"></div>`;
+      <p>แถวหัวตารางควรมี <code>รหัส</code> <code>รายชื่อเครื่องมือวัด</code> และถ้ามี: <code>ยี่ห้อ</code> <code>รุ่น</code> <code>ขนาด</code> <code>ผู้ถือครอง</code> <code>แผนก</code> <code>วันที่เริ่มใช้</code> <code>รหัสทรัพย์สิน</code> <code>ประเภท</code> <code>Serial No.</code> <code>ที่เก็บ</code> <code>ราคา</code> <code>ให้ยืมได้</code> <code>ต้องสอบเทียบ</code> <code>สอบเทียบทุก (เดือน)</code> <code>สอบเทียบล่าสุด</code> <code>ครบกำหนดสอบเทียบ</code> <code>หมายเหตุ</code></p>
+      <p class="muted">รหัสเครื่องมือที่มีอยู่แล้วจะอัปเดตทับ · รูปและใบรับรองเพิ่มทีหลังในหน้ารายละเอียด</p><input type="file" id="qaImp" accept=".xlsx,.xls,.csv"></div>`;
     const bad = S.imp.filter(o => !o.asset_no || !o.name).length;
-    return `<div class="qa-card qa-scroll"><h3>ตรวจก่อนนำเข้า — ${S.imp.length} รายการ${bad ? ` <span class="bad">(ไม่มีรหัส/ชื่อ ${bad})</span>` : ""}</h3><table class="qa-t"><thead><tr><th>รหัส</th><th>ชื่อ</th><th>ประเภท</th><th>ยี่ห้อ / รุ่น</th><th>S/N</th><th>ผู้รับผิดชอบ</th><th>ซื้อ</th><th>สอบเทียบล่าสุด</th><th>ครบกำหนด</th></tr></thead><tbody>
-      ${S.imp.slice(0, 500).map(o => `<tr class="${!o.asset_no || !o.name ? "bad" : ""}"><td class="mono">${esc(o.asset_no)}</td><td>${esc(o.name)}</td><td>${esc(CAT_L[o.category] || "")}</td><td>${esc([o.brand, o.model].filter(Boolean).join(" / "))}</td><td class="mono">${esc(o.serial_no || "")}</td><td>${esc(o.owner_name || "")}</td><td>${fmt(o.purchase_date)}</td><td>${fmt(o.last_cal_date)}</td><td>${fmt(o.next_cal_due)}</td></tr>`).join("")}
+    return `<div class="qa-card qa-scroll"><h3>ตรวจก่อนนำเข้า — ${S.imp.length} รายการ${bad ? ` <span class="bad">(ไม่มีรหัส/ชื่อ ${bad})</span>` : ""}</h3><table class="qa-t"><thead><tr><th>รหัส</th><th>ชื่อ</th><th>ประเภท</th><th>ยี่ห้อ / รุ่น</th><th>ขนาด</th><th>ผู้ถือครอง</th><th>เริ่มใช้</th><th>สอบเทียบล่าสุด</th><th>ครบกำหนด</th></tr></thead><tbody>
+      ${S.imp.slice(0, 500).map(o => `<tr class="${!o.asset_no || !o.name ? "bad" : ""}"><td class="mono">${esc(o.asset_no)}</td><td>${esc(o.name)}</td><td>${esc(CAT_L[o.category] || "")}</td><td>${esc([o.brand, o.model].filter(Boolean).join(" / "))}</td><td>${esc(o.spec || "")}</td><td>${esc(o.owner_name || "")}<div class="sub">${esc(o.department || "")}</div></td><td>${fmt(o.purchase_date)}</td><td>${fmt(o.last_cal_date)}</td><td>${fmt(o.next_cal_due)}</td></tr>`).join("")}
       </tbody></table><div class="qa-acts"><button class="qa-btn" data-a="imp-go">นำเข้า ${S.imp.length - bad} รายการ</button> <button class="qa-btn ghost" data-a="imp-cancel">ยกเลิก</button></div></div>`;
   }
 
@@ -305,18 +313,21 @@
       <label class="qa-add">📷 เพิ่มรูป<input type="file" id="tPh" accept="image/*" multiple hidden></label></div>
       <div class="qa-docs">${docs.map((f, i) => `<span class="qa-doc">📎 ${esc(f.name)} <button type="button" data-rm="d${i}">×</button></span>`).join("")}<label class="qa-add">📎 แนบเอกสาร (PDF / รูป)<input type="file" id="tDoc" accept="application/pdf,image/*" multiple hidden></label></div>`;
     const m = dialog(t ? "✏️ แก้ไขเครื่องมือ" : "+ เพิ่มเครื่องมือ", `<div class="qa-form">
-      ${fld("tNo", "รหัสทรัพย์สิน *", x.asset_no)}${fld("tName", "ชื่อเครื่องมือ *", x.name)}${sel("tCat", "ประเภท", [["", "—"], ...CATS], x.category)}
+      ${fld("tNo", "รหัสเครื่องมือ * (ตามสติกเกอร์ เช่น PM-03)", x.asset_no)}${fld("tName", "ชื่อเครื่องมือ *", x.name)}${sel("tCat", "ประเภท", [["", "—"], ...CATS], x.category)}
+      ${fld("tFa", "รหัสทรัพย์สิน (AP02-…)", x.fixed_asset_no)}
       ${fld("tBrand", "ยี่ห้อ", x.brand)}${fld("tModel", "รุ่น", x.model)}${fld("tSn", "Serial No.", x.serial_no)}
-      ${fld("tSpec", "ช่วงวัด / Spec / ความละเอียด", x.spec)}${fld("tLoc", "ที่เก็บ", x.location)}${fld("tOwner", "ผู้รับผิดชอบ", x.owner_name)}
-      ${fld("tBuy", "วันที่ซื้อ (ใช้คำนวณอายุ)", x.purchase_date, "date")}${fld("tPrice", "ราคา (บาท)", x.price, "number", ' min="0"')}
+      ${fld("tSpec", "ขนาด / ช่วงวัด / ความละเอียด", x.spec)}${fld("tOwner", "ผู้ถือครอง", x.owner_name)}${fld("tDept", "แผนก", x.department, "text", ' list="qaDepts"')}${fld("tLoc", "ที่เก็บ", x.location)}
+      ${fld("tBuy", "วันที่เริ่มใช้ (ใช้คำนวณอายุ)", x.purchase_date, "date")}${fld("tPrice", "ราคา (บาท)", x.price, "number", ' min="0"')}
       ${t && ["available", "repair", "lost"].includes(x.status) ? sel("tSt", "สถานะ", [["available", "ว่าง"], ["repair", "ซ่อม / ชำรุด"], ["lost", "สูญหาย"]], x.status) : ""}
+      <label class="qa-ck"><input type="checkbox" id="tLend"${x.lendable ? " checked" : ""}> เครื่องมือกลาง ให้ยืมได้</label>
       <label class="qa-ck"><input type="checkbox" id="tCal"${x.needs_cal ? " checked" : ""}> ต้องสอบเทียบ</label>
       ${fld("tInt", "สอบเทียบทุก (เดือน)", x.cal_interval_m, "number", ' min="1" max="120"')}${fld("tLast", "สอบเทียบล่าสุด", x.last_cal_date, "date")}${fld("tNext", "ครบกำหนดครั้งถัดไป (ว่าง = คำนวณให้)", x.next_cal_due, "date")}
       <label class="wide">หมายเหตุ<input id="tNote" value="${esc(x.note || "")}"></label></div>
+      <datalist id="qaDepts">${depts().map(d => `<option value="${esc(d)}">`).join("")}</datalist>
       <h4>รูปเครื่องมือ และเอกสาร (คู่มือ / ใบรับรอง / ใบซื้อ)</h4><div id="tFiles">${files()}</div>`,
       async v => {
         await post("tool", { id: t ? t.id : 0, asset_no: v("tNo"), name: v("tName"), category: v("tCat"), brand: v("tBrand"), model: v("tModel"), serial_no: v("tSn"), spec: v("tSpec"),
-          location: v("tLoc"), owner_name: v("tOwner"), purchase_date: v("tBuy"), price: v("tPrice"), status: v("tSt"), needs_cal: v("tCal"), cal_interval_m: v("tInt"),
+          location: v("tLoc"), owner_name: v("tOwner"), department: v("tDept"), fixed_asset_no: v("tFa"), lendable: v("tLend"), purchase_date: v("tBuy"), price: v("tPrice"), status: v("tSt"), needs_cal: v("tCal"), cal_interval_m: v("tInt"),
           last_cal_date: v("tLast"), next_cal_due: v("tNext"), note: v("tNote"), photos, docs });
         await refresh("บันทึกแล้ว");
       });
@@ -329,6 +340,16 @@
         box.innerHTML = files(); rebind(); }; });
     };
     rebind();
+  }
+  const depts = () => [...new Set(["ประกันคุณภาพ", "กลโลหะ", "พลาสติก", "ไฟฟ้า", "วิศวกรรม", "ติดตั้งและบริการ", "คลังสินค้า", "วางแผนการผลิต", "การตลาด", ...D.tools.map(t => t.department).filter(Boolean)])];
+  function dlgHolder(t) {
+    dialog(`🔁 เบิก / เปลี่ยนผู้ถือครอง: ${esc(t.asset_no)} · ${esc(t.name)}`, `<p>ผู้ถือครองตอนนี้: <b>${esc(t.owner_name || "คลัง QA")}</b>${t.department ? " · " + esc(t.department) : ""}</p><div class="qa-form">
+      ${fld("hName", "ผู้ถือครองใหม่ (เว้นว่าง = คืนเข้าคลัง QA)", "")}${fld("hDept", "แผนก", "", "text", ' list="qaDepts2"')}${fld("hDate", "วันที่", TODAY(), "date")}
+      ${sel("hWhy", "สาเหตุ", [["", "—"], ["เบิกใหม่", "เบิกใหม่"], ["ลาออก", "ลาออก"], ["ชำรุด", "ชำรุด"], ["สเกลไม่ชัด", "สเกลไม่ชัด"], ["โอนย้าย", "โอนย้ายแผนก / คน"], ["อื่นๆ", "อื่นๆ"]], "")}
+      ${["available", "repair", "lost"].includes(t.status) ? sel("hSt", "สถานะเครื่องมือ", [["available", "ว่าง / ใช้งานได้"], ["repair", "ซ่อม / ชำรุด"], ["lost", "สูญหาย"]], t.status) : ""}
+      <label class="wide">หมายเหตุ<input id="hNote"></label></div><datalist id="qaDepts2">${depts().map(d => `<option value="${esc(d)}">`).join("")}</datalist>
+      <p class="sub">บันทึกแทนชีต “เบิก/คืนเครื่องมือ” — ดูย้อนหลังได้ที่แท็บ ยืม-คืน และบันทึกการเปลี่ยนแปลงของเครื่องมือ · ถ้าชำรุดจนใช้ไม่ได้ ให้กด “ขอจำหน่าย” ต่อ</p>`,
+      async v => { await post("holder", { id: t.id, owner_name: v("hName"), department: v("hDept"), date: v("hDate"), reason: v("hWhy"), status: v("hSt"), note: v("hNote") }); await refresh("บันทึกแล้ว"); });
   }
   function dlgCalSend(t) {
     dialog(`🚚 ส่งสอบเทียบ: ${esc(t.asset_no)} · ${esc(t.name)}`, `<div class="qa-form">${fld("cDate", "วันที่ส่ง", TODAY(), "date")}${fld("cLab", "หน่วยงานสอบเทียบ (Lab)", lastLab(t))}<label class="wide">หมายเหตุ<input id="cNote"></label></div>`,
@@ -367,8 +388,8 @@
   async function exportXlsx(kind) {
     let X; try { X = await lib("xlsx"); } catch (e) { return toast(e.message, 1); }
     const ts = kind === "cal" ? D.tools.filter(t => active(t) && t.needs_cal).sort((a, b) => String(a.next_cal_due || "9").localeCompare(String(b.next_cal_due || "9"))) : filtered();
-    const rows = ts.map(t => { const l = openLoan(t); return { "รหัสทรัพย์สิน": t.asset_no, "ชื่อเครื่องมือ": t.name, "ประเภท": (CAT_L[t.category] || "").replace(/^\S+\s/, ""), "ยี่ห้อ": t.brand || "", "รุ่น": t.model || "", "Serial No.": t.serial_no || "",
-      "ช่วงวัด": t.spec || "", "ที่เก็บ": t.location || "", "ผู้รับผิดชอบ": t.owner_name || "", "วันที่ซื้อ": t.purchase_date || "", "อายุ": age(t.purchase_date), "สถานะ": (ST[t.status] || [t.status])[0], "ผู้ยืม": l ? l.borrower_name : "",
+    const rows = ts.map(t => { const l = openLoan(t); return { "รหัส": t.asset_no, "ชื่อเครื่องมือ": t.name, "ประเภท": (CAT_L[t.category] || "").replace(/^\S+\s/, ""), "ยี่ห้อ": t.brand || "", "รุ่น": t.model || "", "ขนาด": t.spec || "", "Serial No.": t.serial_no || "", "รหัสทรัพย์สิน": t.fixed_asset_no || "",
+      "ผู้ถือครอง": t.owner_name || "", "แผนก": t.department || "", "ที่เก็บ": t.location || "", "ให้ยืมได้": t.lendable ? "ใช่" : "", "วันที่เริ่มใช้": t.purchase_date || "", "อายุ": age(t.purchase_date), "สถานะ": (ST[t.status] || [t.status])[0], "ผู้ยืม": l ? l.borrower_name : "",
       "ต้องสอบเทียบ": t.needs_cal ? "ใช่" : "ไม่", "สอบเทียบทุก (เดือน)": t.needs_cal ? t.cal_interval_m : "", "สอบเทียบล่าสุด": t.last_cal_date || "", "ครบกำหนดสอบเทียบ": t.next_cal_due || "", "สถานะสอบเทียบ": t.needs_cal ? calState(t).l : "", "หมายเหตุ": t.note || "" }; });
     const ws = X.utils.json_to_sheet(rows); ws["!cols"] = Object.keys(rows[0] || { a: 1 }).map(k => ({ wch: Math.max(10, k.length + 2) }));
     const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, kind === "cal" ? "Calibration plan" : "Tool register");
@@ -380,10 +401,12 @@
     const on = (id, ev, fn) => { const e = ROOT.querySelector("#" + id); if (e) e.addEventListener(ev, fn); };
     on("qaQ", "input", e => { S.q = e.target.value; draw(); const q = ROOT.querySelector("#qaQ"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); });
     on("qaCat", "change", e => { S.cat = e.target.value; draw(); });
+    on("qaDept", "change", e => { S.dept = e.target.value; draw(); });
     on("qaSt", "change", e => { S.st = e.target.value; draw(); });
     on("qaImp", "change", e => e.target.files[0] && readImport(e.target.files[0]));
     ROOT.querySelectorAll("[data-sel]").forEach(c => c.addEventListener("change", () => { c.checked ? S.sel.add(+c.dataset.sel) : S.sel.delete(+c.dataset.sel); draw(); }));
     ROOT.querySelectorAll("[data-a]").forEach(b => b.addEventListener("click", () => act(b.dataset.a, b.dataset)));
+    ROOT.querySelectorAll("[data-holder]").forEach(x => x.addEventListener("click", () => { S.q = (me().name || "").replace(/^(นาย|นางสาว|นาง|น\.ส\.)\s*/, "").split(" ")[0]; }));
     const lg = ROOT.querySelector("#qaLog");
     if (lg) fetch("/api/qa-tools/log?tool=" + S.tool).then(r => r.json()).then(j => { lg.innerHTML = (j.log || []).map(x => `<div class="qa-log"><b>${esc(x.action)}</b> · ${esc(x.by || "")} · ${fmtT(x.at)}${x.detail ? `<div>${esc(x.detail)}</div>` : ""}</div>`).join("") || "ยังไม่มี"; }).catch(() => { lg.textContent = ""; });
   }
@@ -392,6 +415,7 @@
     try {
       if (a === "new") return dlgTool(null);
       if (a === "edit") return dlgTool(t);
+      if (a === "holder") return dlgHolder(t);
       if (a === "borrow") return dlgBorrow(t);
       if (a === "receive") return dlgReceive(loan);
       if (a === "ret-req") return dlgNote("↩ แจ้งคืน", "หมายเหตุ (เช่น วางไว้ที่ไหน / สภาพ)", async n => { await post("return-request", { id: loan.id, note: n }); await refresh("แจ้งคืนแล้ว — นำเครื่องมือไปคืนผู้ดูแล"); }, "แจ้งคืน");
@@ -450,6 +474,7 @@
 .qa-form{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}.qa-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#6b7280}.qa-form .wide{grid-column:1/-1}.qa-ck{flex-direction:row!important;align-items:center;gap:6px!important;color:inherit!important;font-size:13.5px!important}
 .qa-files{display:flex;gap:8px;flex-wrap:wrap}.qa-f{position:relative}.qa-f img{width:72px;height:72px;object-fit:cover;border-radius:8px;display:block}.qa-f button{position:absolute;top:-6px;right:-6px;background:#fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.2);width:20px;height:20px;line-height:1}
 .qa-add{display:inline-flex;align-items:center;gap:6px;border:1px dashed var(--rak-line,#d6dae0);color:var(--rak);border-radius:8px;padding:8px 12px;cursor:pointer;font-size:12.5px;min-height:20px}
+.qa-more{display:inline-block;margin-top:8px;font-size:12.5px;color:var(--rak)}
 .qa-log{padding:6px 0;border-bottom:1px solid #f1f3f5;font-size:12.5px;color:#4b5563}
 .qa-toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#1f2328;color:#fff;padding:10px 16px;border-radius:10px;z-index:300;font-size:13.5px}.qa-toast.bad{background:#c92a2a}
 `;

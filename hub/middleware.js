@@ -1104,13 +1104,14 @@ async function qaApi(cfg, req, url, prof) {
   const setTool = (id, row) => rest(`${QA_T}?id=eq.${id}`, 'PATCH', { ...row, updated_by: who, updated_at: new Date().toISOString() });
   if (req.method === 'GET') {
     if (p === 'data') {
-      const [tools, loans, cals] = await Promise.all([
+      const [tools, loans, cals, holds] = await Promise.all([
         restAll(cfg, `${QA_T}?select=*&order=asset_no.asc`),
         restAll(cfg, `${QA_L}?select=*&order=out_at.desc&limit=1000`),
         restAll(cfg, `${QA_C}?select=*&order=created_at.desc&limit=1000`),
+        restAll(cfg, `${QA_G}?select=*&action=eq.${encodeURIComponent('เบิก / เปลี่ยนผู้ถือครอง')}&order=at.desc&limit=300`),
       ]);
       if (!tools || !loans || !cals) return json({ error: 'no_table' }, 503);
-      return json({ me: { username: who, name: whoName, canManage: manage, canApprove: approve }, tools, loans, cals });
+      return json({ me: { username: who, name: whoName, canManage: manage, canApprove: approve }, tools, loans, cals, holds: holds || [] });
     }
     if (p === 'log') {
       const id = Number(url.searchParams.get('tool')) || 0;
@@ -1151,7 +1152,8 @@ async function qaApi(cfg, req, url, prof) {
     if (id && !old) return json({ error: 'ไม่พบเครื่องมือ' }, 404);
     const row = { asset_no: mpStr(d.asset_no, 40), name: mpStr(d.name, 160), category: mpStr(d.category, 40) || null, brand: mpStr(d.brand, 80) || null,
       model: mpStr(d.model, 80) || null, serial_no: mpStr(d.serial_no, 80) || null, spec: mpStr(d.spec, 200) || null, location: mpStr(d.location, 120) || null,
-      owner_name: mpStr(d.owner_name, 120) || null, purchase_date: qaDay(d.purchase_date), price: qaNum(d.price), needs_cal: d.needs_cal !== false,
+      owner_name: mpStr(d.owner_name, 120) || null, department: mpStr(d.department, 80) || null, fixed_asset_no: mpStr(d.fixed_asset_no, 40) || null,
+      lendable: d.lendable === true, purchase_date: qaDay(d.purchase_date), price: qaNum(d.price), needs_cal: d.needs_cal !== false,
       cal_interval_m: Math.min(120, Math.max(1, parseInt(d.cal_interval_m, 10) || 12)), last_cal_date: qaDay(d.last_cal_date), next_cal_due: qaDay(d.next_cal_due),
       photos: qaFiles(d.photos, who, 12), docs: qaFiles(d.docs, who), note: mpStr(d.note, 1000) || null };
     if (!row.asset_no || !row.name) return json({ error: 'ใส่รหัสทรัพย์สินและชื่อเครื่องมือ' }, 400);
@@ -1172,10 +1174,11 @@ async function qaApi(cfg, req, url, prof) {
     for (const x of rows) {
       const row = { asset_no: mpStr(x.asset_no, 40), name: mpStr(x.name, 160) };
       if (!row.asset_no || !row.name) { out.failed.push((x.asset_no || '?') + ': ไม่มีรหัส/ชื่อ'); continue; }
-      for (const k of ['category', 'brand', 'model', 'serial_no', 'spec', 'location', 'owner_name', 'note']) if (x[k] != null && x[k] !== '') row[k] = mpStr(x[k], k === 'note' ? 1000 : 160);
+      for (const k of ['category', 'brand', 'model', 'serial_no', 'spec', 'location', 'owner_name', 'department', 'fixed_asset_no', 'note']) if (x[k] != null && x[k] !== '') row[k] = mpStr(x[k], k === 'note' ? 1000 : 160);
       for (const k of ['purchase_date', 'last_cal_date', 'next_cal_due']) if (qaDay(x[k])) row[k] = x[k];
       if (x.price != null && x.price !== '') row.price = qaNum(x.price);
       if (x.needs_cal != null && x.needs_cal !== '') row.needs_cal = !/^(no|n|false|0|ไม่)/i.test(String(x.needs_cal));
+      if (x.lendable != null && x.lendable !== '') row.lendable = !/^(no|n|false|0|ไม่)/i.test(String(x.lendable));
       if (x.cal_interval_m) row.cal_interval_m = Math.min(120, Math.max(1, parseInt(x.cal_interval_m, 10) || 12));
       if (row.last_cal_date && !row.next_cal_due && row.needs_cal !== false) row.next_cal_due = addMonthsIso(row.last_cal_date, row.cal_interval_m || 12);
       const id = byNo.get(row.asset_no.toLowerCase());
@@ -1185,9 +1188,21 @@ async function qaApi(cfg, req, url, prof) {
     }
     return json(out);
   }
+  if (p === 'holder') {                                 // เบิก / คืน / เปลี่ยนผู้ถือครอง (custodian) — same as the old เบิก/คืนเครื่องมือ sheet
+    if (!manage) return json({ error: 'เปลี่ยนผู้ถือครองได้เฉพาะผู้ดูแลเครื่องมือ' }, 403);
+    const t = await tool(d.id); if (!t) return json({ error: 'ไม่พบเครื่องมือ' }, 404);
+    const name = mpStr(d.owner_name, 120), dept = mpStr(d.department, 80), reason = mpStr(d.reason, 120), day = qaDay(d.date) || today;
+    const row = { owner_name: name || null, department: dept || null };
+    if (['available', 'repair', 'lost'].includes(d.status) && ['available', 'repair', 'lost'].includes(t.status)) row.status = d.status;
+    const r = await setTool(t.id, row); if (!r.ok) return json({ error: 'supabase' }, 502);
+    await fetch(cfg.url + QA_G, { method: 'POST', headers: authHeaders(cfg.service), body: JSON.stringify({ tool_id: t.id, by: whoName, action: 'เบิก / เปลี่ยนผู้ถือครอง',
+      detail: mpStr(`${t.owner_name || 'คลัง QA'} → ${name || 'คืนคลัง QA'}${dept ? ' (' + dept + ')' : ''} · ${day}${reason ? ' · ' + reason : ''}${d.note ? ' · ' + mpStr(d.note, 200) : ''}`, 500) }) }).catch(() => null);
+    return json({ ok: true, tool: r.data[0] });
+  }
   if (p === 'borrow') {                                 // anyone with the menu
     const t = await tool(d.tool_id);
     if (!t) return json({ error: 'ไม่พบเครื่องมือ' }, 404);
+    if (!t.lendable) return json({ error: 'เครื่องมือนี้มีผู้ถือครองประจำ ไม่ได้เปิดให้ยืม' }, 409);
     if (t.status !== 'available') return json({ error: 'เครื่องมือนี้ไม่ว่าง (' + t.status + ')' }, 409);
     if (t.needs_cal && t.next_cal_due && t.next_cal_due < today) return json({ error: 'เลยกำหนดสอบเทียบแล้ว — ห้ามใช้จนกว่าจะสอบเทียบ' }, 409);
     const due = qaDay(d.due_back);
