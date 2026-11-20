@@ -419,7 +419,7 @@
   function docsBox(p) {
     const docs = p.docs || [], ed = canDocs(p);
     const missing = KEY_DOCS.filter(t => !docs.some(d => d.type === t));
-    const chip = d => { const u = safeUrl(d.link); return `<span class="se-doc" title="${esc([d.type, d.note, d.file ? "ไฟล์: " + d.file : "", d.by ? "เพิ่มโดย " + d.by : ""].filter(Boolean).join(" · "))}">
+    const chip = d => { const u = safeUrl(d.link) || (d.fp ? fileUrl(d.fp) : ""); return `<span class="se-doc" title="${esc([d.type, d.note, d.file ? "ไฟล์: " + d.file : "", d.by ? "เพิ่มโดย " + d.by : ""].filter(Boolean).join(" · "))}">
       ${u ? `<a href="${esc(u)}" target="_blank" rel="noopener">` : "<span>"}<i>${docIc(d.type)}</i><b>${esc(d.type)}</b>${d.title && d.title !== d.type ? `<span>${esc(d.title)}</span>` : ""}${d.file && !u ? `<small>${esc(d.file)}</small>` : ""}${u ? `<em>↗</em></a>` : "</span>"}
       ${ed ? `<button class="se-x" data-docdel="${d.id}" aria-label="ลบเอกสาร ${esc(d.title || d.type)}">${IC.x}</button>` : ""}</span>`; };
     return `<div class="se-docs"><span class="se-docs-h">📎 เอกสารที่เกี่ยวข้อง</span>
@@ -439,17 +439,18 @@
         <label>ประเภท *<select id="dType">${DOC_TYPES.map(([t, ic, th]) => `<option value="${esc(t)}" ${t === (type || "SOW") ? "selected" : ""}>${ic} ${esc(th)}</option>`).join("")}</select></label>
         <label class="w2">ชื่อเอกสาร<input id="dTitle" placeholder="เช่น SOW Rev.2, Layout Line 3"></label>
         <label class="w3">ลิงก์ (Google Drive / SharePoint / URL)<input id="dLink" type="url" placeholder="https://drive.google.com/..."></label>
-        <label class="w3">หรือแนบไฟล์<input id="dFile" type="file"></label>
+        <label class="w3">หรือแนบไฟล์ (PDF / รูป ไม่เกิน 4 MB)<input id="dFile" type="file" accept="application/pdf,image/*" data-up="doc" data-pid="${esc(p.id)}"></label>
         <label class="w3">หมายเหตุ<input id="dNote" placeholder="เช่น ฉบับที่ลูกค้าส่งมา 5 Nov"></label>
       </div>
-      <p class="se-hint" style="margin:0">โหมดทดลองเก็บแค่ชื่อไฟล์ ยังไม่อัปโหลดจริง · แนะนำใส่ลิงก์ Google Drive ของ Job เพื่อให้ทุกคนเปิดได้</p>`,
+      <p class="se-hint" style="margin:0">${SERVER ? "ไฟล์เก็บใน SSM Work (ทุกคนที่เปิดเมนูนี้ได้ เปิดดูได้) · ถ้าไฟล์อยู่ใน Google Drive ของ Job แล้ว ใส่ลิงก์แทนได้" : "โหมดทดลองเก็บแค่ชื่อไฟล์ ยังไม่อัปโหลดจริง"}</p>`,
       mm => {
-        const g = id => mm.querySelector(id).value.trim(), f = mm.querySelector("#dFile").files[0];
+        const g = id => mm.querySelector(id).value.trim(), fo = fileOf(mm.querySelector("#dFile")), f = fo.name ? { name: fo.name } : null;
+        if (fo.err) return fo.err;
         const link = g("#dLink");
         if (!link && !f) return "ใส่ลิงก์หรือแนบไฟล์อย่างน้อย 1 อย่าง";
         if (link && !safeUrl(link)) return "ลิงก์ต้องขึ้นต้นด้วย http:// หรือ https://";
         p.docs = p.docs || [];
-        p.docs.push({ id: uid(), type: g("#dType"), title: g("#dTitle") || (f ? f.name.replace(/\.[^.]+$/, "") : ""), link, file: f ? f.name : "", note: g("#dNote"), by: who(), at: new Date().toISOString() });
+        p.docs.push({ id: uid(), type: g("#dType"), title: g("#dTitle") || (f ? f.name.replace(/\.[^.]+$/, "") : ""), link, file: f ? f.name : "", fp: fo.path || "", note: g("#dNote"), by: who(), at: new Date().toISOString() });
         save(); toast("เพิ่มเอกสารแล้ว"); redraw();
       }, "เพิ่มเอกสาร");
     return m;
@@ -523,10 +524,10 @@
           <label class="se-f">วันที่<input type="date" id="cDate" value="${today()}"></label>
           <label class="se-f w2">รายการ<input id="cDesc" placeholder="เช่น ${esc(c.code === "accommodation" ? "ที่พัก 4 ห้อง × 3 คืน" : c.code === "manpower" ? "ค่าแรงทีมติดตั้ง สัปดาห์ 1" : "รายละเอียดค่าใช้จ่าย")}"></label>
           <label class="se-f">จำนวนเงิน (บาท)<input id="cAmt" inputmode="decimal" placeholder="0"></label>
-          <label class="se-f">ใบเสร็จ<input type="file" id="cFile" accept="image/*,application/pdf"></label>
+          <label class="se-f">ใบเสร็จ<input type="file" id="cFile" accept="image/*,application/pdf" data-up="rcpt" data-pid="${esc(p.id)}"></label>
           <div class="se-f"><button class="se-btn primary" id="cAdd">${IC.plus}บันทึก</button></div></div>` : ""}
         <div class="tbl"><table><thead><tr><th>วันที่</th><th>รายการ</th><th class="r">จำนวนเงิน</th><th>ใบเสร็จ</th><th>ผู้บันทึก</th><th>สถานะ</th><th></th></tr></thead>
-          <tbody>${acts.length ? acts.map(a => `<tr data-a="${a.id}"><td>${fmtD(a.date)}</td><td>${esc(a.desc)}</td><td class="r">${money(num(a.amount))}</td><td>${a.receipt ? `📎 ${esc(a.receipt)}` : `<span class="se-muted">–</span>`}</td><td>${esc(a.by)}</td><td><span class="se-st ${STA[a.status][1]}">${STA[a.status][0]}</span></td>
+          <tbody>${acts.length ? acts.map(a => `<tr data-a="${a.id}"><td>${fmtD(a.date)}</td><td>${esc(a.desc)}</td><td class="r">${money(num(a.amount))}</td><td>${a.receipt ? rcpt(a) : `<span class="se-muted">–</span>`}</td><td>${esc(a.by)}</td><td><span class="se-st ${STA[a.status][1]}">${STA[a.status][0]}</span></td>
             <td><span class="se-rowact">${canChk && a.status === "pending" ? `<button class="se-btn sm" data-chk="checked">✓</button><button class="se-btn sm" data-chk="rejected">✗</button>` : ""}${canAdd && a.status === "pending" ? `<button class="se-x" data-adel aria-label="ลบ">${IC.x}</button>` : ""}</span></td></tr>`).join("")
             : `<tr><td colspan="7" class="se-muted c" style="padding:16px">ยังไม่มีรายการ</td></tr>`}</tbody></table></div>
       </div>`;
@@ -566,8 +567,8 @@
     if (add) add.onclick = () => {
       const g = id => sec.querySelector(id).value.trim(), amount = num(g("#cAmt"));
       if (!g("#cDate") || !g("#cDesc") || amount <= 0) return toast("กรอกวันที่ รายการ และจำนวนเงิน");
-      const f = sec.querySelector("#cFile").files[0];
-      p.actuals.push({ id: uid(), date: g("#cDate"), cat: c.code, desc: g("#cDesc"), amount, receipt: f ? f.name : "", by: who(), status: "pending" });
+      const fo = fileOf(sec.querySelector("#cFile")); if (fo.err) return toast(fo.err);
+      p.actuals.push({ id: uid(), date: g("#cDate"), cat: c.code, desc: g("#cDesc"), amount, receipt: fo.name || "", rp: fo.path || "", by: who(), status: "pending" });
       save(); toast(bud != null && bud - actualBy(p)[c.code] < 0 ? "บันทึกแล้ว · ⚠️ หมวดนี้เกินงบ" : "บันทึกแล้ว · รอตรวจ"); redraw();
     };
     sec.querySelectorAll("tr[data-a]").forEach(tr => {
@@ -580,6 +581,7 @@
   const CSS4 = `
 .se-click{cursor:pointer}.se-click:hover td{background:var(--blush)}.se-click .se-go{color:var(--rak);font-size:12.5px;white-space:nowrap;font-weight:600}
 .se-catnav{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.se-up{display:block;font-size:12px;color:#6b7280;margin-top:3px}.se-up.ok{color:#15803d}.se-up.bad{color:#c70404}
 .se-fsb{margin-left:auto;display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 12px;font:inherit;font-size:13px;color:#3d4450;cursor:pointer}.se-fsb:hover{border-color:var(--rak);color:var(--rak)}
 .se-full{position:fixed;inset:0;z-index:45;background:#f5f6f8;overflow:auto;padding:12px 16px 24px}
 .se-full .se-back,.se-full .se-ph,.se-full .se-next,.se-full .se-pbar,.se-full .se-off,.se-full .se-role{display:none}
@@ -791,6 +793,42 @@
     const f = m.querySelector("input,select,textarea"); if (f) f.focus();
     return m;
   }
+
+  /* ---------- files: uploaded the moment they are chosen (server mode), so saving a form never waits ---------- */
+  const fileUrl = path => "/api/site-expense/file?p=" + encodeURIComponent(path);
+  const rcpt = a => a.rp ? `<a href="${esc(fileUrl(a.rp))}" target="_blank" rel="noopener">📎 ${esc(a.receipt)}</a>` : `📎 ${esc(a.receipt)}`;
+  const UP = new WeakMap();
+  function shrink(file, max = 1800, q = 0.82) {
+    return new Promise((ok, no) => {
+      const img = new Image(), u = URL.createObjectURL(file);
+      img.onload = () => { URL.revokeObjectURL(u); const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight)); const c = document.createElement("canvas");
+        c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k); c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(b => b ? ok(b) : no(new Error("อ่านรูปไม่สำเร็จ")), "image/jpeg", q); };
+      img.onerror = () => { URL.revokeObjectURL(u); no(new Error("อ่านรูปไม่สำเร็จ · ใช้ JPG / PNG หรือ PDF")); };
+      img.src = u;
+    });
+  }
+  async function uploadFile(file, kind, pid) {
+    const pdf = file.type === "application/pdf";
+    if (!pdf && !/^image\//.test(file.type)) throw new Error("รองรับเฉพาะรูปภาพหรือ PDF");
+    const body = pdf ? file : await shrink(file);
+    if (body.size > 4 * 1024 * 1024) throw new Error("ไฟล์ใหญ่เกิน 4 MB");
+    const r = await fetch(`/api/site-expense/file?kind=${kind}&project=${encodeURIComponent(pid)}`, { method: "POST", credentials: "same-origin", headers: { "content-type": pdf ? "application/pdf" : "image/jpeg" }, body });
+    const j = await r.json().catch(() => ({})); if (!r.ok || !j.path) throw new Error(j.error || "อัปโหลดไม่สำเร็จ");
+    return j.path;
+  }
+  document.addEventListener("change", e => {
+    const i = e.target; if (!i || !i.matches || !i.matches("input[type=file][data-up]")) return;
+    const f = i.files[0]; let st = i.parentElement.querySelector(".se-up");
+    if (!st) { st = document.createElement("small"); st.className = "se-up"; i.insertAdjacentElement("afterend", st); }
+    UP.delete(i); st.className = "se-up"; st.textContent = "";
+    if (!f) return;
+    if (!SERVER) { UP.set(i, { name: f.name }); st.textContent = "โหมดทดลอง: เก็บแค่ชื่อไฟล์"; return; }
+    const job = { pending: true }; UP.set(i, job); st.textContent = "⏳ กำลังอัปโหลด…";
+    uploadFile(f, i.dataset.up, i.dataset.pid).then(path => { if (UP.get(i) !== job) return; UP.set(i, { name: f.name.slice(0, 120), path }); st.textContent = "✓ อัปโหลดแล้ว"; st.classList.add("ok"); })
+      .catch(err => { if (UP.get(i) !== job) return; UP.delete(i); i.value = ""; st.textContent = "✗ " + err.message; st.classList.add("bad"); });
+  });
+  const fileOf = i => { if (!i || !i.files || !i.files[0]) return {}; const v = UP.get(i); if (!v) return { err: "แนบไฟล์ใหม่อีกครั้ง" }; if (v.pending) return { err: "รออัปโหลดไฟล์ให้เสร็จก่อน" }; return v; };
 
   /* ---------- date ranges: any [data-rg] holding a [data-r=s] start and [data-r=e] end date ---------- */
   const rangeOf = t => { const g = t && t.closest && t.closest("[data-rg]"); if (!g) return null; const a = g.querySelector('input[data-r="s"]'), b = g.querySelector('input[data-r="e"]'); return a && b ? { g, a, b } : null; };
@@ -1221,12 +1259,12 @@
         <label class="se-f">หมวด<select id="aCat">${CATS.map(c => `<option value="${c.code}">${esc(c.name)}</option>`).join("")}</select></label>
         <label class="se-f w2">รายการ<input id="aDesc" placeholder="เช่น ค่าที่พัก 2 ห้อง × 3 คืน"></label>
         <label class="se-f">จำนวนเงิน (บาท)<input id="aAmt" inputmode="decimal" placeholder="0"></label>
-        <label class="se-f">ใบเสร็จ<input type="file" id="aFile" accept="image/*,application/pdf"></label>
+        <label class="se-f">ใบเสร็จ<input type="file" id="aFile" accept="image/*,application/pdf" data-up="rcpt" data-pid="${esc(p.id)}"></label>
         <div class="se-f w2 se-left">งบคงเหลือหมวดนี้: <b id="aLeft"></b></div>
         <div class="se-f"><button class="se-btn primary" id="aAdd">${IC.plus}บันทึกรายการ</button></div>
-      </div><p class="se-hint">โหมดทดลองเก็บแค่ชื่อไฟล์ใบเสร็จ · SSM ตรวจรายการก่อนนับเป็น Actual ที่ยืนยันแล้ว (รายการรอตรวจนับรวมใน Dashboard ด้วย ยกเว้นที่ไม่ผ่าน)</p>` : ""}
+      </div><p class="se-hint">${SERVER ? "แนบรูปหรือ PDF ใบเสร็จได้ (ไม่เกิน 4 MB)" : "โหมดทดลองเก็บแค่ชื่อไฟล์ใบเสร็จ"} · SSM ตรวจรายการก่อนนับเป็น Actual ที่ยืนยันแล้ว (รายการรอตรวจนับรวมใน Dashboard ด้วย ยกเว้นที่ไม่ผ่าน)</p>` : ""}
       <div class="tbl"><table><thead><tr><th>วันที่</th><th>หมวด</th><th>รายการ</th><th class="r">จำนวนเงิน</th><th>ใบเสร็จ</th><th>ผู้บันทึก</th><th>สถานะ</th><th></th></tr></thead>
-        <tbody>${rows.length ? rows.map(a => `<tr data-a="${a.id}"><td>${fmtD(a.date)}</td><td>${catCell(catOf(a.cat))}</td><td>${esc(a.desc)}</td><td class="r">${money(num(a.amount))}</td><td>${a.receipt ? `📎 ${esc(a.receipt)}` : `<span class="se-muted">–</span>`}</td><td>${esc(a.by)}</td>
+        <tbody>${rows.length ? rows.map(a => `<tr data-a="${a.id}"><td>${fmtD(a.date)}</td><td>${catCell(catOf(a.cat))}</td><td>${esc(a.desc)}</td><td class="r">${money(num(a.amount))}</td><td>${a.receipt ? rcpt(a) : `<span class="se-muted">–</span>`}</td><td>${esc(a.by)}</td>
           <td><span class="se-st ${STA[a.status][1]}">${STA[a.status][0]}</span></td>
           <td><span class="se-rowact">${canChk && a.status === "pending" ? `<button class="se-btn sm" data-chk="checked">✓</button><button class="se-btn sm" data-chk="rejected">✗</button>` : ""}${canAdd && a.status === "pending" ? `<button class="se-x" data-adel aria-label="ลบ">${IC.x}</button>` : ""}</span></td></tr>`).join("")
           : `<tr><td colspan="8" class="se-muted c" style="padding:22px">ยังไม่มีรายการ</td></tr>`}</tbody></table></div>`;
@@ -1237,8 +1275,8 @@
       const g = id => sec.querySelector(id).value.trim();
       const amount = num(g("#aAmt"));
       if (!g("#aDate") || !g("#aDesc") || amount <= 0) return toast("กรอกวันที่ รายการ และจำนวนเงิน");
-      const f = sec.querySelector("#aFile").files[0];
-      p.actuals.push({ id: uid(), date: g("#aDate"), cat: g("#aCat"), desc: g("#aDesc"), amount, receipt: f ? f.name : "", by: who(), status: "pending" });
+      const fo = fileOf(sec.querySelector("#aFile")); if (fo.err) return toast(fo.err);
+      p.actuals.push({ id: uid(), date: g("#aDate"), cat: g("#aCat"), desc: g("#aDesc"), amount, receipt: fo.name || "", rp: fo.path || "", by: who(), status: "pending" });
       save(); const c = g("#aCat"); toast(left(c) < 0 ? "บันทึกแล้ว · ⚠️ หมวดนี้เกินงบ" : "บันทึกแล้ว · รอ SSM ตรวจ"); redraw();
     };
     }
