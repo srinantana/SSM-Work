@@ -13,11 +13,11 @@
   const ST = { available: ["ยืมได้", "s-ok"], on_loan: ["ถูกยืม", "s-loan"], calibration: ["ส่งสอบเทียบ", "s-cal"], repair: ["ซ่อม / ชำรุด", "s-warn"], lost: ["สูญหาย", "s-bad"], retire_pending: ["รออนุมัติจำหน่าย", "s-off"], retired: ["จำหน่ายแล้ว", "s-off"] };
   const RES = { pass: "ผ่าน", adjusted: "ปรับตั้งแล้วผ่าน", fail: "ไม่ผ่าน" };
   const COND = { ok: "ปกติ", damaged: "ชำรุด", missing_parts: "อุปกรณ์ไม่ครบ" };
-  const TABS = [["", "ภาพรวม"], ["list", "ทะเบียนเครื่องมือ"], ["loans", "ยืม-คืน"], ["cal", "สอบเทียบ"]];
+  const TABS = [["", "ภาพรวม"], ["list", "ทะเบียนเครื่องมือ"], ["loans", "ยืม-คืน"], ["cal", "สอบเทียบ"], ["history", "ประวัติสอบเทียบ"]];
   const DUE_SOON = 30;   // days before the calibration due date to start warning
 
   let ROOT = null, D = null, ERR = "", LOADING = null;
-  const S = { page: "", tool: 0, q: "", cat: "", dept: "", st: "", imp: null, sel: new Set() };
+  const S = { page: "", tool: 0, q: "", cat: "", dept: "", st: "", imp: null, sel: new Set(), hq: "", hst: "", hy: "" };
 
   /* ---------- helpers ---------- */
   const pad = n => String(n).padStart(2, "0");
@@ -118,7 +118,7 @@
     const pend = D.cals.filter(c => c.status === "pending_approval" || (m.canManage && c.status === "pending_verify")).length + D.tools.filter(t => t.status === "retire_pending").length;
     const role = m.canApprove ? "ผู้อนุมัติ" : m.canManage ? "ผู้ดูแลเครื่องมือ" : "";
     const head = `<div class="qa-tabs">${tabs.map(([id, l]) => `<a href="#qa-tools${id ? "/" + id : ""}" class="${S.page === id ? "on" : ""}">${l}${id === "cal" && m.canApprove && pend ? ` <b class="qa-dot">${pend}</b>` : ""}</a>`).join("")}${role ? `<span class="qa-role">${role}</span>` : ""}</div>`;
-    const page = S.page === "tool" ? vTool() : ({ "": vDash, list: vList, loans: vLoans, cal: vCal, import: vImport }[S.page] || vDash)();
+    const page = S.page === "tool" ? vTool() : ({ "": vDash, list: vList, loans: vLoans, cal: vCal, history: vHist, import: vImport }[S.page] || vDash)();
     ROOT.innerHTML = head + page;
     bind();
   }
@@ -207,7 +207,7 @@
           ${docs ? `<div class="qa-docs">${docs}</div>` : ""}
           <div class="qa-acts">${acts.join(" ")}</div></div></div>
       <div class="qa-grid">
-        <div class="qa-card"><h3>🎯 ประวัติสอบเทียบ</h3>${cals.length ? `<table class="qa-t"><thead><tr><th>วันที่</th><th>หน่วยงาน</th><th>ผล</th><th>ครบกำหนด</th><th>สถานะ</th></tr></thead><tbody>${cals.map(x => `<tr><td>${fmt(x.cal_date) || "ส่ง " + fmt(x.sent_date)}</td><td>${esc(x.lab || "")}${x.cert_no ? `<div class="sub">ใบรับรอง ${esc(x.cert_no)}</div>` : ""}${(x.docs || []).map(f => ` <a target="_blank" rel="noopener" href="${esc(docHref(f))}" title="${esc(f.name || "ใบรับรอง")}">${f.url ? "🔗" : "📎"}</a>`).join("")}</td><td>${x.result ? chip(RES[x.result], x.result === "fail" ? "s-bad" : "s-ok") : ""}</td><td>${fmt(x.next_due)}</td><td>${calStatus(x)}${x.verify ? ` <button class="qa-lnk" data-a="cal-print" data-id="${x.id}" title="พิมพ์บันทึกผลการทวนสอบ">🖨 FM-QA-10</button>` : ""}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">ยังไม่มี</p>`}</div>
+        <div class="qa-card"><h3>🎯 ประวัติสอบเทียบ</h3>${cals.length ? `<table class="qa-t"><thead><tr><th>วันที่</th><th>หน่วยงาน</th><th>ผล</th><th>ครบกำหนด</th><th>สถานะ</th></tr></thead><tbody>${cals.map(x => `<tr><td>${fmt(x.cal_date) || "ส่ง " + fmt(x.sent_date)}</td><td>${esc(x.lab || "")}${x.cert_no ? `<div class="sub">ใบรับรอง ${esc(x.cert_no)}</div>` : ""}${(x.docs || []).map(f => ` <a target="_blank" rel="noopener" href="${esc(docHref(f))}" title="${esc(f.name || "ใบรับรอง")}">${f.url ? "🔗" : "📎"}</a>`).join("")}</td><td>${x.result ? chip(RES[x.result], x.result === "fail" ? "s-bad" : "s-ok") : ""}</td><td>${fmt(x.next_due)}</td><td>${calStatus(x)}${x.verify ? ` <button class="qa-lnk" data-a="cal-print" data-id="${x.id}" title="พิมพ์บันทึกผลการทวนสอบ">🖨 FM-QA-10</button>` : ""} <button class="qa-lnk" data-a="cal-view" data-id="${x.id}">📜 ประวัติ</button></td></tr>`).join("")}</tbody></table>` : `<p class="muted">ยังไม่มี</p>`}</div>
         <div class="qa-card"><h3>🤝 ประวัติการยืม</h3>${loans.length ? `<table class="qa-t"><thead><tr><th>ผู้ยืม</th><th>งาน</th><th>ยืม</th><th>คืน</th></tr></thead><tbody>${loans.slice(0, 30).map(x => `<tr><td>${esc(x.borrower_name)}</td><td>${esc([x.job_no, x.customer].filter(Boolean).join(" · "))}</td><td>${fmtT(x.out_at)}</td><td>${x.returned_at ? fmtT(x.returned_at) + (x.return_condition && x.return_condition !== "ok" ? " " + chip(COND[x.return_condition], "s-warn") : "") : chip("ยังไม่คืน", "s-loan")}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">ยังไม่เคยถูกยืม</p>`}</div>
         <div class="qa-card"><h3>🕓 บันทึกการเปลี่ยนแปลง</h3><div id="qaLog" class="sub">กำลังโหลด…</div></div>
       </div>`;
@@ -382,6 +382,58 @@
   function dlgNote(title, label, cb, saveLabel) { dialog(title, `<div class="qa-form"><label class="wide">${label}<input id="nNote"></label></div>`, async v => cb(v("nNote")), saveLabel); }
 
   /* ---------- labels / excel ---------- */
+  /* ---------- ประวัติสอบเทียบ: every calibration record — result, edits, verification, approval ---------- */
+  const CST = [["sent", "ส่งแล้ว รอผล"], ["pending_verify", "รอทวนสอบ"], ["pending_approval", "รออนุมัติ"], ["approved", "อนุมัติแล้ว"], ["rejected", "ไม่อนุมัติ"]];
+  const calYear = c => String(c.cal_date || c.sent_date || c.created_at || "").slice(0, 4);
+  function vHist() {
+    const years = [...new Set(D.cals.map(calYear).filter(Boolean))].sort().reverse();
+    const q = S.hq.trim().toLowerCase();
+    const rows = D.cals.filter(c => {
+      const t = tById(c.tool_id) || {};
+      return (!S.hst || c.status === S.hst) && (!S.hy || calYear(c) === S.hy)
+        && (!q || [t.asset_no, t.name, c.lab, c.cert_no, c.verify && c.verify.no, c.approved_by, c.verify && c.verify.name].some(x => String(x || "").toLowerCase().includes(q)));
+    }).sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)));
+    return `<div class="qa-card"><div class="qa-bar"><input id="qaHq" placeholder="🔍 รหัส / ชื่อเครื่องมือ / ใบรับรอง / Verify No. / ผู้อนุมัติ" value="${esc(S.hq)}">
+      <select id="qaHst"><option value="">ทุกสถานะ</option>${CST.map(([k, l]) => `<option value="${k}"${S.hst === k ? " selected" : ""}>${l}</option>`).join("")}</select>
+      <select id="qaHy"><option value="">ทุกปี</option>${years.map(y => `<option${S.hy === y ? " selected" : ""}>${y}</option>`).join("")}</select></div>
+      <p class="sub">${rows.length} รายการ · เรียงตามแก้ไขล่าสุด · กด 📜 เพื่อดูไทม์ไลน์ บันทึกผล → แก้ไข → ทวนสอบ → อนุมัติ</p>
+      <div class="qa-scroll"><table class="qa-t"><thead><tr><th>เครื่องมือ</th><th>สอบเทียบ</th><th>Lab / ใบรับรอง</th><th>ผล</th><th>ทวนสอบ</th><th>อนุมัติ</th><th>แก้ไขล่าสุด</th><th></th></tr></thead><tbody>
+      ${rows.map(c => { const t = tById(c.tool_id) || {}, v = c.verify; return `<tr><td><a href="#qa-tools/tool/${t.id}">${esc(t.name || "?")}</a><div class="sub mono">${esc(t.asset_no || "")}</div></td>
+        <td>${c.cal_date ? fmt(c.cal_date) : `<span class="sub">ส่ง ${fmt(c.sent_date)}</span>`}</td>
+        <td>${esc(c.lab || "")}${c.cert_no ? `<div class="sub">${esc(c.cert_no)}</div>` : ""}${(c.docs || []).map(f => ` <a target="_blank" rel="noopener" href="${esc(docHref(f))}">${f.url ? "🔗" : "📎"}</a>`).join("")}</td>
+        <td>${c.result ? chip(RES[c.result], c.result === "fail" ? "s-bad" : "s-ok") : ""}</td>
+        <td>${v ? `<span class="mono">${esc(v.no || "")}</span><div class="sub">${esc(v.name || "")} · ${fmt(v.date)}</div>` : `<span class="sub">—</span>`}</td>
+        <td>${calStatus(x0(c))}${c.approved_at ? `<div class="sub">${fmtT(c.approved_at)}</div>` : ""}</td>
+        <td class="sub">${fmtT(c.updated_at || c.created_at)}</td>
+        <td><button class="qa-lnk" data-a="cal-view" data-id="${c.id}">📜 ประวัติ</button>${v ? ` <button class="qa-lnk" data-a="cal-print" data-id="${c.id}">🖨</button>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">ไม่พบรายการ</td></tr>`}
+      </tbody></table></div></div>`;
+  }
+  const x0 = c => ({ ...c, approve_note: "" });   // status chip without the note (shown in the detail)
+  function dlgCalView(c) {
+    if (!c) return toast("ไม่พบรายการ", 1);
+    const t = tById(c.tool_id) || {}, v = c.verify, m = me();
+    const kv = rows => `<table class="qa-kv">${rows.filter(r => r[1]).map(([k, val]) => `<tr><th>${k}</th><td>${val}</td></tr>`).join("")}</table>`;
+    const acts = [m.canManage && ["sent", "rejected", "pending_verify", "pending_approval"].includes(c.status) ? `<button class="qa-btn sm ghost" data-v="edit">✏️ แก้ไขผลสอบเทียบ</button>` : "",
+      m.canManage && c.cal_date && ["pending_verify", "pending_approval", "rejected"].includes(c.status) ? `<button class="qa-btn sm ghost" data-v="verify">🔎 ${v ? "แก้ไขการทวนสอบ" : "ทวนสอบ"}</button>` : "",
+      v ? `<button class="qa-btn sm ghost" data-v="print">🖨 FM-QA-10</button>` : ""].filter(Boolean).join(" ");
+    const mdl = dialog(`📜 ประวัติสอบเทียบ: ${esc(t.asset_no || "")} · ${esc(t.name || "")}`, `
+      <div class="qa-tags">${calStatus(x0(c))}</div>${acts ? `<div class="qa-acts">${acts}</div>` : ""}
+      <h4>🎯 ผลสอบเทียบ</h4>${kv([["ส่งสอบเทียบ", fmt(c.sent_date)], ["วันที่สอบเทียบ", fmt(c.cal_date)], ["หน่วยงาน (Lab)", esc(c.lab || "")], ["เลขที่ใบรับรอง", esc(c.cert_no || "")],
+        ["ใบรับรอง", (c.docs || []).map(f => `<a target="_blank" rel="noopener" href="${esc(docHref(f))}">${f.url ? "🔗" : "📎"} ${esc(f.name || "ใบรับรอง")}</a>`).join(" ")], ["ผล", c.result ? chip(RES[c.result], c.result === "fail" ? "s-bad" : "s-ok") : ""],
+        ["ครบกำหนดถัดไป", fmt(c.next_due)], ["ค่าใช้จ่าย", c.cost != null ? Number(c.cost).toLocaleString() + " บาท" : ""], ["หมายเหตุ", esc(c.note || "")]]) || `<p class="muted">ยังไม่มีผล</p>`}
+      <h4>🔎 ทวนสอบภายใน (FM-QA-10)</h4>${v ? kv([["Verify No.", `<span class="mono">${esc(v.no || "")}</span>`], ["วันที่ดำเนินการ", fmt(v.date)], ["ผู้ทวนสอบ", esc([v.name, v.position].filter(Boolean).join(" · "))], ["Reference Cer No.", esc(v.ref_cert || "")], ["เกณฑ์การยอมรับ", esc(v.criteria || "")]])
+        + `<table class="qa-t"><thead><tr><th>จุดสอบเทียบ</th><th>Error</th><th>Uncertainty</th><th>MPE</th><th>ผล</th></tr></thead><tbody>${(v.points || []).map(x => `<tr><td>${esc(x.pt)}</td><td>${esc(x.err)}</td><td>${esc(x.unc)}</td><td>${esc(x.mpe)}</td><td>${x.ok ? chip("ผ่าน", "s-ok") : chip("ไม่ผ่าน", "s-bad")}</td></tr>`).join("")}</tbody></table>`
+        + kv([["บันทึกเพิ่มเติม", esc(v.note || "")], ["มาตรการป้องกัน", esc(v.protect || "")]]) : `<p class="muted">ยังไม่ได้ทวนสอบ</p>`}
+      <h4>✍️ อนุมัติ</h4>${c.approved_at ? kv([["ผล", c.status === "approved" ? chip("อนุมัติ", "s-ok") : chip("ไม่อนุมัติ", "s-bad")], ["โดย", esc(c.approved_by || "")], ["เมื่อ", fmtT(c.approved_at)], ["หมายเหตุ", esc(c.approve_note || "")]]) : `<p class="muted">ยังไม่อนุมัติ</p>`}
+      <h4>🕑 ไทม์ไลน์</h4><div id="vTl" class="sub">กำลังโหลด…</div>`, async () => {}, "ปิด");
+    mdl.querySelectorAll("[data-v]").forEach(b => b.onclick = () => { mdl.remove(); const k = b.dataset.v; if (k === "edit") dlgCalResult(t, c.id); else if (k === "verify") dlgVerify(c); else printVerify(c); });
+    const item = x => `<div class="qa-log"><b>${esc(x.action)}</b> · ${esc(x.by || "")} · ${fmtT(x.at)}${x.detail ? `<div>${esc(x.detail)}</div>` : ""}</div>`;
+    fetch(`/api/qa-tools/log?tool=${c.tool_id}&cal=${c.id}`, { cache: "no-store" }).then(r => r.json()).then(j => {
+      const a = j.log || [], o = j.older || [];
+      mdl.querySelector("#vTl").innerHTML = (a.length ? a.map(item).join("") : "") + (o.length ? `<p class="sub">บันทึกก่อนมีประวัติรายใบ (ของเครื่องมือนี้ทุกรอบ):</p>${o.map(item).join("")}` : "") || `<p class="muted">ยังไม่มีบันทึก</p>`;
+    }).catch(() => { mdl.querySelector("#vTl").textContent = "โหลดไม่สำเร็จ"; });
+  }
+
   /* ---------- internal verification (FM-QA-10 บันทึกผลการทวนสอบเครื่องมือวัด) ---------- */
   const thD = d => { const x = parse(d); return x ? `${x.getDate()}/${x.getMonth() + 1}/${String(x.getFullYear()).slice(2)}` : ""; };
   const nextVerifyNo = d => {   // Buddhist yymm-nn, e.g. 6901-04 = 4th verification in Jan 2569
@@ -483,6 +535,9 @@
     on("qaCat", "change", e => { S.cat = e.target.value; draw(); });
     on("qaDept", "change", e => { S.dept = e.target.value; draw(); });
     on("qaSt", "change", e => { S.st = e.target.value; draw(); });
+    on("qaHq", "input", e => { S.hq = e.target.value; draw(); const q = ROOT.querySelector("#qaHq"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); });
+    on("qaHst", "change", e => { S.hst = e.target.value; draw(); });
+    on("qaHy", "change", e => { S.hy = e.target.value; draw(); });
     on("qaImp", "change", e => e.target.files[0] && readImport(e.target.files[0]));
     ROOT.querySelectorAll("[data-sel]").forEach(c => c.addEventListener("change", () => { c.checked ? S.sel.add(+c.dataset.sel) : S.sel.delete(+c.dataset.sel); draw(); }));
     ROOT.querySelectorAll("[data-a]").forEach(b => b.addEventListener("click", () => act(b.dataset.a, b.dataset)));
@@ -503,6 +558,7 @@
       if (a === "cal-result") return dlgCalResult(t, ds.cal);
       if (a === "cal-verify") return dlgVerify(D.cals.find(c => c.id === +ds.id));
       if (a === "cal-print") return printVerify(D.cals.find(c => c.id === +ds.id));
+      if (a === "cal-view") return dlgCalView(D.cals.find(c => c.id === +ds.id));
       if (a === "cal-ok" || a === "cal-no") return dlgNote(a === "cal-ok" ? "✔ อนุมัติผลสอบเทียบ" : "✖ ไม่อนุมัติผลสอบเทียบ", a === "cal-ok" ? "หมายเหตุ (ถ้ามี)" : "เหตุผล", async n => { await post("cal-approve", { id: +ds.id, approve: a === "cal-ok", note: n }); await refresh(a === "cal-ok" ? "อนุมัติแล้ว" : "ส่งกลับให้แก้ไขแล้ว"); }, a === "cal-ok" ? "อนุมัติ" : "ไม่อนุมัติ");
       if (a === "retire") return dlgNote("🗑 ขอจำหน่าย / เลิกใช้", "เหตุผล *", async n => { if (!n) throw new Error("ใส่เหตุผล"); await post("retire", { id: t.id, step: "request", reason: n }); await refresh("ส่งคำขอให้ดิวอนุมัติแล้ว"); }, "ส่งคำขอ");
       if (a === "retire-ok" || a === "retire-no") return dlgNote(a === "retire-ok" ? "✔ อนุมัติจำหน่าย" : "✖ ไม่อนุมัติจำหน่าย", "หมายเหตุ", async n => { await post("retire", { id: t.id, approve: a === "retire-ok", note: n }); await refresh("บันทึกแล้ว"); }, "ยืนยัน");
