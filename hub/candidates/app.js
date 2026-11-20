@@ -1,4 +1,5 @@
 /* SSM Work · Candidates — applicants' written tests from the public form (/apply), CV / Resume, scoring, status.
+   Pre:    ดิว / นุ่น เพิ่มผู้สมัครจาก CV ก่อนทำแบบทดสอบ (answers = {}) → /apply ส่งด้วยชื่อ-นามสกุลตรงกัน (ไม่นับเว้นวรรค) เติมคำตอบเข้าแถวเดิม
    Fit:    วิเคราะห์ความเข้ากันได้เบื้องต้น — ดิว / นุ่น วางข้อความ CV → fit.js ให้คะแนนตามโครงสร้าง SSM → POST /api/candidates/fit
    Routes: #candidates (ผู้สมัคร) · #candidates/c/<id> (ผู้สมัครรายคน) · #candidates/tests (แบบทดสอบ + ลิงก์ / QR)
    Data:   GET /api/candidates/data → { me: {username, name, canEdit}, keepDays, purged, tests, candidates, scores }
@@ -14,7 +15,7 @@
   const QR = ["https://cdn.jsdelivr.net/npm/qrcode-generator@2.0.4/dist/qrcode.js", "sha384-e9EFD6BGC90bkW9aDV5xbbBfzwN7G8YImHao2lfLVKV/hPB0E0go+H3I64h7oHtA"];
 
   let ROOT = null, D = null, ERR = "", LOADING = null;
-  const S = { page: "", id: 0, q: "", st: "", test: "" };
+  const S = { page: "", id: 0, q: "", st: "", test: "", add: false };
   const me = () => (D && D.me) || {};
 
   const pad = n => String(n).padStart(2, "0");
@@ -27,6 +28,8 @@
   const avg = c => { const s = scoresOf(c).filter(x => x.total != null); return s.length ? Math.round(s.reduce((a, b) => a + Number(b.total), 0) / s.length * 10) / 10 : null; };
   const isNew = c => !(c.seen_by || []).includes(me().username);
   const daysLeft = c => ["rejected", "withdrawn"].includes(c.status) ? Math.max(0, D.keepDays - Math.floor((Date.now() - new Date(c.status_at)) / 864e5)) : null;
+  const pending = c => !Object.keys(c.answers || {}).length;   // สร้างจาก CV แล้ว รอผู้สมัครทำแบบทดสอบ
+  const nameKey = s => String(s ?? "").normalize("NFC").replace(/[\s\u200B-\u200D\u2060\uFEFF]/g, "");
   const fileHref = f => f.url || "/api/candidates/file?p=" + encodeURIComponent(f.p);
 
   async function load(force) {
@@ -60,7 +63,7 @@
 
   function vList() {
     const cs = D.candidates, q = S.q.toLowerCase();
-    const list = cs.filter(c => (!S.st || c.status === S.st || (S.st === "open" && !["hired", "rejected", "withdrawn"].includes(c.status))) && (!S.test || String(c.test_id) === S.test)
+    const list = cs.filter(c => (!S.st || c.status === S.st || (S.st === "open" && !["hired", "rejected", "withdrawn"].includes(c.status)) || (S.st === "pending" && pending(c))) && (!S.test || String(c.test_id) === S.test)
       && (!q || [c.name, c.phone, c.email, c.line_id, c.position].some(v => String(v || "").toLowerCase().includes(q))));
     const cnt = k => cs.filter(c => c.status === k).length;
     const unscored = cs.filter(c => !["rejected", "withdrawn"].includes(c.status) && !scoresOf(c).some(s => s.assessor === me().username)).length;
@@ -70,15 +73,29 @@
     return `<div class="cd-tiles">${tiles.map(([i, l, n, k]) => `<div class="cd-tile t-${k}"><i>${i}</i><b>${n}</b><span>${l}</span></div>`).join("")}</div>
       ${D.purged ? `<div class="cd-note">ลบข้อมูลผู้สมัครที่ไม่ผ่าน / ถอนตัวครบ ${D.keepDays} วันแล้ว ${D.purged} คน (PDPA)</div>` : ""}
       <div class="cd-bar"><input type="search" id="cdQ" placeholder="🔍 ค้นหาชื่อ / เบอร์ / อีเมล" value="${esc(S.q)}">
-        <select id="cdSt"><option value="">ทุกสถานะ</option><option value="open"${S.st === "open" ? " selected" : ""}>กำลังพิจารณา</option>${Object.entries(ST).map(([k, [l]]) => `<option value="${k}"${S.st === k ? " selected" : ""}>${l}</option>`).join("")}</select>
+        <select id="cdSt"><option value="">ทุกสถานะ</option><option value="open"${S.st === "open" ? " selected" : ""}>กำลังพิจารณา</option><option value="pending"${S.st === "pending" ? " selected" : ""}>รอทำแบบทดสอบ</option>${Object.entries(ST).map(([k, [l]]) => `<option value="${k}"${S.st === k ? " selected" : ""}>${l}</option>`).join("")}</select>
         ${D.tests.length > 1 ? `<select id="cdTest"><option value="">ทุกตำแหน่ง</option>${D.tests.map(t => `<option value="${t.id}"${S.test === String(t.id) ? " selected" : ""}>${esc(t.title)}</option>`).join("")}</select>` : ""}
-        ${me().canEdit ? `<a class="cd-btn ghost" href="${DRIVE_FOLDER}" target="_blank" rel="noopener">📁 โฟลเดอร์ CV (Drive)</a>` : ""}</div>
+        ${me().canEdit ? `<button class="cd-btn" data-a="add-open">+ เพิ่มผู้สมัคร (จาก CV)</button> <a class="cd-btn ghost" href="${DRIVE_FOLDER}" target="_blank" rel="noopener">📁 โฟลเดอร์ CV (Drive)</a>` : ""}</div>
+      ${me().canEdit && S.add ? vAdd() : ""}
       <div class="cd-card cd-scroll"><table class="cd-t"><thead><tr><th>ผู้สมัคร</th><th>ตำแหน่ง</th><th>ส่งเมื่อ</th><th>ใช้เวลา</th><th>สถานะ</th><th class="n">คะแนนเฉลี่ย</th><th class="n">เข้ากันได้*</th><th>CV</th></tr></thead><tbody>
       ${list.map(c => { const a = avg(c), n = scoresOf(c).length, dl = daysLeft(c);
         return `<tr class="${isNew(c) ? "new" : ""}" data-go="${c.id}"><td><a href="#candidates/c/${c.id}"><b>${esc(c.name)}</b></a>${isNew(c) ? " " + chip("ใหม่", "s-new") : ""}<div class="sub">${esc([c.phone, c.email].filter(Boolean).join(" · "))}</div></td>
-          <td>${esc(c.position || "")}</td><td>${fmtT(c.submitted_at)}</td><td>${dur(c.started_at, c.submitted_at)}</td><td>${stChip(c)}${dl !== null ? `<div class="sub">ลบใน ${dl} วัน</div>` : ""}</td>
+          <td>${esc(c.position || "")}</td><td>${pending(c) ? `<span class="sub">สร้าง ${fmtT(c.submitted_at)}</span>` : fmtT(c.submitted_at)}</td><td>${dur(c.started_at, c.submitted_at)}</td><td>${stChip(c)}${pending(c) ? " " + chip("รอทำแบบทดสอบ", "s-warn") : ""}${dl !== null ? `<div class="sub">ลบใน ${dl} วัน</div>` : ""}</td>
           <td class="n">${a !== null ? `<b>${a}</b><span class="sub"> / 100 (${n})</span>` : `<span class="sub">ยังไม่มี</span>`}</td><td class="n">${fitPct(c) !== null ? `<span class="cd-fitn ${fitCls(fitPct(c))}">${fitPct(c)}%</span>` : `<span class="sub">–</span>`}</td><td>${(c.files || []).length ? "📎 " + c.files.length : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">ยังไม่มีผู้สมัคร — ส่งลิงก์สมัครจากแท็บ “แบบทดสอบ · ลิงก์สมัคร”</td></tr>`}
       </tbody></table><div class="sub" style="margin-top:6px">* เข้ากันได้ = ผลวิเคราะห์ CV × โครงสร้าง SSM สำหรับตำแหน่ง Site Control (คีย์เวิร์ด · เบื้องต้น)</div></div>`;
+  }
+
+  // ---------- เพิ่มผู้สมัครจาก CV ก่อนทำแบบทดสอบ — คำตอบเข้าชื่อนี้เมื่อชื่อ-นามสกุลตรงกันทุกตัวอักษร (ไม่นับเว้นวรรค) ----------
+  function vAdd() {
+    return `<div class="cd-card cd-add"><h3>+ เพิ่มผู้สมัครจาก CV (ก่อนทำแบบทดสอบ)</h3>
+      <p class="sub">เมื่อผู้สมัครส่งแบบทดสอบด้วย <b>ชื่อ-นามสกุลที่ตรงกันทุกตัวอักษร</b> (ไม่นับเว้นวรรค) คำตอบจะเข้ามาอยู่ในชื่อนี้อัตโนมัติ — พิมพ์ชื่อให้ตรงกับที่ผู้สมัครจะกรอก ไม่ใส่คำนำหน้า (นาย / นางสาว)</p>
+      <div class="cd-addg"><label class="cd-lab">ชื่อ-นามสกุล *<input id="adName" placeholder="เช่น วิสุธรรม แก้วเกษ"></label>
+        <label class="cd-lab">เบอร์โทร<input id="adPhone" inputmode="tel"></label><label class="cd-lab">อีเมล<input id="adEmail" type="email"></label><label class="cd-lab">LINE<input id="adLine"></label>
+        ${D.tests.length > 1 ? `<label class="cd-lab">ตำแหน่ง<select id="adTest">${D.tests.map(t => `<option value="${t.id}">${esc(t.title)}</option>`).join("")}</select></label>` : ""}
+        <label class="cd-lab" style="grid-column:1/-1">ลิงก์ CV ใน Google Drive (ไฟล์หรือโฟลเดอร์)<input id="adCv" type="url" placeholder="https://drive.google.com/…"></label>
+        <label class="cd-lab" style="grid-column:1/-1">โน้ต<textarea id="adNote" rows="2"></textarea></label></div>
+      <div id="adWarn" class="sub"></div>
+      <button class="cd-btn" data-a="add-save">บันทึก</button> <button class="cd-btn ghost" data-a="add-close">ยกเลิก</button></div>`;
   }
 
   // ---------- วิเคราะห์ความเข้ากันได้เบื้องต้น (CV × โครงสร้าง SSM) — scoring in fit.js ----------
@@ -115,9 +132,9 @@
     const total = qs.reduce((a, q) => a + sumQ(q.no), 0);
     const files = (c.files || []).map((f, i) => `<span class="cd-file"><a href="${esc(fileHref(f))}" target="_blank" rel="noopener">${f.url ? "🔗" : "📎"} ${esc(f.name)}</a>${m.canEdit ? ` <button class="cd-x" data-a="rm-file" data-i="${i}" title="เอาออก">×</button>` : ""}</span>`).join("");
     return `<div class="cd-back"><a href="#candidates">← ผู้สมัครทั้งหมด</a></div>
-      <div class="cd-card cd-head"><div><div class="sub">${esc(c.position || "")} · ส่ง ${fmtT(c.submitted_at)}${dur(c.started_at, c.submitted_at) ? " · ใช้เวลา " + dur(c.started_at, c.submitted_at) : ""}</div><h2>${esc(c.name)}</h2>
+      <div class="cd-card cd-head"><div><div class="sub">${esc(c.position || "")} · ${pending(c) ? "ยังไม่ได้ส่งแบบทดสอบ" : "ส่ง " + fmtT(c.submitted_at)}${dur(c.started_at, c.submitted_at) ? " · ใช้เวลา " + dur(c.started_at, c.submitted_at) : ""}</div><h2>${esc(c.name)}</h2>
           <div class="cd-contact">📞 <a href="tel:${esc(c.phone)}">${esc(c.phone || "")}</a>${c.email ? ` · ✉️ <a href="mailto:${esc(c.email)}">${esc(c.email)}</a>` : ""}${c.line_id ? ` · LINE ${esc(c.line_id)}` : ""}</div>
-          <div class="sub">ยินยอม PDPA ${fmtT(c.consent_at)}${dl !== null ? ` · <b class="bad">ข้อมูลจะถูกลบใน ${dl} วัน</b>` : ""}</div></div>
+          <div class="sub">${pending(c) ? `${chip("รอทำแบบทดสอบ", "s-warn")} สร้างจาก CV ${fmtT(c.submitted_at)}` : `ยินยอม PDPA ${fmtT(c.consent_at)}`}${dl !== null ? ` · <b class="bad">ข้อมูลจะถูกลบใน ${dl} วัน</b>` : ""}</div></div>
         <div class="cd-side">${m.canEdit ? `<label class="cd-lab">สถานะ<select id="cdStatus">${Object.entries(ST).map(([k, [l]]) => `<option value="${k}"${c.status === k ? " selected" : ""}>${l}</option>`).join("")}</select></label>` : stChip(c)}
           <div class="cd-score"><b>${avg(c) ?? "–"}</b><span>คะแนนเฉลี่ย / 100 · ${others.length} ผู้ประเมิน</span></div>
           <button class="cd-btn ghost sm" data-a="print">🖨 พิมพ์ / PDF</button>${m.canEdit ? ` <button class="cd-btn ghost sm danger" data-a="del">🗑 ลบข้อมูล</button>` : ""}</div></div>
@@ -125,8 +142,10 @@
         ${m.canEdit ? `<div class="cd-bar"><label class="cd-btn ghost sm">⬆ อัปโหลด PDF / รูป<input type="file" id="cdUp" accept="application/pdf,image/*" multiple hidden></label>
           <input type="url" id="cdLink" placeholder="วางลิงก์ไฟล์ Google Drive (จากโฟลเดอร์ CV)" style="flex:1;min-width:240px"><input type="text" id="cdLinkName" placeholder="ชื่อไฟล์ เช่น CV" style="width:140px"><button class="cd-btn sm" data-a="add-link">+ เพิ่มลิงก์</button>
           <a class="cd-btn ghost sm" href="${DRIVE_FOLDER}" target="_blank" rel="noopener">📁 เปิดโฟลเดอร์ CV</a></div>` : ""}
-        ${m.canEdit ? `<label class="cd-lab">โน้ตของทีมสรรหา<textarea id="cdNote" rows="2">${esc(c.note || "")}</textarea></label><button class="cd-btn ghost sm" data-a="save-note">บันทึกโน้ต</button>` : c.note ? `<div class="cd-note">${esc(c.note)}</div>` : ""}</div>
+        ${m.canEdit ? `<div class="cd-addg"><label class="cd-lab">ชื่อ-นามสกุล (ใช้จับคู่กับแบบทดสอบ)<input id="edName" value="${esc(c.name)}"></label><label class="cd-lab">เบอร์โทร<input id="edPhone" value="${esc(c.phone || "")}"></label><label class="cd-lab">อีเมล<input id="edEmail" value="${esc(c.email || "")}"></label><label class="cd-lab">LINE<input id="edLine" value="${esc(c.line_id || "")}"></label></div>
+          <label class="cd-lab">โน้ตของทีมสรรหา<textarea id="cdNote" rows="2">${esc(c.note || "")}</textarea></label><button class="cd-btn ghost sm" data-a="save-note">บันทึกชื่อ / ติดต่อ / โน้ต</button>` : c.note ? `<div class="cd-note">${esc(c.note)}</div>` : ""}</div>
       ${vFit(c)}
+      ${pending(c) ? `<div class="cd-trial"><div>⏳ <b>ยังไม่ได้ทำแบบทดสอบ</b> — ส่งลิงก์ <b>${esc(location.origin)}/apply/</b> ให้ผู้สมัคร เมื่อเขาส่งด้วยชื่อ-นามสกุล “${esc(c.name)}” (ตรงทุกตัวอักษร ไม่นับเว้นวรรค) คำตอบจะเข้ามาที่หน้านี้อัตโนมัติ</div>${m.canEdit ? `<button class="cd-btn ghost sm" data-a="copy" data-link="${esc(location.origin)}/apply/">📋 คัดลอกลิงก์</button>` : ""}</div>` : ""}
       ${rb.scale ? `<details class="cd-card cd-guide"><summary>📏 วิธีให้คะแนน (สำหรับผู้สัมภาษณ์เท่านั้น)</summary><p>${esc(rb.note || "")}</p><p>ให้คะแนนข้อละ 20 คะแนน แบ่งเป็น 4 ด้าน ด้านละ 5 คะแนน: ${esc((rb.dims || []).join(" · "))}</p><ul>${rb.scale.map(x => `<li>${esc(x)}</li>`).join("")}</ul>${rb.usage ? `<p class="sub">${esc(rb.usage)}</p>` : ""}</details>` : ""}
       ${qs.map(q => { const r = (rb.questions || []).find(x => x.no === q.no) || {}; const sc = mine.scores[q.no] || [];
         return `<div class="cd-card cd-q"><div class="cd-qh"><div><span class="sub">ข้อ ${q.no} · ${q.points || 20} คะแนน</span><h3>${esc(q.title)}</h3></div><div class="cd-qt"><b>${sumQ(q.no)}</b> / 20</div></div>
@@ -180,6 +199,8 @@
     on("cdQ", "input", e => { S.q = e.target.value; draw(); const q = ROOT.querySelector("#cdQ"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); });
     on("cdSt", "change", e => { S.st = e.target.value; draw(); });
     on("cdTest", "change", e => { S.test = e.target.value; draw(); });
+    on("adName", "input", e => { const k = nameKey(e.target.value), w = ROOT.querySelector("#adWarn"); const hit = k.length >= 4 && D.candidates.find(x => nameKey(x.name) === k);
+      w.innerHTML = hit ? `⚠️ มีชื่อนี้แล้ว: <a href="#candidates/c/${hit.id}">${esc(hit.name)}</a>${pending(hit) ? " (รอทำแบบทดสอบ)" : " (ส่งแบบทดสอบแล้ว)"}` : ""; });
     ROOT.querySelectorAll("tr[data-go]").forEach(r => r.addEventListener("click", e => { if (!e.target.closest("a")) location.hash = "#candidates/c/" + r.dataset.go; }));
     ROOT.querySelectorAll("[data-a]").forEach(b => b.addEventListener("click", () => act(b.dataset.a, b.dataset)));
     const c = S.page === "c" && D.candidates.find(x => x.id === S.id);
@@ -227,6 +248,16 @@
         for (const t of D.tests.filter(x => x.trial)) await post("test", { id: t.id, trial: false });
         toast("เปิดใช้งานจริงแล้ว 🚀"); return load(true);
       }
+      if (a === "add-open") { S.add = true; draw(); const e = ROOT.querySelector("#adName"); if (e) e.focus(); return; }
+      if (a === "add-close") { S.add = false; return draw(); }
+      if (a === "add-save") { const v = id => (ROOT.querySelector("#" + id) || {}).value?.trim() || "";
+        const name = v("adName"), cv = v("adCv");
+        if (nameKey(name).length < 4) return toast("กรอกชื่อ-นามสกุล", 1);
+        if (cv && !/^https:\/\/(drive|docs)\.google\.com\//.test(cv)) return toast("ลิงก์ CV ต้องเป็น Google Drive", 1);
+        try { const j = await post("create", { name, phone: v("adPhone"), email: v("adEmail"), line_id: v("adLine"), test_id: v("adTest") || null, note: v("adNote"), files: cv ? [{ url: cv, name: "CV (Google Drive)" }] : [] });
+          S.add = false; toast("เพิ่มแล้ว — รอผู้สมัครทำแบบทดสอบ"); await load(true); location.hash = "#candidates/c/" + j.id; }
+        catch (x) { toast(x.message, 1); }
+        return; }
       if (!c) return;
       if (a === "print") return printCand(c);
       if (a === "fit-run") { keepText(); const text = (FIT_TXT[c.id] || "").trim();
@@ -238,7 +269,9 @@
         if ((m.concerns || "").includes(add)) return toast("ใส่ไว้แล้ว"); m.concerns = [m.concerns, "จากผลวิเคราะห์ CV:\n" + add].filter(Boolean).join("\n"); draw(); const e = ROOT.querySelector("#cdCon"); if (e) e.scrollIntoView({ block: "center" }); return toast("ใส่คำถามแล้ว — กด “บันทึกคะแนน” เพื่อเก็บ"); }
       if (a === "save-score") { keepText(); const m = myScore(c); const j = await post("score", { id: c.id, scores: m.scores, strengths: m.strengths, concerns: m.concerns });
         D.scores = D.scores.filter(s => !(s.candidate_id === c.id && s.assessor === me().username)).concat(j.score); delete DRAFT[c.id]; toast("บันทึกคะแนนแล้ว"); return draw(); }
-      if (a === "save-note") { const note = ROOT.querySelector("#cdNote").value; await post("note", { id: c.id, note }); c.note = note; return toast("บันทึกโน้ตแล้ว"); }
+      if (a === "save-note") { const v = id => ROOT.querySelector("#" + id).value.trim();
+        const body = { id: c.id, note: ROOT.querySelector("#cdNote").value, name: v("edName"), phone: v("edPhone"), email: v("edEmail"), line_id: v("edLine") };
+        await post("note", body); Object.assign(c, { note: body.note, name: body.name.replace(/\s+/g, " "), phone: body.phone.replace(/[^\d+]/g, ""), email: body.email.toLowerCase(), line_id: body.line_id }); toast("บันทึกแล้ว"); return draw(); }
       if (a === "add-link") { const url = ROOT.querySelector("#cdLink").value.trim(), name = ROOT.querySelector("#cdLinkName").value.trim() || "CV";
         if (!/^https:\/\/(drive|docs)\.google\.com\//.test(url)) return toast("ใส่ลิงก์ Google Drive (https://drive.google.com/…)", 1);
         const files = (c.files || []).concat({ url, name, at: new Date().toISOString(), by: me().name }); await post("files", { id: c.id, files }); c.files = files; toast("เพิ่มลิงก์แล้ว"); return draw(); }
@@ -277,6 +310,7 @@
 .cd-qr{width:150px;text-align:center}.cd-qr svg{width:150px;height:150px}
 .cd-trial{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:#fff4e6;border:1px solid #ffd8a8;color:#a14b00;border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:13.5px}
 .cd-log{padding:5px 0;border-bottom:1px solid #f1f3f5}
+.cd-addg{display:grid;align-items:end;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:4px 12px}.cd-addg input,.cd-addg select{padding:8px 11px;border:1px solid #d6dae0;border-radius:9px;font:inherit;font-size:13.5px;color:var(--ink,#1f2328)}.cd-add{border-left:4px solid var(--rak)}#adWarn{color:#d9480f;margin:4px 0 8px}
 .cd-fit{display:flex;flex-direction:column;gap:12px;margin:8px 0}.cd-fitroles{display:flex;flex-direction:column;gap:7px}.cd-fitrole{display:grid;grid-template-columns:minmax(150px,240px) 1fr 52px;gap:10px;align-items:center;font-size:13.5px}.cd-fitrole.main span{font-weight:600}.cd-fitrole b{text-align:right}
 .cd-fitbar{height:10px;background:#f1f3f5;border-radius:999px;overflow:hidden}.cd-fitbar i{display:block;height:100%;border-radius:999px}.cd-fitbar i.ok{background:#2b8a3e}.cd-fitbar i.mid{background:#f08c00}.cd-fitbar i.low{background:#adb5bd}
 .cd-fitn{display:inline-block;min-width:34px;text-align:center;font-weight:600;font-size:12.5px;padding:1px 7px;border-radius:999px}.cd-fitn.ok{background:#ebfbee;color:#2b8a3e}.cd-fitn.mid{background:#fff4e6;color:#d9480f}.cd-fitn.low{background:#f1f3f5;color:#6b7280}
