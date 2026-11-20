@@ -1090,8 +1090,10 @@ const QA_FILE = /^t(\d{1,10}|new)\/[A-Za-z0-9_-]{6,60}\.(jpg|pdf)$/;
 const QA_STATUS = ['available', 'on_loan', 'calibration', 'repair', 'lost', 'retire_pending', 'retired'];
 const qaDay = (v) => (ISO_DAY.test(String(v || '')) ? String(v) : null);
 const qaNum = (v) => { const t = String(v ?? '').replace(/,/g, '').trim(); if (!t) return null; const n = Number(t); return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null; };
-const qaFiles = (a, by, max = 20) => (Array.isArray(a) ? a : []).filter((x) => x && QA_FILE.test(String(x.p || ''))).slice(0, max)
-  .map((x) => ({ p: String(x.p), name: mpStr(x.name, 120), kind: mpStr(x.kind, 20), at: mpStr(x.at, 40) || new Date().toISOString(), by: mpStr(x.by, 80) || by }));
+// a document is an uploaded file {p} in the qa-tools bucket, or a link {url} (http / https only — e.g. a certificate on Google Drive)
+const QA_LINK = /^https?:\/\/[^\s"'<>]{3,1000}$/i;
+const qaFiles = (a, by, max = 20) => (Array.isArray(a) ? a : []).filter((x) => x && (QA_FILE.test(String(x.p || '')) || QA_LINK.test(String(x.url || '').trim()))).slice(0, max)
+  .map((x) => ({ ...(x.url ? { url: String(x.url).trim() } : { p: String(x.p) }), name: mpStr(x.name, 120), kind: mpStr(x.kind, 20), at: mpStr(x.at, 40) || new Date().toISOString(), by: mpStr(x.by, 80) || by }));
 const addMonthsIso = (d, m) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCMonth(x.getUTCMonth() + m); return x.toISOString().slice(0, 10); };
 async function qaApi(cfg, req, url, prof) {
   const p = url.pathname.slice('/api/qa-tools/'.length);
