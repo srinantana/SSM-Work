@@ -137,15 +137,65 @@
     const noDue = cs.filter(([, c]) => c.k === "unk").length;
     if (noDue) tiles.push(["❔", "ยังไม่มีวันครบสอบเทียบ", noDue, "warn", "cal"]);
     if (m.canApprove || m.canManage) tiles.push(["✍️", "รออนุมัติ", pending, pending ? "warn" : "", "cal"]);
-    const mine = open.filter(l => l.borrower === m.username), myHeld = ts.filter(isMine);
-    const row = (t, extra) => `<a class="qa-row" href="#qa-tools/tool/${t.id}">${thumb(t, "qa-th sm")}<span><b>${esc(t.name)}</b><span class="sub">${esc(t.asset_no)}</span></span><span class="qa-right">${extra}</span></a>`;
     return `<div class="qa-tiles">${tiles.map(([ic, l, n, k, href]) => `<a class="qa-tile t-${k}" href="#qa-tools/${href}"><i>${ic}</i><b>${n}</b><span>${l}</span></a>`).join("")}</div>
-      <div class="qa-grid">
-        <div class="qa-card"><h3>🤝 ที่ฉันยืมอยู่</h3>${mine.length ? mine.map(l => { const t = tById(l.tool_id); return t ? row(t, chip(l.status === "return_requested" ? "แจ้งคืนแล้ว" : "คืน " + fmt(l.due_back), l.status === "return_requested" ? "s-loan" : days(l.due_back) < 0 ? "s-bad" : "s-off")) : ""; }).join("") : `<p class="muted">ไม่มี · เปิด <a href="#qa-tools/list">ทะเบียนเครื่องมือ</a> แล้วกด “ยืม”</p>`}</div>
-        ${myHeld.length ? `<div class="qa-card"><h3>🧑‍🔧 เครื่องมือที่ฉันถือครอง (${myHeld.length})</h3>${myHeld.slice(0, 8).map(t => row(t, t.needs_cal ? chip(calState(t).l, calState(t).c) : "")).join("")}${myHeld.length > 8 ? `<a class="qa-more" href="#qa-tools/list" data-holder="1">ดูทั้งหมด ${myHeld.length} รายการ →</a>` : ""}</div>` : ""}
-        <div class="qa-card"><h3>⏰ เกินกำหนดคืน</h3>${late.length ? late.map(l => { const t = tById(l.tool_id); return t ? row(t, `<span class="sub">${esc(l.borrower_name)}</span>${chip("เกิน " + (-days(l.due_back)) + " วัน", "s-bad")}`) : ""; }).join("") : `<p class="muted">ไม่มี 👍</p>`}</div>
-        <div class="qa-card"><h3>🎯 ต้องสอบเทียบ</h3>${over.concat(soon).length ? over.concat(soon).sort((a, b) => a[1].n - b[1].n).slice(0, 10).map(([t, c]) => row(t, chip(c.l, c.c))).join("") : `<p class="muted">ไม่มีที่ครบกำหนดใน ${DUE_SOON} วัน</p>`}</div>
-      </div>`;
+      ${vKpi(ts, cs, open, late)}`;
+  }
+
+  /* ---------- KPI dashboard (ภาพรวม) — computed from the register, loans and calibration records ---------- */
+  function vKpi(ts, cs, open, late) {
+    const pct = (a, b) => b ? Math.round(a * 100 / b) : 0, num = n => Number(n || 0).toLocaleString();
+    const bar = (v, max, cls = "") => `<span class="qa-kbar ${cls}"><i style="width:${max ? Math.max(2, Math.round(v * 100 / max)) : 0}%"></i></span>`;
+    const tone = p => p >= 90 ? "ok" : p >= 70 ? "warn" : "bad";
+    // 1) calibration readiness
+    const need = cs.filter(([t]) => t.needs_cal), cnt = k => need.filter(([, c]) => c.k === k).length;
+    const okN = cnt("ok") + cnt("soon"), overN = cnt("over"), unkN = cnt("unk"), soonN = cnt("soon"), comp = pct(okN, need.length);
+    // 2) by department
+    const deps = {}; need.forEach(([t, c]) => { const d = t.department || "ไม่ระบุแผนก"; const o = deps[d] || (deps[d] = { n: 0, over: 0 }); o.n++; if (c.k === "over" || c.k === "unk") o.over++; });
+    const depRows = Object.entries(deps).map(([d, o]) => ({ d, ...o, p: pct(o.n - o.over, o.n) })).sort((a, b) => a.p - b.p || b.n - a.n);
+    // 3) workload: overdue now + next 12 months
+    const t0 = today(), months = Array.from({ length: 12 }, (_, i) => new Date(t0.getFullYear(), t0.getMonth() + i, 1));
+    const load = months.map(mo => need.filter(([t]) => { const d = parse(t.next_cal_due); return d && d >= t0 && d.getFullYear() === mo.getFullYear() && d.getMonth() === mo.getMonth(); }).length);
+    const lmax = Math.max(overN, ...load, 1);
+    // 4) calibration results this year
+    const y = t0.getFullYear(), yc = D.cals.filter(c => String(c.cal_date || "").startsWith(String(y)));
+    const res = k => yc.filter(c => c.result === k).length, appr = yc.filter(c => c.status === "approved");
+    const cost = yc.reduce((a, c) => a + (+c.cost || 0), 0), labs = {}; yc.forEach(c => { const l = c.lab || "ไม่ระบุ"; labs[l] = (labs[l] || 0) + (+c.cost || 0); });
+    const tat = yc.filter(c => c.sent_date && c.cal_date).map(c => (parse(c.cal_date) - parse(c.sent_date)) / 864e5).filter(n => n >= 0);
+    const waitV = D.cals.filter(c => c.status === "pending_verify").length, waitA = D.cals.filter(c => c.status === "pending_approval").length, atLab = D.cals.filter(c => c.status === "sent").length;
+    // 5) loans
+    const since = new Date(t0); since.setDate(since.getDate() - 90);
+    const recent = D.loans.filter(l => l.out_at && new Date(l.out_at) >= since), top = {}; recent.forEach(l => { top[l.tool_id] = (top[l.tool_id] || 0) + 1; });
+    const topRows = Object.entries(top).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id, n]) => [tById(+id), n]).filter(r => r[0]);
+    const done = D.loans.filter(l => l.returned_at && l.out_at), dur = done.length ? done.reduce((a, l) => a + (new Date(l.returned_at) - new Date(l.out_at)) / 864e5, 0) / done.length : 0;
+    const lateRet = done.filter(l => l.due_back && new Date(l.returned_at) > new Date(l.due_back + "T23:59:59")).length;
+    // 6) register quality
+    const ages = ts.map(t => parse(t.purchase_date)).filter(Boolean).map(d => (t0 - d) / 864e5 / 365.25);
+    const old10 = ages.filter(a => a >= 10).length, realPh = ts.filter(t => (t.photos || []).some(f => f.kind !== "web")).length;
+    const webPh = ts.filter(t => (t.photos || []).length && !(t.photos || []).some(f => f.kind !== "web")).length, fa = ts.filter(t => t.fixed_asset_no).length, owner = ts.filter(t => t.owner_name || t.lendable).length;
+    const kv = (l, v, extra = "") => `<div class="qa-kv2"><span>${l}</span><b>${v}</b>${extra}</div>`;
+    return `<div class="qa-kpi">
+      <div class="qa-card qa-kc"><h3>🎯 ความพร้อมสอบเทียบ</h3>
+        <div class="qa-ring t-${tone(comp)}" style="--p:${comp}"><b>${comp}%</b><span>อยู่ในกำหนด</span></div>
+        <div class="qa-legend"><a href="#qa-tools/list" data-a="kpi" data-st="calsoon"><i class="d-warn"></i>ครบใน ${DUE_SOON} วัน <b>${soonN}</b></a><a href="#qa-tools/list" data-a="kpi" data-st="calover"><i class="d-bad"></i>เลยกำหนด <b>${overN}</b></a>${unkN ? `<a href="#qa-tools/cal"><i class="d-off"></i>ไม่มีวันครบ <b>${unkN}</b></a>` : ""}<span><i class="d-ok"></i>ในกำหนด <b>${okN - soonN}</b></span></div>
+        <p class="sub">เครื่องมือที่ต้องสอบเทียบ ${num(need.length)} รายการ · เป้าหมาย ≥ 95%</p></div>
+      <div class="qa-card qa-kc"><h3>🏭 ความพร้อมรายแผนก</h3>
+        <table class="qa-kt">${depRows.map(r => `<tr data-a="kpi" data-dept="${esc(r.d === "ไม่ระบุแผนก" ? "" : r.d)}" data-st="calover" title="ดูรายการเลยกำหนดของแผนกนี้"><td>${esc(r.d)}</td><td class="n">${r.n}</td><td class="w">${bar(r.p, 100, "t-" + tone(r.p))}</td><td class="n t-${tone(r.p)}">${r.p}%</td></tr>`).join("") || `<tr><td class="muted">ไม่มีข้อมูล</td></tr>`}</table>
+        <p class="sub">จำนวน · % อยู่ในกำหนด — กดแถวเพื่อดูรายการเลยกำหนด</p></div>
+      <div class="qa-card qa-kc qa-wide"><h3>📅 ภาระงานสอบเทียบ 12 เดือนข้างหน้า</h3>
+        <div class="qa-cols"><div class="qa-col over" title="เลยกำหนดแล้ว ${overN}"><b>${overN}</b><i style="height:${Math.round(overN * 100 / lmax)}%"></i><span>ค้าง</span></div>${load.map((n, i) => `<div class="qa-col${i === 0 ? " now" : ""}" title="${MS[months[i].getMonth()]} ${months[i].getFullYear()}: ${n}"><b>${n || ""}</b><i style="height:${Math.round(n * 100 / lmax)}%"></i><span>${MS[months[i].getMonth()]}${months[i].getMonth() === 0 || i === 0 ? "<br>" + String(months[i].getFullYear() + 543).slice(2) : ""}</span></div>`).join("")}</div>
+        <p class="sub">จำนวนเครื่องมือที่ครบกำหนดแต่ละเดือน (แท่งแดง = เลยกำหนดแล้ว ต้องเคลียร์ก่อน)</p></div>
+      <div class="qa-card qa-kc"><h3>🧪 ผลสอบเทียบปี ${y + 543}</h3>
+        <div class="qa-kgrid">${kv("สอบเทียบแล้ว", num(yc.length))}${kv("อนุมัติแล้ว", num(appr.length))}${kv("ผ่าน", num(res("pass")), `<em class="t-ok">${pct(res("pass"), yc.length)}%</em>`)}${kv("ปรับตั้งแล้วผ่าน", num(res("adjusted")))}${kv("ไม่ผ่าน", num(res("fail")), res("fail") ? `<em class="t-bad">ต้องประเมินผลกระทบ</em>` : "")}${kv("เวลาที่ Lab ใช้ (เฉลี่ย)", tat.length ? Math.round(tat.reduce((a, b) => a + b, 0) / tat.length) + " วัน" : "-")}</div>
+        <div class="qa-kgrid">${kv("อยู่ที่ Lab", num(atLab))}${kv("รอทวนสอบ", num(waitV), waitV ? `<em class="t-warn">QA Engineer</em>` : "")}${kv("รออนุมัติ", num(waitA), waitA ? `<em class="t-warn">ดิว</em>` : "")}</div></div>
+      <div class="qa-card qa-kc"><h3>💰 ค่าสอบเทียบปี ${y + 543}</h3>
+        <div class="qa-big">${num(cost)} <small>บาท</small></div>
+        <table class="qa-kt">${Object.entries(labs).sort((a, b) => b[1] - a[1]).map(([l, v]) => `<tr><td>${esc(l)}</td><td class="w">${bar(v, cost)}</td><td class="n">${num(v)}</td></tr>`).join("") || `<tr><td class="muted">ยังไม่มีค่าใช้จ่ายที่บันทึก</td></tr>`}</table></div>
+      <div class="qa-card qa-kc"><h3>🤝 ยืม-คืน</h3>
+        <div class="qa-kgrid">${kv("ถูกยืมอยู่", num(open.length))}${kv("เกินกำหนดคืน", num(late.length), late.length ? `<em class="t-bad">ตาม</em>` : "")}${kv("ยืม 90 วันล่าสุด", num(recent.length))}${kv("ยืมเฉลี่ย", done.length ? dur.toFixed(1) + " วัน" : "-")}${kv("คืนตรงเวลา", done.length ? pct(done.length - lateRet, done.length) + "%" : "-")}</div>
+        ${topRows.length ? `<h4>ยืมบ่อย (90 วัน)</h4><table class="qa-kt">${topRows.map(([t, n]) => `<tr><td><a href="#qa-tools/tool/${t.id}">${esc(t.asset_no)}</a> <span class="sub">${esc(t.name)}</span></td><td class="n">${n} ครั้ง</td></tr>`).join("")}</table>` : `<p class="sub">ยังไม่มีการยืมใน 90 วัน</p>`}</div>
+      <div class="qa-card qa-kc"><h3>🗂 คุณภาพข้อมูลทะเบียน</h3>
+        <div class="qa-kgrid">${kv("มีรูปจริง", pct(realPh, ts.length) + "%", `<em>${realPh}/${ts.length}${webPh ? " · รูปตัวอย่าง " + webPh : ""}</em>`)}${kv("มีรหัสทรัพย์สิน", pct(fa, ts.length) + "%", `<em>${fa}/${ts.length}</em>`)}${kv("มีผู้ถือครอง / เครื่องมือกลาง", pct(owner, ts.length) + "%", `<em>${owner}/${ts.length}</em>`)}${kv("อายุเฉลี่ย", ages.length ? (ages.reduce((a, b) => a + b, 0) / ages.length).toFixed(1) + " ปี" : "-")}${kv("อายุ ≥ 10 ปี", num(old10), old10 ? `<em class="t-warn">พิจารณาทดแทน</em>` : "")}</div></div>
+    </div>`;
   }
 
   function filters() {
@@ -611,6 +661,7 @@
       if (a === "label") return printLabels([t.id]);
       if (a === "labels") return printLabels([...S.sel]);
       if (a === "view") { S.view = ds.v === "rows" ? "rows" : "grid"; try { localStorage.setItem("qaView", S.view); } catch (e) { /* private mode */ } return draw(); }
+      if (a === "kpi") { S.q = ""; S.cat = ""; S.dept = ds.dept || ""; S.st = ds.st || ""; location.hash = "#qa-tools/list"; return; }
       if (a === "audit-reload") { loadAudit(true); return draw(); }
       if (a === "sel-all") { filtered().forEach(x => S.sel.add(x.id)); return draw(); }
       if (a === "sel-none") { S.sel.clear(); return draw(); }
@@ -631,6 +682,15 @@
 .qa-tile{display:grid;grid-template-columns:auto 1fr;grid-template-rows:auto auto;column-gap:10px;align-items:center;text-decoration:none;color:inherit;background:#fff;border:1px solid var(--line,#e3e6ea);border-radius:14px;padding:12px 14px;transition:transform .12s}
 .qa-tile:hover{transform:translateY(-2px);border-color:var(--rak-line)}.qa-tile i{grid-row:span 2;font-style:normal;font-size:22px;width:40px;height:40px;display:grid;place-items:center;background:var(--blush);border-radius:12px}
 .qa-tile b{font-size:24px;line-height:1}.qa-tile span{font-size:12px;color:#6b7280}.t-ok b{color:#2b8a3e}.t-loan b{color:#1c7ed6}.t-warn b{color:#d9480f}.t-bad b{color:#c92a2a}.t-bad i{background:#fff5f5}.t-warn i{background:#fff4e6}
+.qa-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}.qa-kpi .qa-card{margin:0}.qa-kc h3{margin:0 0 10px}.qa-kc h4{margin:12px 0 6px;font-size:13px}.qa-wide{grid-column:1/-1}
+.qa-ring{--c:#2b8a3e;width:150px;height:150px;border-radius:50%;margin:6px auto 12px;display:grid;place-content:center;text-align:center;background:radial-gradient(closest-side,#fff 74%,transparent 75% 100%),conic-gradient(var(--c) calc(var(--p)*1%),#f1f3f5 0)}.qa-ring b{font-size:32px;line-height:1}.qa-ring span{font-size:12px;color:#6b7280}.qa-ring.t-warn{--c:#e8590c}.qa-ring.t-bad{--c:#c92a2a}
+.qa-legend{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;font-size:13px}.qa-legend a,.qa-legend span{color:inherit;text-decoration:none;display:flex;align-items:center;gap:6px}.qa-legend b{margin-left:auto}.qa-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}.d-ok{background:#2b8a3e}.d-warn{background:#e8590c}.d-bad{background:#c92a2a}.d-off{background:#adb5bd}
+.qa-kt{width:100%;border-collapse:collapse;font-size:13px}.qa-kt td{padding:5px 4px;border-bottom:1px solid #f5f5f5}.qa-kt tr[data-a]{cursor:pointer}.qa-kt tr[data-a]:hover{background:#f8faf5}.qa-kt .n{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}.qa-kt .w{width:45%}
+.qa-kbar{display:block;height:8px;background:#f1f3f5;border-radius:6px;overflow:hidden}.qa-kbar i{display:block;height:100%;background:var(--rak,#65a30d);border-radius:6px}.qa-kbar.t-warn i{background:#e8590c}.qa-kbar.t-bad i{background:#c92a2a}
+td.t-ok,em.t-ok{color:#2b8a3e}td.t-warn,em.t-warn{color:#e8590c}td.t-bad,em.t-bad{color:#c92a2a}
+.qa-cols{display:flex;gap:6px;align-items:flex-end;height:170px;padding-top:6px}.qa-col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;min-width:0}.qa-col i{width:70%;max-width:38px;background:var(--rak,#65a30d);border-radius:5px 5px 0 0;min-height:2px}.qa-col.over i{background:#c92a2a}.qa-col.now i{background:#4d7c0f}.qa-col b{font-size:12px;margin-bottom:3px}.qa-col span{font-size:11px;color:#6b7280;margin-top:4px;text-align:center;line-height:1.2;height:28px}
+.qa-kgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px}.qa-kv2{background:#f8f9fa;border-radius:10px;padding:8px 10px;display:flex;flex-direction:column;gap:2px}.qa-kv2 span{font-size:12px;color:#6b7280}.qa-kv2 b{font-size:20px}.qa-kv2 em{font-style:normal;font-size:11.5px;color:#6b7280}
+.qa-big{font-size:30px;font-weight:700;margin:4px 0 10px}.qa-big small{font-size:14px;color:#6b7280;font-weight:500}
 .qa-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}.qa-grid .qa-card{margin:0;overflow:auto}
 .qa-row{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid #f1f3f5;text-decoration:none;color:inherit}.qa-row:last-child{border:0}.qa-row>span:nth-child(2){display:flex;flex-direction:column;min-width:0}.qa-right{margin-left:auto;text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:2px}
 .qa-th{width:64px;height:64px;border-radius:10px;object-fit:cover;background:var(--blush);flex:none}.qa-th.sm{width:38px;height:38px;border-radius:8px}.qa-th.xl{width:220px;height:220px;font-size:80px}
