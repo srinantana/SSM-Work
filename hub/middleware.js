@@ -1430,10 +1430,12 @@ function certClean(d) {
   }
   return o;
 }
+let ST_EMP = { at: 0, rows: null };   // RAK_Employee cache (5 min) — Site Team shows names from it
 async function siteTeamApi(cfg, req, url, prof) {
   const path = url.pathname, can = canEditManpower(prof), who = prof.username || prof.email;
   const H = { ...authHeaders(cfg.service), prefer: 'return=representation' };
   if (path === '/api/site-team/data' && req.method === 'GET') {
+    if (Date.now() - ST_EMP.at > 300000) { const e = await readEmployeeTable(cfg).catch(() => null); ST_EMP = { at: Date.now(), rows: e ? e.rows : ST_EMP.rows || [] }; }
     const [workers, people, trips, jobs, certs] = await Promise.all([
       restAll(cfg, '/rest/v1/mp_workers?select=id,emp_code,name_th,nickname,unit,trade,active,sort&order=sort.asc'),
       restAll(cfg, '/rest/v1/site_team_people?select=*&order=id.asc'),
@@ -1449,6 +1451,7 @@ async function siteTeamApi(cfg, req, url, prof) {
       canEdit: can,
       canCert: canEditCert(prof),
       certs: certs || [],
+      emp: (ST_EMP.rows || []).filter((e) => e.th || e.code).map((e) => ({ code: e.code, th: e.th, nick: e.nick, left: leftCompany(e.status) })),   // names shown = RAK_Employee
       certsReady: !!certs,
       workers: (workers || []).map((w) => ({ ...w, name_en_hr: can ? names.get(String(w.emp_code || w.id).toUpperCase()) || '' : '' })),
       people: people.map(strip),
