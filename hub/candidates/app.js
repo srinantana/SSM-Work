@@ -84,12 +84,37 @@
         ${D.tests.length > 1 ? `<select id="cdTest"><option value="">ทุกตำแหน่ง</option>${D.tests.map(t => `<option value="${t.id}"${S.test === String(t.id) ? " selected" : ""}>${esc(t.title)}</option>`).join("")}</select>` : ""}
         ${me().canEdit ? `<button class="cd-btn" data-a="add-open">+ เพิ่มผู้สมัคร (จาก CV)</button> <a class="cd-btn ghost" href="${DRIVE_FOLDER}" target="_blank" rel="noopener">📁 โฟลเดอร์ CV (Drive)</a>` : ""}</div>
       ${me().canEdit && S.add ? vAdd() : ""}
-      <div class="cd-card cd-scroll"><table class="cd-t"><thead><tr><th>ผู้สมัคร</th><th>ตำแหน่ง</th><th>ส่งเมื่อ</th><th>ใช้เวลา</th><th>สถานะ</th><th class="n">คะแนนเฉลี่ย</th><th class="n">เข้ากันได้*</th><th>CV</th></tr></thead><tbody>
+      <div class="cd-card cd-scroll"><table class="cd-t"><thead><tr><th>ผู้สมัคร</th><th>ตำแหน่ง</th><th>ส่งเมื่อ</th><th>ใช้เวลา</th><th>สถานะ</th><th class="n">คะแนนเฉลี่ย</th><th class="n">เข้ากันได้*</th><th>CV · Note</th></tr></thead><tbody>
       ${list.map(c => { const a = avg(c), n = scoresOf(c).length, dl = daysLeft(c);
         return `<tr class="${isNew(c) ? "new" : ""}" data-go="${c.id}"><td><a href="#candidates/c/${c.id}"><b>${esc(c.name)}</b></a>${isNew(c) ? " " + chip("ใหม่", "s-new") : ""}<div class="sub">${esc([c.phone, c.email].filter(Boolean).join(" · "))}</div></td>
           <td>${esc(c.position || "")}</td><td>${pending(c) ? `<span class="sub">สร้าง ${fmtT(c.submitted_at)}</span>` : fmtT(c.submitted_at)}</td><td>${dur(c.started_at, c.submitted_at)}</td><td>${stChip(c)}${pending(c) ? " " + chip("รอทำแบบทดสอบ", "s-warn") : ""}${dl !== null ? `<div class="sub">ลบใน ${dl} วัน</div>` : ""}</td>
-          <td class="n">${a !== null ? `<b>${a}</b><span class="sub"> / 100 (${n})</span>` : `<span class="sub">ยังไม่มี</span>`}</td><td class="n">${fitPct(c) !== null ? `<span class="cd-fitn ${fitCls(fitPct(c))}">${fitPct(c)}%</span>` : `<span class="sub">–</span>`}</td><td>${(c.files || []).length ? "📎 " + c.files.length : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">ยังไม่มีผู้สมัคร — ส่งลิงก์สมัครจากแท็บ “แบบทดสอบ · ลิงก์สมัคร”</td></tr>`}
+          <td class="n">${a !== null ? `<b>${a}</b><span class="sub"> / 100 (${n})</span>` : `<span class="sub">ยังไม่มี</span>`}</td><td class="n">${fitPct(c) !== null ? `<span class="cd-fitn ${fitCls(fitPct(c))}">${fitPct(c)}%</span>` : `<span class="sub">–</span>`}</td><td>${(c.files || []).length ? "📎 " + c.files.length : ""}${notesOf(c).length ? ` <span title="Interview note">🗣 ${notesOf(c).length}</span>` : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">ยังไม่มีผู้สมัคร — ส่งลิงก์สมัครจากแท็บ “แบบทดสอบ · ลิงก์สมัคร”</td></tr>`}
       </tbody></table><div class="sub" style="margin-top:6px">* เข้ากันได้ = ผลวิเคราะห์ CV × โครงสร้าง SSM สำหรับตำแหน่ง Site Control (คีย์เวิร์ด · เบื้องต้น)</div></div>`;
+  }
+
+  // ---------- Interview note — everyone with the menu adds notes; author or ดิว / นุ่น edit / delete ----------
+  const REC = { hire: ["แนะนำรับ", "s-ok"], consider: ["พิจารณาเพิ่ม", "s-warn"], no: ["ไม่แนะนำ", "s-off"] };
+  const notesOf = c => ((D && D.notes) || []).filter(n => n.candidate_id === c.id);
+  const today = () => { const d = new Date(); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); };
+  const fmtD = s => { if (!s) return ""; const [y, m, d] = String(s).split("-").map(Number); return d + " " + MS[m - 1] + " " + String(y + 543).slice(2); };
+  const NOTE = { c: 0, id: null };   // open editor: candidate id + note id (0 = new)
+  function vNotes(c) {
+    const m = me(), ns = notesOf(c), ed = NOTE.c === c.id ? NOTE.id : null;
+    const cur = ed ? ns.find(n => n.id === ed) || {} : {};
+    const form = ed !== null ? `<div class="cd-nform"><div class="cd-addg">
+        <label class="cd-lab">วันที่สัมภาษณ์<input type="date" id="inDate" value="${esc(cur.interview_date || today())}"></label>
+        <label class="cd-lab">รอบ<input id="inRound" list="inRounds" value="${esc(cur.round || "")}" placeholder="รอบ 1"><datalist id="inRounds"><option>รอบ 1</option><option>รอบ 2</option><option>สัมภาษณ์ทางโทรศัพท์</option><option>ทดสอบหน้างาน</option></datalist></label>
+        <label class="cd-lab" style="grid-column:span 2">ผู้ร่วมสัมภาษณ์<input id="inPanel" value="${esc(cur.panel ?? m.name ?? "")}" placeholder="เช่น ดิว, บี"></label></div>
+      <label class="cd-lab">บันทึกการสัมภาษณ์<textarea id="inNote" rows="6" placeholder="สิ่งที่ถาม · คำตอบ / ตัวอย่างงานที่เล่า · ทัศนคติ · เงินเดือนที่ขอ · วันเริ่มงานได้ · ข้อกังวล">${esc(cur.note || "")}</textarea></label>
+      <div class="cd-lab">ความเห็น<div class="cd-rec">${Object.entries(REC).map(([k, [l]]) => `<label><input type="radio" name="inRec" value="${k}"${cur.recommend === k ? " checked" : ""}> ${l}</label>`).join("")}<label><input type="radio" name="inRec" value=""${!cur.recommend ? " checked" : ""}> ยังไม่สรุป</label></div></div>
+      <button class="cd-btn sm" data-a="inote-save">บันทึก</button> <button class="cd-btn ghost sm" data-a="inote-cancel">ยกเลิก</button></div>` : "";
+    return `<div class="cd-card cd-notes"><div class="cd-qh"><h3>🗣 Interview note${ns.length ? ` <span class="sub">(${ns.length})</span>` : ""}</h3>${ed === null ? `<button class="cd-btn sm" data-a="inote-new"${D.notesReady ? "" : " disabled title=\"ให้ Admin รัน database/candidates.sql ก่อน\""}>+ เพิ่ม Interview note</button>` : ""}</div>
+      ${D.notesReady ? "" : `<div class="cd-note">ยังไม่มีตาราง Interview note — ให้ Admin รัน database/candidates.sql (ส่วน cand_notes) ใน Supabase</div>`}
+      ${ed === 0 ? form : ""}
+      ${ns.map(n => n.id === ed ? form : `<div class="cd-nitem"><div class="cd-nh"><b>${fmtD(n.interview_date)}</b>${n.round ? ` · ${esc(n.round)}` : ""}${n.recommend && REC[n.recommend] ? " " + chip(...REC[n.recommend]) : ""}
+          <span class="sub">โดย ${esc(n.author_name || n.author)}${n.panel ? ` · ผู้ร่วมสัมภาษณ์: ${esc(n.panel)}` : ""}${n.updated_at && n.created_at && n.updated_at.slice(0, 16) !== n.created_at.slice(0, 16) ? " · แก้ไข " + fmtT(n.updated_at) : ""}</span>
+          ${n.author === m.username || m.canEdit ? `<span class="cd-nact"><button class="cd-btn ghost sm" data-a="inote-edit" data-n="${n.id}">แก้ไข</button> <button class="cd-btn ghost sm danger" data-a="inote-del" data-n="${n.id}">ลบ</button></span>` : ""}</div>
+        <div class="cd-ans">${esc(n.note)}</div></div>`).join("") || (ed === null ? `<p class="muted">ยังไม่มีบันทึกการสัมภาษณ์</p>` : "")}</div>`;
   }
 
   // ---------- เพิ่มผู้สมัครจาก CV ก่อนทำแบบทดสอบ — คำตอบเข้าชื่อนี้เมื่อชื่อ-นามสกุลตรงกันทุกตัวอักษร (ไม่นับเว้นวรรค) ----------
@@ -155,6 +180,7 @@
         ${m.canEdit ? `<div class="cd-addg"><label class="cd-lab">ชื่อ-นามสกุล (ใช้จับคู่กับแบบทดสอบ)<input id="edName" value="${esc(c.name)}"></label><label class="cd-lab">เบอร์โทร<input id="edPhone" value="${esc(c.phone || "")}"></label><label class="cd-lab">อีเมล<input id="edEmail" value="${esc(c.email || "")}"></label><label class="cd-lab">LINE<input id="edLine" value="${esc(c.line_id || "")}"></label></div>
           <label class="cd-lab">โน้ตของทีมสรรหา<textarea id="cdNote" rows="2">${esc(c.note || "")}</textarea></label><button class="cd-btn ghost sm" data-a="save-note">บันทึกชื่อ / ติดต่อ / โน้ต</button>` : c.note ? `<div class="cd-note">${esc(c.note)}</div>` : ""}</div>
       ${vFit(c)}
+      ${vNotes(c)}
       ${pending(c) ? `<div class="cd-trial"><div>⏳ <b>ยังไม่ได้ทำแบบทดสอบ</b> — ส่งลิงก์ <b>${esc(location.origin)}/apply/</b> ให้ผู้สมัคร เมื่อเขาส่งด้วยชื่อ-นามสกุล “${esc(c.name)}” (ตรงทุกตัวอักษร ไม่นับเว้นวรรคและคำนำหน้า) คำตอบจะเข้ามาที่หน้านี้อัตโนมัติ</div>${m.canEdit ? `<button class="cd-btn ghost sm" data-a="copy" data-link="${esc(location.origin)}/apply/">📋 คัดลอกลิงก์</button>` : ""}</div>` : ""}
       ${rb.scale ? `<details class="cd-card cd-guide"><summary>📏 วิธีให้คะแนน (สำหรับผู้สัมภาษณ์เท่านั้น)</summary><p>${esc(rb.note || "")}</p><p>ให้คะแนนข้อละ 20 คะแนน แบ่งเป็น 4 ด้าน ด้านละ 5 คะแนน: ${esc((rb.dims || []).join(" · "))}</p><ul>${rb.scale.map(x => `<li>${esc(x)}</li>`).join("")}</ul>${rb.usage ? `<p class="sub">${esc(rb.usage)}</p>` : ""}</details>` : ""}
       ${qs.map(q => { const r = (rb.questions || []).find(x => x.no === q.no) || {}; const sc = mine.scores[q.no] || [];
@@ -194,6 +220,7 @@
       <h1>${esc(c.name)}</h1><div class="m">${esc(c.position || "")} · ${esc(c.phone || "")} ${esc(c.email || "")} · ส่ง ${fmtT(c.submitted_at)} · ${(t.content || {}).rev || ""}</div>
       ${qs.map(q => `<h2>ข้อ ${q.no} ${esc(q.title)}</h2><div class="a">${esc((c.answers || {})[q.no] || "")}</div>`).join("")}
       ${c.ai_note ? `<h2>การใช้เครื่องมือช่วย / AI</h2><div class="a">${esc(c.ai_note)}</div>` : ""}
+      ${notesOf(c).length ? `<h2>Interview note</h2>${notesOf(c).map(n => `<p class="m"><b>${fmtD(n.interview_date)}</b>${n.round ? " · " + esc(n.round) : ""} · โดย ${esc(n.author_name || n.author)}${n.panel ? " · ผู้ร่วมสัมภาษณ์ " + esc(n.panel) : ""}${n.recommend && REC[n.recommend] ? " · <b>" + REC[n.recommend][0] + "</b>" : ""}</p><div class="a">${esc(n.note)}</div>`).join("")}` : ""}
       <h2>แบบบันทึกคะแนน — ผู้ประเมิน ${esc(me().name || "")}</h2><table><tr><th>ข้อ</th>${dims.map(d => `<th>${esc(d)} /5</th>`).join("")}<th>รวม /20</th></tr>
       ${qs.map(q => { const s = mine.scores[q.no] || []; return `<tr><td>${q.no}</td>${dims.map((_, i) => `<td>${s[i] ?? ""}</td>`).join("")}<td>${s.reduce((a, b) => a + (b || 0), 0) || ""}</td></tr>`; }).join("")}</table>
       <p><b>คะแนนรวม ${mine.total ?? "____"} / 100</b></p><h2>จุดแข็งที่มีหลักฐานในคำตอบ</h2><div class="a">${esc(mine.strengths || "")}&nbsp;</div><h2>ข้อกังวลและคำถามสำหรับสัมภาษณ์</h2><div class="a">${esc(mine.concerns || "")}&nbsp;</div>
@@ -272,6 +299,16 @@
         return; }
       if (!c) return;
       if (a === "print") return printCand(c);
+      if (a === "inote-new") { keepText(); NOTE.c = c.id; NOTE.id = 0; draw(); const e = ROOT.querySelector("#inNote"); if (e) e.focus(); return; }
+      if (a === "inote-edit") { keepText(); NOTE.c = c.id; NOTE.id = +ds.n; return draw(); }
+      if (a === "inote-cancel") { keepText(); NOTE.c = 0; NOTE.id = null; return draw(); }
+      if (a === "inote-save") { const v = id => ROOT.querySelector("#" + id).value;
+        const body = { id: c.id, note_id: NOTE.id || undefined, interview_date: v("inDate"), round: v("inRound").trim(), panel: v("inPanel").trim(), note: v("inNote"), recommend: (ROOT.querySelector("[name=inRec]:checked") || {}).value || "" };
+        if (!body.note.trim()) return toast("พิมพ์บันทึกการสัมภาษณ์ก่อน", 1);
+        keepText(); const j = await post("inote", body); D.notes = (D.notes || []).filter(n => n.id !== j.note.id).concat(j.note)
+          .sort((x, y) => String(y.interview_date).localeCompare(String(x.interview_date)) || String(y.created_at).localeCompare(String(x.created_at)));
+        NOTE.c = 0; NOTE.id = null; toast("บันทึก Interview note แล้ว"); return draw(); }
+      if (a === "inote-del") { if (!confirm("ลบ Interview note นี้?")) return; keepText(); await post("inote-del", { note_id: +ds.n }); D.notes = D.notes.filter(n => n.id !== +ds.n); return draw(); }
       if (a === "fit-run") { keepText(); const text = (FIT_TXT[c.id] || "").trim();
         if (text.length < 40) return toast("วางข้อความจาก CV ก่อน (อย่างน้อยสองสามบรรทัด)", 1);
         const j = await post("fit", { id: c.id, cv_text: text, fit: window.CandFit.analyze(text) }); c.cv_text = text; c.fit = j.fit; delete FIT_TXT[c.id];
@@ -324,6 +361,8 @@
 .cd-log{padding:5px 0;border-bottom:1px solid #f1f3f5}
 .cd-fold>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;flex-wrap:wrap}.cd-fold>summary::-webkit-details-marker{display:none}.cd-fold>summary h3{margin:0}.cd-fold[open]>summary{margin-bottom:10px}
 .cd-foldt{margin-left:auto;font-size:12.5px;color:var(--rak);border:1px solid var(--rak-line);border-radius:8px;padding:3px 10px;background:#fff}.cd-fold>summary:hover .cd-foldt{background:var(--blush)}
+.cd-notes{border-left:4px solid #0ca678}.cd-nitem{border-top:1px solid #f1f3f5;padding:10px 0}.cd-nh{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;font-size:13.5px}.cd-nact{margin-left:auto}
+.cd-nform{background:#f8f9fa;border-radius:10px;padding:10px 14px;margin:8px 0}.cd-nform textarea{width:100%;padding:8px 11px;border:1px solid #d6dae0;border-radius:9px;font:inherit;font-size:13.5px}.cd-rec{display:flex;gap:16px;flex-wrap:wrap;color:var(--ink,#1f2328);font-size:13.5px;margin:2px 0 10px}
 .cd-addg{display:grid;align-items:end;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:4px 12px}.cd-addg input,.cd-addg select{padding:8px 11px;border:1px solid #d6dae0;border-radius:9px;font:inherit;font-size:13.5px;color:var(--ink,#1f2328)}.cd-add{border-left:4px solid var(--rak)}#adWarn{color:#d9480f;margin:4px 0 8px}
 .cd-fit{display:flex;flex-direction:column;gap:12px;margin:8px 0}.cd-fitroles{display:flex;flex-direction:column;gap:7px}.cd-fitrole{display:grid;grid-template-columns:minmax(150px,240px) 1fr 52px;gap:10px;align-items:center;font-size:13.5px}.cd-fitrole.main span{font-weight:600}.cd-fitrole b{text-align:right}
 .cd-fitbar{height:10px;background:#f1f3f5;border-radius:999px;overflow:hidden}.cd-fitbar i{display:block;height:100%;border-radius:999px}.cd-fitbar i.ok{background:#2b8a3e}.cd-fitbar i.mid{background:#f08c00}.cd-fitbar i.low{background:#adb5bd}

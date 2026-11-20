@@ -65,6 +65,23 @@ alter table public.cand_tests add column if not exists trial boolean not null de
 alter table public.candidates add column if not exists cv_text text;    -- added 20 Nov 2026: ข้อความจาก CV สำหรับวิเคราะห์ความเข้ากันได้
 alter table public.candidates add column if not exists fit jsonb;       -- added 20 Nov 2026: ผลวิเคราะห์ CV × โครงสร้าง SSM (hub/candidates/fit.js)
 
+-- Interview notes (added 20 Nov 2026): one row per note; everyone with the menu writes, author or ดิว / นุ่น edit / delete.
+create table if not exists public.cand_notes (
+  id             bigint generated always as identity primary key,
+  candidate_id   bigint not null references public.candidates(id) on delete cascade,
+  interview_date date not null default current_date,
+  round          text,                                 -- รอบ 1 / รอบ 2 / โทร / หน้างาน …
+  panel          text,                                 -- ผู้ร่วมสัมภาษณ์
+  note           text not null,
+  recommend      text,                                 -- hire | consider | no
+  author         text not null,                        -- username
+  author_name    text,
+  created_at     timestamptz not null default now(),
+  updated_at     timestamptz not null default now()
+);
+create index if not exists cand_notes_cand on public.cand_notes (candidate_id);
+alter table public.cand_notes enable row level security;
+
 alter table public.cand_tests  enable row level security;
 alter table public.candidates  enable row level security;
 alter table public.cand_scores enable row level security;
