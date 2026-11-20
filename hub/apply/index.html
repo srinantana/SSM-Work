@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>สมัครงาน · RAK Engineering</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23000'/%3E%3Ctext x='32' y='41' font-family='Arial' font-weight='700' font-size='22' fill='%23fff' text-anchor='middle'%3ESSM%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--rak:#c70404;--ink:#1f2328;--muted:#6b7280;--line:#e3e6ea;--soft:#f6f7f9;--blush:#fff3f3}
+*{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+body{margin:0;font:16px/1.65 "IBM Plex Sans Thai",system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);background:var(--soft)}
+.top{background:#fff;border-bottom:1px solid var(--line)}.top .in{max-width:860px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:12px}
+.top img{height:40px;width:auto}.top .t{font-size:12px;letter-spacing:1.5px;color:var(--muted);font-weight:600}
+main{max-width:860px;margin:0 auto;padding:22px 16px 80px}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:22px 22px;margin-bottom:16px}
+h1{font-size:24px;margin:0 0 4px}h2{font-size:19px;margin:0 0 10px}h3{font-size:16px;margin:16px 0 6px}
+.eyebrow{font-size:12px;letter-spacing:2px;color:var(--rak);font-weight:700}
+.muted{color:var(--muted)}.small{font-size:13.5px}
+ul{padding-left:20px;margin:6px 0}li{margin:3px 0}
+label.f{display:flex;flex-direction:column;gap:5px;font-size:14px;font-weight:600;margin-bottom:12px}
+label.f span{font-weight:400;color:var(--muted);font-size:13px}
+input[type=text],input[type=tel],input[type=email],textarea{font:inherit;font-size:16px;padding:11px 13px;border:1px solid #cfd4da;border-radius:10px;background:#fff;width:100%;color:inherit}
+input:focus,textarea:focus{outline:2px solid #ffb3b3;border-color:var(--rak)}
+textarea{min-height:220px;resize:vertical;line-height:1.6}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}@media(max-width:620px){.grid{grid-template-columns:1fr}.card{padding:18px 16px}}
+.consent{background:#fafbfc;border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:14px}
+.ck{display:flex;gap:10px;align-items:flex-start;font-size:15px;margin-top:12px;cursor:pointer}.ck input{width:20px;height:20px;margin-top:4px;flex:none;accent-color:var(--rak)}
+.btn{display:inline-block;font:inherit;font-size:16px;font-weight:600;padding:13px 26px;border-radius:12px;border:0;background:var(--rak);color:#fff;cursor:pointer}
+.btn:disabled{opacity:.45;cursor:not-allowed}.btn.ghost{background:#fff;color:var(--ink);border:1px solid #cfd4da}
+.q{border-top:4px solid var(--rak)}.q .pts{float:right;font-size:13px;color:var(--muted);font-weight:600}
+.facts{background:var(--blush);border-radius:10px;padding:10px 14px 10px 30px;margin:10px 0}
+.ask{font-weight:600;margin:12px 0 4px}.parts{margin:0 0 12px}
+.cnt{font-size:12.5px;color:var(--muted);text-align:right;margin-top:4px}
+.err{color:#c92a2a;font-weight:600;margin-top:10px}.ok{color:#2b8a3e}
+.bar{position:sticky;bottom:0;background:rgba(255,255,255,.96);backdrop-filter:blur(6px);border-top:1px solid var(--line);padding:12px 16px;margin:0 -16px;display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.prog{font-size:13.5px;color:var(--muted)}.saved{font-size:12.5px;color:#2b8a3e}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+.done{text-align:center;padding:40px 20px}.done .big{font-size:56px}
+.pick a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;margin:8px 0;text-decoration:none;color:inherit;font-weight:600;background:#fff}
+</style>
+</head>
+<body>
+<div class="top"><div class="in"><img src="/assets/rak-logo-light.png" alt="RAK Engineering"><span class="t">SITE &amp; SERVICE MANAGEMENT · สมัครงาน</span></div></div>
+<main id="app"><div class="card">กำลังโหลด…</div></main>
+<script>
+(function () {
+  "use strict";
+  const CONSENT_VER = "v1";
+  const KEEP_DAYS = 90;
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const store = { get(k) { try { return JSON.parse(localStorage.getItem(k) || "null"); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } }, del(k) { try { localStorage.removeItem(k); } catch { /* ignore */ } } };
+  let TESTS = [], T = null, D = null;   // D = draft {name, phone, email, line_id, consent, started_at, answers, ai_note}
+  const key = () => "rak-apply-" + T.slug;
+
+  async function init() {
+    try {
+      const r = await fetch("/api/apply/tests", { cache: "no-store" }); const j = await r.json();
+      TESTS = j.tests || [];
+    } catch { $("#app").innerHTML = `<div class="card err">โหลดแบบทดสอบไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วลองใหม่</div>`; return; }
+    route(); addEventListener("hashchange", route);
+  }
+  function route() {
+    const slug = location.hash.slice(1);
+    if (!TESTS.length) { $("#app").innerHTML = `<div class="card done"><div class="big">📭</div><h2>ขณะนี้ยังไม่เปิดรับสมัคร</h2><p class="muted">ขอบคุณที่สนใจร่วมงานกับ RAK Engineering</p></div>`; return; }
+    T = TESTS.find(t => t.slug === slug) || (TESTS.length === 1 ? TESTS[0] : null);
+    if (!T) { $("#app").innerHTML = `<div class="card"><h2>เลือกตำแหน่งที่สมัคร</h2><div class="pick">${TESTS.map(t => `<a href="#${esc(t.slug)}">${esc(t.title)} →</a>`).join("")}</div></div>`; return; }
+    D = store.get(key()) || { answers: {} };
+    D.consent && D.started_at ? viewTest() : viewStart();
+  }
+
+  function viewStart() {
+    const c = T.content || {};
+    $("#app").innerHTML = `<div class="card"><div class="eyebrow">${esc(c.org || "RAK Engineering")} · ${esc(c.rev || "")}</div><h1>แบบทดสอบผู้สมัครตำแหน่ง ${esc(T.title)}</h1>
+      <p>${esc(c.intro || "")}</p><h3>คำชี้แจง</h3><ul>${(c.rules || []).map(r => `<li>${esc(r)}</li>`).join("")}</ul></div>
+      <div class="card"><h2>ข้อมูลผู้สมัคร</h2>
+        <label class="f">ชื่อ-นามสกุล *<input type="text" id="name" autocomplete="name" value="${esc(D.name || "")}"></label>
+        <div class="grid"><label class="f">เบอร์โทรศัพท์ *<input type="tel" id="phone" autocomplete="tel" inputmode="tel" value="${esc(D.phone || "")}"></label>
+        <label class="f">อีเมล<input type="email" id="email" autocomplete="email" value="${esc(D.email || "")}"></label></div>
+        <label class="f">LINE ID <span>(ถ้ามี)</span><input type="text" id="line" value="${esc(D.line_id || "")}"></label>
+        <div class="consent"><b>การเก็บและใช้ข้อมูลส่วนบุคคล (PDPA)</b>
+          <ul class="small"><li>RAK Engineering Co., Ltd. เก็บชื่อ ช่องทางติดต่อ และคำตอบในแบบทดสอบนี้ เพื่อใช้พิจารณาคัดเลือกเข้าทำงานเท่านั้น</li>
+          <li>ข้อมูลดูได้เฉพาะผู้ที่เกี่ยวข้องกับการคัดเลือกของทีม Site &amp; Service Management และฝ่ายบุคคล</li>
+          <li>หากไม่ได้รับการคัดเลือกหรือถอนการสมัคร บริษัทจะลบข้อมูลภายใน ${KEEP_DAYS} วันนับจากวันที่แจ้งผล</li>
+          <li>คุณขอดู แก้ไข หรือให้ลบข้อมูลได้ทุกเมื่อ โดยติดต่อผู้ที่ส่งลิงก์นี้ให้คุณ หรือฝ่ายบุคคล RAK Engineering</li></ul>
+          <label class="ck"><input type="checkbox" id="consent"${D.consent ? " checked" : ""}> ข้าพเจ้าได้อ่านและยินยอมให้เก็บและใช้ข้อมูลตามที่ระบุข้างต้น</label></div>
+        <div class="err" id="err"></div>
+        <p style="margin-top:18px"><button class="btn" id="go">เริ่มทำแบบทดสอบ →</button></p>
+        <p class="small muted">คำตอบจะถูกบันทึกในเครื่องนี้ระหว่างพิมพ์ ปิดหน้าแล้วกลับมาทำต่อได้ด้วยเครื่องและเบราว์เซอร์เดิม</p></div>`;
+    $("#go").onclick = () => {
+      const name = $("#name").value.trim(), phone = $("#phone").value.trim(), email = $("#email").value.trim();
+      const err = m => { $("#err").textContent = m; };
+      if (name.length < 4) return err("กรอกชื่อ-นามสกุล");
+      if (phone.replace(/\D/g, "").length < 9) return err("กรอกเบอร์โทรศัพท์ให้ถูกต้อง");
+      if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return err("อีเมลไม่ถูกต้อง");
+      if (!$("#consent").checked) return err("กรุณาติ๊กยินยอมการเก็บข้อมูลก่อนเริ่ม");
+      Object.assign(D, { name, phone, email, line_id: $("#line").value.trim(), consent: true, started_at: D.started_at || new Date().toISOString() });
+      store.set(key(), D); viewTest(); scrollTo(0, 0);
+    };
+  }
+
+  function viewTest() {
+    const c = T.content || {}, qs = c.questions || [];
+    $("#app").innerHTML = `<div class="card"><div class="eyebrow">${esc(T.title)} · ${esc(D.name)}</div><h2>บริบทบริษัทและการทำงาน</h2>${(c.context || []).map(p => `<p>${esc(p)}</p>`).join("")}
+        <p class="small muted">ไม่มีคำตอบตายตัว ตอบด้วยภาษาของตนเอง เขียนเป็นข้อความ ตาราง หรือรายการขั้นตอนก็ได้ · หากข้อมูลไม่พอ ให้ระบุสมมติฐานและข้อมูลที่ต้องการเพิ่ม</p></div>
+      ${qs.map(q => `<div class="card q"><span class="pts">${q.points || ""} คะแนน</span><div class="eyebrow">ข้อ ${q.no}</div><h2>${esc(q.title)}</h2>
+        <p>${esc(q.scenario || "")}</p>${(q.facts || []).length ? `<ul class="facts">${q.facts.map(f => `<li>${esc(f)}</li>`).join("")}</ul>` : ""}
+        <div class="ask">${esc(q.ask || "")}</div><ol class="parts">${(q.parts || []).map(p => `<li>${esc(p)}</li>`).join("")}</ol>
+        <textarea data-q="${q.no}" placeholder="พิมพ์คำตอบข้อ ${q.no} ที่นี่ — แยกหัวข้อย่อยตามหมายเลข 1, 2, 3 …">${esc((D.answers || {})[q.no] || "")}</textarea><div class="cnt" id="cnt${q.no}"></div></div>`).join("")}
+      <div class="card"><h2>การใช้เครื่องมือช่วย</h2><label class="f">หากใช้เครื่องมือช่วยค้นคว้าหรือ AI ให้ระบุว่าใช้ช่วยส่วนใด <span>(ถ้าไม่ได้ใช้ เว้นว่างได้)</span><textarea id="ai" style="min-height:90px">${esc(D.ai_note || "")}</textarea></label>
+        <input class="hp" type="text" id="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <div class="err" id="err"></div></div>
+      <div class="bar"><span class="prog" id="prog"></span><span class="saved" id="saved"></span><span><button class="btn ghost" id="back">← แก้ข้อมูลผู้สมัคร</button> <button class="btn" id="send">ส่งแบบทดสอบ</button></span></div>`;
+    const upd = () => {
+      let n = 0; qs.forEach(q => { const v = (D.answers[q.no] || "").trim(); if (v) n++; const e = $("#cnt" + q.no); if (e) e.textContent = v ? v.length.toLocaleString() + " ตัวอักษร" : ""; });
+      $("#prog").textContent = `ตอบแล้ว ${n} / ${qs.length} ข้อ`;
+    };
+    let t = null;
+    document.querySelectorAll("textarea[data-q]").forEach(ta => ta.addEventListener("input", () => { D.answers[ta.dataset.q] = ta.value; upd(); clearTimeout(t); t = setTimeout(() => { store.set(key(), D); $("#saved").textContent = "✓ บันทึกในเครื่องแล้ว"; }, 600); }));
+    $("#ai").addEventListener("input", e => { D.ai_note = e.target.value; store.set(key(), D); });
+    $("#back").onclick = () => { store.set(key(), D); D.started_at && viewStart(); scrollTo(0, 0); };
+    $("#send").onclick = send;
+    window.onpagehide = () => { if (D && D.consent) store.set(key(), D); };   // keep the last keystrokes when the tab closes
+    upd();
+  }
+
+  async function send() {
+    const qs = (T.content || {}).questions || [];
+    const miss = qs.filter(q => !(D.answers[q.no] || "").trim()).map(q => q.no);
+    if (miss.length) { $("#err").textContent = "ยังไม่ได้ตอบข้อ " + miss.join(", "); document.querySelector(`textarea[data-q="${miss[0]}"]`).focus(); return; }
+    if (!confirm("ยืนยันส่งแบบทดสอบ? ส่งแล้วแก้ไขไม่ได้")) return;
+    const b = $("#send"); b.disabled = true; b.textContent = "กำลังส่ง…";
+    try {
+      const r = await fetch("/api/apply/submit", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: T.slug, name: D.name, phone: D.phone, email: D.email, line_id: D.line_id,
+        answers: D.answers, ai_note: D.ai_note || "", consent: true, consent_ver: CONSENT_VER, started_at: D.started_at, website: $("#website").value }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || "ส่งไม่สำเร็จ ลองใหม่อีกครั้ง");
+      store.del(key());
+      $("#app").innerHTML = `<div class="card done"><div class="big">✅</div><h2>ส่งแบบทดสอบเรียบร้อยแล้ว</h2><p>ขอบคุณ คุณ${esc(D.name)} ที่สมัครตำแหน่ง ${esc(T.title)}</p><p class="muted">ทีมงานจะติดต่อกลับทางเบอร์ ${esc(D.phone)}${D.email ? " หรืออีเมล " + esc(D.email) : ""}</p></div>`;
+      scrollTo(0, 0);
+    } catch (e) { $("#err").textContent = e.message; b.disabled = false; b.textContent = "ส่งแบบทดสอบ"; }
+  }
+  init();
+})();
+</script>
+</body>
+</html>
