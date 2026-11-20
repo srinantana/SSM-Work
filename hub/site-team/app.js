@@ -46,14 +46,23 @@
   const monthsLeft = s => { const d = parse(s); return d ? (d - today()) / (30.44 * 864e5) : null; };
 
   /* ---------- people = Manpower workers + passport rows ---------- */
+  /* names shown come from RAK_Employee (D.emp): ชื่อ นามสกุล (ชื่อเล่น) + รหัสพนักงาน — matched by employee code, else Thai name */
+  let EMPX = null;
+  function empOf(code, th) {
+    if (!EMPX || EMPX.src !== D.emp) { const byC = new Map(), byT = new Map();
+      for (const e of D.emp || []) { if (e.code) byC.set(String(e.code).toUpperCase(), e); const k = thNorm(e.th).replace(/\s+/g, ""); if (k && !byT.has(k)) byT.set(k, e); }
+      EMPX = { src: D.emp, byC, byT }; }
+    return (code && EMPX.byC.get(String(code).toUpperCase())) || (th && EMPX.byT.get(thNorm(th).replace(/\s+/g, ""))) || null;
+  }
   function people() {
     const byW = new Map(D.people.filter(p => p.worker_id).map(p => [p.worker_id, p]));
     const out = D.workers.filter(w => w.active !== false || byW.has(w.id)).map(w => {
-      const p = byW.get(w.id) || {};
-      return { key: "w:" + w.id, worker: w, p, pid: p.id || 0, unit: w.unit || "-", name_th: w.name_th || p.name_th || "", nick: w.nickname || "",
-        name_en: p.name_en || w.name_en_hr || "", code: w.emp_code || w.id, active: w.active !== false && p.active !== false };
+      const p = byW.get(w.id) || {}, e = empOf(w.emp_code || p.emp_code, w.name_th || p.name_th);
+      return { key: "w:" + w.id, worker: w, p, pid: p.id || 0, unit: w.unit || "-", name_th: (e && thNorm(e.th)) || w.name_th || p.name_th || "", nick: (e && e.nick) || w.nickname || "",
+        name_en: p.name_en || w.name_en_hr || "", code: (e && e.code) || w.emp_code || p.emp_code || w.id, active: w.active !== false && p.active !== false };
     });
-    for (const p of D.people) if (!p.worker_id) out.push({ key: "p:" + p.id, worker: null, p, pid: p.id, unit: GROUP_OK.has(p.team) ? p.team : "-", name_th: p.name_th || "", nick: "", name_en: p.name_en || "", code: p.emp_code || "", active: p.active !== false });
+    for (const p of D.people) if (!p.worker_id) { const e = empOf(p.emp_code, p.name_th);
+      out.push({ key: "p:" + p.id, worker: null, p, pid: p.id, unit: GROUP_OK.has(p.team) ? p.team : "-", name_th: (e && thNorm(e.th)) || p.name_th || "", nick: (e && e.nick) || "", name_en: p.name_en || "", code: (e && e.code) || p.emp_code || "", active: p.active !== false }); }
     return out.map(r => Object.assign(r, status(r.p)));
   }
   function status(p) {
