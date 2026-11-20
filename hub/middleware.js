@@ -1368,7 +1368,7 @@ async function qaApi(cfg, req, url, prof) {
 // added here who is not on the board. Editors = Manpower editors (SC / PC / SSM). Everyone else with the menu sees names,
 // teams and expiry dates only: national ID, passport no. and birth date are removed before the response leaves the server.
 const ST_FIELDS = ['emp_code', 'name_en', 'name_th', 'sex', 'nationality', 'national_id', 'birth_date', 'passport_no', 'passport_issue', 'passport_expiry',
-  'passport_file', 'visa_note', 'renewal_status', 'renewal_cost', 'renewal_note', 'insurance_type', 'insurance_policy', 'insurance_expiry', 'note', 'active', 'team', 'visas'];
+  'passport_file', 'visa_note', 'renewal_status', 'renewal_cost', 'renewal_note', 'insurance_type', 'insurance_policy', 'insurance_start', 'insurance_expiry', 'note', 'active', 'team', 'visas'];
 const ST_PRIVATE = ['national_id', 'birth_date', 'passport_no', 'passport_issue', 'insurance_policy', 'passport_file', 'sex'];
 const stDate = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : null);
 function stClean(d) {
@@ -1379,7 +1379,7 @@ function stClean(d) {
   if ('nationality' in d) o.nationality = mpStr(d.nationality, 3).toUpperCase() || 'THA';
   if ('national_id' in d) { const v = String(d.national_id || '').replace(/\D/g, ''); if (v && v.length !== 13) throw new Error('เลขบัตรประชาชนต้องมี 13 หลัก'); o.national_id = v || null; }
   if ('passport_no' in d) { const v = String(d.passport_no || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (v && !/^[A-Z0-9]{6,12}$/.test(v)) throw new Error('เลข Passport ไม่ถูกต้อง'); o.passport_no = v || null; }
-  for (const k of ['birth_date', 'passport_issue', 'passport_expiry', 'insurance_expiry']) if (k in d) o[k] = stDate(d[k]);
+  for (const k of ['birth_date', 'passport_issue', 'passport_expiry', 'insurance_start', 'insurance_expiry']) if (k in d) o[k] = stDate(d[k]);
   if ('renewal_status' in d) o.renewal_status = ['', 'needed', 'in_progress', 'done'].includes(d.renewal_status) ? d.renewal_status : '';
   if ('insurance_type' in d) o.insurance_type = ['', 'trip', 'annual'].includes(d.insurance_type) ? d.insurance_type : '';
   if ('renewal_cost' in d) { const n = Number(String(d.renewal_cost ?? '').replace(/,/g, '')); o.renewal_cost = String(d.renewal_cost ?? '').trim() === '' ? null : (Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null); }
@@ -1394,9 +1394,9 @@ function stClean(d) {
 // Writes to site_team_people; if a newer column is not there yet (database/site_team-002 / -003.sql not run), retry without it.
 async function stWrite(u, method, H, row) {
   let r = await fetch(u, { method, headers: H, body: JSON.stringify(row) });
-  for (let i = 0; i < 3 && !r.ok && r.status === 400; i++) {
+  for (let i = 0; i < 4 && !r.ok && r.status === 400; i++) {
     const t = await r.clone().text().catch(() => '');
-    const col = ['team', 'visas', 'kind', 'status'].find((k) => k in row && new RegExp(`'${k}'|"${k}"|\\b${k}\\b`).test(t));
+    const col = ['team', 'visas', 'kind', 'status', 'insurance_start'].find((k) => k in row && new RegExp(`'${k}'|"${k}"|\\b${k}\\b`).test(t));
     if (!col) break;
     const { [col]: _drop, ...rest } = row; row = rest;
     r = await fetch(u, { method, headers: H, body: JSON.stringify(row) });

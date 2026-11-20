@@ -310,6 +310,13 @@
     const c = (D.certs || []).find(x => x.id === id); if (!c) return;
     try { const j = await post("cert", { ...c, ...patch }); D.certs = D.certs.filter(x => x.id !== id).concat(j.cert); toast("บันทึกแล้ว"); draw(); } catch (x) { toast(x.message, 1); }
   }
+  /* annual travel insurance covering the whole trip (insurance_start → insurance_expiry) */
+  function annualCover(p, t) {
+    if (p.insurance_type !== "annual" || !p.insurance_expiry) return null;
+    const from = t.date_from || t.date_to, to = t.date_to || t.date_from, ok = (!from || !p.insurance_start || p.insurance_start <= from) && (!to || p.insurance_expiry >= to);
+    return { ok, l: (ok ? "รายปี ✓ " : "รายปี ไม่ครอบคลุม · ") + (p.insurance_start ? fmt(p.insurance_start) + " – " : "ถึง ") + fmt(p.insurance_expiry) };
+  }
+  const insTd = (p, t) => { const a = annualCover(p, t); return `<td>${a ? `<span class="stm-st ${a.ok ? "st-ok" : "st-warn"}" title="${esc(p.insurance_policy || "")}">🛡️ ${esc(a.l)}</span>` : `<span class="stm-st st-none">ซื้อรายเที่ยว</span>`}</td>`; };
   /* quick view of a trip's people — name TH / EN, team, passport no. (SC / PC / SSM only), expiry, 6-month check, visa */
   function tripQuick(t) {
     const ce = D.canEdit, ps = tripPeople(t), back = parse(t.date_to || t.date_from);
@@ -317,15 +324,15 @@
     const visaTd = r => { if (!t.country) return ""; const x = visaFor(r.p, t.country); if (!x) return `<td><span class="stm-st st-none">ไม่มี</span></td>`;
       const e = parse(x.expiry), ok = !e || !back || e >= back; return `<td><span class="stm-st ${ok ? "st-ok" : "st-bad"}">${x.expiry ? (ok ? "ถึง " : "หมด ") + fmt(x.expiry) : "มี"}</span></td>`; };
     const pass = r => !r.p.passport_expiry && !r.p.passport_no && !r.p.has_passport ? ["st-bad", "ไม่มี Passport"] : r.okTravel ? ["st-ok", "ผ่าน"] : ["st-bad", "ไม่ผ่าน " + TRAVEL_MONTHS + " เดือน"];
-    return `<div class="stm-qv"><table class="stm-t"><thead><tr><th>#</th><th>ชื่อ-นามสกุล</th><th>Name (ตาม Passport)</th><th>ทีม</th>${ce ? "<th>Passport No.</th>" : ""}<th>หมดอายุ</th><th>Passport</th>${t.country ? `<th>วีซ่า ${flag(cKey(t.country))}</th>` : ""}</tr></thead><tbody>
+    return `<div class="stm-qv"><table class="stm-t"><thead><tr><th>#</th><th>ชื่อ-นามสกุล</th><th>Name (ตาม Passport)</th><th>ทีม</th>${ce ? "<th>Passport No.</th>" : ""}<th>หมดอายุ</th><th>Passport</th>${t.country ? `<th>วีซ่า ${flag(cKey(t.country))}</th>` : ""}<th>ประกันเดินทาง</th></tr></thead><tbody>
       ${ps.map((r, i) => { const [cls, l] = pass(r); return `<tr><td class="muted">${i + 1}</td><td>${esc(r.name_th || "")}${r.nick ? ` <span class="muted">(${esc(r.nick)})</span>` : ""}<div class="sub">${esc(r.code || "")}</div></td>
-        <td>${esc(r.p.name_en || r.name_en || "")}</td><td>${unitBadge(r.unit)}</td>${ce ? `<td class="mono">${esc(r.p.passport_no || "—")}</td>` : ""}<td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${cls}">${l}</span></td>${visaTd(r)}</tr>`; }).join("")}
+        <td>${esc(r.p.name_en || r.name_en || "")}</td><td>${unitBadge(r.unit)}</td>${ce ? `<td class="mono">${esc(r.p.passport_no || "—")}</td>` : ""}<td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${cls}">${l}</span></td>${visaTd(r)}${insTd(r.p, t)}</tr>`; }).join("")}
       </tbody></table>${ce ? `<button class="stm-lnk" data-a="trip-copy" data-id="${t.id}">📋 คัดลอกรายชื่อ (ชื่อ EN + Passport) ไปวางใน Excel / อีเมล</button>` : ""}</div>`;
   }
   function tripLine(t) {
-    const ps = tripPeople(t), bad = ps.filter(x => !x.okTravel).length, ts = TRIP_ST[t.status] || TRIP_ST.draft;
+    const ps = tripPeople(t), bad = ps.filter(x => !x.okTravel).length, ts = TRIP_ST[t.status] || TRIP_ST.draft, ann = ps.filter(x => (annualCover(x.p, t) || {}).ok).length;
     return `<div class="stm-trip"><span class="stm-st ${ts[1]}">${ts[0]}</span> <span class="stm-st st-none">${esc(kindL(t))}</span> <b>${esc(t.title)}</b> <span class="muted">${esc([t.job_no, t.customer].filter(Boolean).join(" · "))}${t.country ? " · " + flag(cKey(t.country)) + " " + esc(t.country) : ""}</span>
-      <div class="sub">${fmt(t.date_from)}${t.date_to && t.date_to !== t.date_from ? " – " + fmt(t.date_to) : ""} · ${ps.length} คน · ประกัน${INS_L[t.insurance_type] || ""}${bad ? ` · <span class="bad">Passport ยังไม่ครบ / ไม่ผ่าน ${bad} คน</span>` : ""}</div></div>`;
+      <div class="sub">${fmt(t.date_from)}${t.date_to && t.date_to !== t.date_from ? " – " + fmt(t.date_to) : ""} · ${ps.length} คน · ประกัน${INS_L[t.insurance_type] || ""}${ann ? ` · 🛡️ มีประกันรายปีแล้ว ${ann} คน` : ""}${bad ? ` · <span class="bad">Passport ยังไม่ครบ / ไม่ผ่าน ${bad} คน</span>` : ""}</div></div>`;
   }
 
   function filterBar(extra = "") {
@@ -440,7 +447,7 @@
       ${picked.length ? `<div class="stm-chips">${picked.map(r => `<span class="stm-chip ${r.okTravel ? "" : "bad"}" title="${r.okTravel ? "Passport ผ่าน" : !r.p.passport_no ? "ยังไม่มี Passport" : "Passport ไม่ผ่าน " + TRAVEL_MONTHS + " เดือน"}">${esc(label(r))}${r.okTravel ? "" : !r.p.passport_no ? " · ไม่มี Passport" : " ⚠"}</span>`).join("")}</div>
         ${notOk ? `<p class="sub bad">⚠️ ${noPass ? `ยังไม่มี Passport ${noPass} คน` : ""}${noPass && notOk > noPass ? " · " : ""}${notOk > noPass ? `Passport ไม่ผ่าน ${TRAVEL_MONTHS} เดือน ${notOk - noPass} คน` : ""} — บันทึกเป็น Draft ได้ · Confirm ได้เมื่อครบทุกคน</p>` : ""}` : ""}
       ${ce ? filterBar(`<select id="stTc"><option value="">🎓 ทุก Certificate</option>${COURSES.map(([k, l, ic]) => `<option value="${k}"${S.tCert === k ? " selected" : ""}>${ic} ต้องมี ${esc(l)}</option>`).join("")}</select>`) + `<div class="stm-scroll stm-pick"><table class="stm-t"><tbody>${rs.map(r => { const [k, l] = chk(r);
-        return `<tr><td><label class="stm-ck"><input type="checkbox" data-pick="${r.pid || "w:" + (r.worker ? r.worker.id : "")}"${r.pid && sel.has(r.pid) ? " checked" : ""}> ${esc(label(r))}</label></td><td>${unitBadge(r.unit)}</td><td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${k === "ok" ? "st-ok" : k === "bad" ? "st-bad" : "st-none"}">${l}</span></td>${vCell(r)}<td><div class="stm-vchips">${(TI.byKey.get(r.key) || []).filter(c => ["ok", "due", "unk"].includes(certSt(c)[0])).map(certChip).join("")}</div></td></tr>`; }).join("")}</tbody></table></div>` : ""}
+        return `<tr><td><label class="stm-ck"><input type="checkbox" data-pick="${r.pid || "w:" + (r.worker ? r.worker.id : "")}"${r.pid && sel.has(r.pid) ? " checked" : ""}> ${esc(label(r))}</label></td><td>${unitBadge(r.unit)}</td><td>${fmt(r.p.passport_expiry)}</td><td><span class="stm-st ${k === "ok" ? "st-ok" : k === "bad" ? "st-bad" : "st-none"}">${l}</span></td>${vCell(r)}${insTd(r.p, t)}<td><div class="stm-vchips">${(TI.byKey.get(r.key) || []).filter(c => ["ok", "due", "unk"].includes(certSt(c)[0])).map(certChip).join("")}</div></td></tr>`; }).join("")}</tbody></table></div>` : ""}
       <div class="stm-acts">${ce ? `<button class="stm-btn ghost" data-a="trip-save" data-st="draft">💾 บันทึก Draft</button> <button class="stm-btn" data-a="trip-save" data-st="confirmed"${canConfirm ? "" : ` disabled title="Confirm ได้เมื่อทุกคนมี Passport ผ่าน ${TRAVEL_MONTHS} เดือน และใส่วันกลับแล้ว"`}>✅ Confirm trip</button>${t.id ? ` <button class="stm-btn ghost" data-a="trip-xlsx" data-id="${t.id}">⬇ รายชื่อทำประกัน</button> <button class="stm-btn danger" data-a="trip-del" data-id="${t.id}">ลบทริป</button>` : ""}` : ""} <button class="stm-btn ghost" data-a="trip-close">กลับ</button></div></div>`;
   }
   async function tripXlsx(t) {
@@ -449,10 +456,11 @@
     const rows = ps.map((r, i) => ({ "ลำดับ": i + 1, "ชื่อ-สกุล (EN ตาม Passport)": r.p.name_en || r.name_en, "ชื่อ-สกุล (TH)": r.name_th, "เพศ": r.p.sex || "",
       "วันเกิด": r.p.birth_date || "", "อายุ": age(r.p.birth_date), "เลขบัตรประชาชน": r.p.national_id || "", "Passport No.": r.p.passport_no || "",
       "Passport หมดอายุ": r.p.passport_expiry || "", "ทีม": r.unit, "Passport ผ่าน 6 เดือน": r.okTravel ? "ผ่าน" : "ไม่ผ่าน",
+      "ประกันรายปี": (a => a ? (a.ok ? "ครอบคลุม" : "ไม่ครอบคลุม") + " (" + (r.p.insurance_start || "") + " – " + r.p.insurance_expiry + ")" + (r.p.insurance_policy ? " " + r.p.insurance_policy : "") : "ต้องซื้อรายเที่ยว")(annualCover(r.p, t)),
       ["วีซ่า " + (cKey(t.country) || "")]: t.country ? ((x => x ? (x.type || "มี") + (x.expiry ? " ถึง " + x.expiry : "") : "ไม่มี")(visaFor(r.p, t.country))) : "" }));
     const head = [["รายชื่อทำประกันเดินทาง — " + t.title], [[t.customer, t.country].filter(Boolean).join(" · ")], ["เดินทาง " + (t.date_from || "") + " ถึง " + (t.date_to || t.date_from || "") + " · ประกัน" + (INS_L[t.insurance_type] || "")], []];
     const ws = X.utils.aoa_to_sheet(head); X.utils.sheet_add_json(ws, rows, { origin: "A5" });
-    ws["!cols"] = [6, 30, 26, 6, 12, 6, 16, 14, 14, 6, 12, 22].map(w => ({ wch: w }));
+    ws["!cols"] = [6, 30, 26, 6, 12, 6, 16, 14, 14, 6, 12, 34, 22].map(w => ({ wch: w }));
     const wb = X.utils.book_new(); X.utils.book_append_sheet(wb, ws, "Insurance");
     X.writeFile(wb, `TravelInsurance_${String(t.title).replace(/[^\w฀-๿]+/g, "_").slice(0, 40)}_${(t.date_from || "").replace(/-/g, "")}.xlsx`);
   }
@@ -480,6 +488,7 @@
         ${f("pRenN", "หมายเหตุต่ออายุ", p.renewal_note)}
         ${sel("pIns", "ประกันเดินทาง", INS, p.insurance_type)}
         ${f("pPol", "เลขกรมธรรม์", p.insurance_policy)}
+        ${f("pInsS", "ประกันเริ่ม", p.insurance_start, "date")}
         ${f("pInsE", "ประกันหมดอายุ", p.insurance_expiry, "date")}
         <label class="wide">หมายเหตุ<input id="pNote" value="${esc(p.note || "")}"></label>
         <div class="wide stm-visas"><div class="stm-vh">วีซ่า (แยกตามประเทศ) <button type="button" class="stm-lnk" data-a="v-add">+ เพิ่มวีซ่า</button></div><div id="pVisas"></div>
@@ -506,7 +515,7 @@
       if (a !== "p-save") return;
       const body = { id: r ? r.pid : 0, worker_id: w ? w.id : null, name_en: v("pEn").toUpperCase(), sex: v("pSex"), national_id: v("pId"), birth_date: v("pDob"), nationality: v("pNat"),
         passport_no: v("pNo"), passport_issue: v("pIss"), passport_expiry: v("pExp"), passport_file: v("pFile"), visas: readVisas(), renewal_status: v("pRen"),
-        renewal_cost: v("pCost"), renewal_note: v("pRenN"), insurance_type: v("pIns"), insurance_policy: v("pPol"), insurance_expiry: v("pInsE"), note: v("pNote") };
+        renewal_cost: v("pCost"), renewal_note: v("pRenN"), insurance_type: v("pIns"), insurance_policy: v("pPol"), insurance_start: v("pInsS"), insurance_expiry: v("pInsE"), note: v("pNote") };
       if (!w) Object.assign(body, { name_th: v("pTh"), emp_code: v("pCode"), team: v("pTeam"), active: m.querySelector("#pAct").checked });
       if (body.national_id && !thaiIdOk(body.national_id.replace(/\D/g, "")) && !confirm("เลขบัตรประชาชนไม่ผ่านการตรวจหลักสุดท้าย — บันทึกต่อไหม?")) return;
       try { await post("person", body); m.remove(); toast("บันทึกแล้ว"); load(true); } catch (x) { m.querySelector("#pErr").textContent = x.message; }
