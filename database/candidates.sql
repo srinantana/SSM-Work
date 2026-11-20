@@ -62,6 +62,8 @@ create table if not exists public.cand_log (
 );
 
 alter table public.cand_tests add column if not exists trial boolean not null default true;   -- added 20 Nov 2026 (โหมดทดลองใช้)
+alter table public.candidates add column if not exists cv_text text;    -- added 20 Nov 2026: ข้อความจาก CV สำหรับวิเคราะห์ความเข้ากันได้
+alter table public.candidates add column if not exists fit jsonb;       -- added 20 Nov 2026: ผลวิเคราะห์ CV × โครงสร้าง SSM (hub/candidates/fit.js)
 
 alter table public.cand_tests  enable row level security;
 alter table public.candidates  enable row level security;

@@ -1,4 +1,5 @@
 /* SSM Work · Candidates — applicants' written tests from the public form (/apply), CV / Resume, scoring, status.
+   Fit:    วิเคราะห์ความเข้ากันได้เบื้องต้น — ดิว / นุ่น วางข้อความ CV → fit.js ให้คะแนนตามโครงสร้าง SSM → POST /api/candidates/fit
    Routes: #candidates (ผู้สมัคร) · #candidates/c/<id> (ผู้สมัครรายคน) · #candidates/tests (แบบทดสอบ + ลิงก์ / QR)
    Data:   GET /api/candidates/data → { me: {username, name, canEdit}, keepDays, purged, tests, candidates, scores }
    Rights: everyone with the menu reads answers and keeps their own score sheet; ดิว / นุ่น (canEdit) change status,
@@ -72,12 +73,35 @@
         <select id="cdSt"><option value="">ทุกสถานะ</option><option value="open"${S.st === "open" ? " selected" : ""}>กำลังพิจารณา</option>${Object.entries(ST).map(([k, [l]]) => `<option value="${k}"${S.st === k ? " selected" : ""}>${l}</option>`).join("")}</select>
         ${D.tests.length > 1 ? `<select id="cdTest"><option value="">ทุกตำแหน่ง</option>${D.tests.map(t => `<option value="${t.id}"${S.test === String(t.id) ? " selected" : ""}>${esc(t.title)}</option>`).join("")}</select>` : ""}
         ${me().canEdit ? `<a class="cd-btn ghost" href="${DRIVE_FOLDER}" target="_blank" rel="noopener">📁 โฟลเดอร์ CV (Drive)</a>` : ""}</div>
-      <div class="cd-card cd-scroll"><table class="cd-t"><thead><tr><th>ผู้สมัคร</th><th>ตำแหน่ง</th><th>ส่งเมื่อ</th><th>ใช้เวลา</th><th>สถานะ</th><th class="n">คะแนนเฉลี่ย</th><th>CV</th></tr></thead><tbody>
+      <div class="cd-card cd-scroll"><table class="cd-t"><thead><tr><th>ผู้สมัคร</th><th>ตำแหน่ง</th><th>ส่งเมื่อ</th><th>ใช้เวลา</th><th>สถานะ</th><th class="n">คะแนนเฉลี่ย</th><th class="n">เข้ากันได้*</th><th>CV</th></tr></thead><tbody>
       ${list.map(c => { const a = avg(c), n = scoresOf(c).length, dl = daysLeft(c);
         return `<tr class="${isNew(c) ? "new" : ""}" data-go="${c.id}"><td><a href="#candidates/c/${c.id}"><b>${esc(c.name)}</b></a>${isNew(c) ? " " + chip("ใหม่", "s-new") : ""}<div class="sub">${esc([c.phone, c.email].filter(Boolean).join(" · "))}</div></td>
           <td>${esc(c.position || "")}</td><td>${fmtT(c.submitted_at)}</td><td>${dur(c.started_at, c.submitted_at)}</td><td>${stChip(c)}${dl !== null ? `<div class="sub">ลบใน ${dl} วัน</div>` : ""}</td>
-          <td class="n">${a !== null ? `<b>${a}</b><span class="sub"> / 100 (${n})</span>` : `<span class="sub">ยังไม่มี</span>`}</td><td>${(c.files || []).length ? "📎 " + c.files.length : ""}</td></tr>`; }).join("") || `<tr><td colspan="7" class="muted">ยังไม่มีผู้สมัคร — ส่งลิงก์สมัครจากแท็บ “แบบทดสอบ · ลิงก์สมัคร”</td></tr>`}
-      </tbody></table></div>`;
+          <td class="n">${a !== null ? `<b>${a}</b><span class="sub"> / 100 (${n})</span>` : `<span class="sub">ยังไม่มี</span>`}</td><td class="n">${fitPct(c) !== null ? `<span class="cd-fitn ${fitCls(fitPct(c))}">${fitPct(c)}%</span>` : `<span class="sub">–</span>`}</td><td>${(c.files || []).length ? "📎 " + c.files.length : ""}</td></tr>`; }).join("") || `<tr><td colspan="8" class="muted">ยังไม่มีผู้สมัคร — ส่งลิงก์สมัครจากแท็บ “แบบทดสอบ · ลิงก์สมัคร”</td></tr>`}
+      </tbody></table><div class="sub" style="margin-top:6px">* เข้ากันได้ = ผลวิเคราะห์ CV × โครงสร้าง SSM สำหรับตำแหน่ง Site Control (คีย์เวิร์ด · เบื้องต้น)</div></div>`;
+  }
+
+  // ---------- วิเคราะห์ความเข้ากันได้เบื้องต้น (CV × โครงสร้าง SSM) — scoring in fit.js ----------
+  const fitPct = c => { const r = c.fit && (c.fit.roles || []).find(x => x.k === "sitecontrol"); return r ? r.pct : null; };
+  const fitCls = p => p >= 70 ? "ok" : p >= 50 ? "mid" : "low";
+  const FIT_TXT = {};   // unsaved CV text per candidate
+  function vFit(c) {
+    const m = me(), F = window.CandFit, f = c.fit;
+    const txt = FIT_TXT[c.id] ?? c.cv_text ?? "";
+    const res = f ? `<div class="cd-fit">
+        <div class="cd-fitroles">${(f.roles || []).map(r => `<div class="cd-fitrole${r.k === "sitecontrol" ? " main" : ""}${r.k === f.best ? " best" : ""}"><span>${esc(r.name)}${r.k === f.best ? " ⭐" : ""}</span><div class="cd-fitbar"><i class="${fitCls(r.pct)}" style="width:${Math.max(2, r.pct)}%"></i></div><b>${r.pct}%</b></div>`).join("")}</div>
+        <div class="cd-fitmeta"><b>${esc(f.level || "")}</b> · ประสบการณ์ ${f.years !== null && f.years !== undefined ? "≈ " + f.years + " ปี" : "ไม่พบช่วงปีใน CV"}${f.lead ? " · มีประสบการณ์นำทีม" : ""} · วิเคราะห์ ${fmtT(f.at)}${f.by ? " โดย " + esc(f.by) : ""}</div>
+        <table class="cd-t"><thead><tr><th>ด้านงานตามโครงสร้าง SSM</th><th class="n">คะแนน</th><th>คำที่พบใน CV</th></tr></thead><tbody>
+        ${(f.dims || []).map(d => `<tr><td>${esc(d.name)}</td><td class="n"><span class="cd-fitn ${fitCls(d.score)}">${d.score}</span></td><td>${(d.hits || []).map(h => `<span class="cd-kw">${esc(h)}</span>`).join(" ") || `<span class="sub">ไม่พบ</span>`}</td></tr>`).join("")}</tbody></table>
+        ${(f.gaps || []).length ? `<div class="cd-fitgap"><b>❓ ด้านที่ CV ยังไม่แสดง — คำถามแนะนำตอนสัมภาษณ์</b><ul>${f.gaps.map(g => `<li><b>${esc(g.name)}:</b> ${esc(g.ask)}</li>`).join("")}</ul><button class="cd-btn ghost sm" data-a="fit-ask">↳ ใส่ลงช่อง “ข้อกังวลและคำถามสำหรับสัมภาษณ์” ของฉัน</button></div>` : ""}
+      </div>` : `<p class="muted">ยังไม่ได้วิเคราะห์</p>`;
+    return `<div class="cd-card"><h3>🧭 ความเข้ากันได้เบื้องต้น — CV × โครงสร้าง SSM</h3>
+      <p class="sub">เทียบคำใน CV กับ 7 ด้านงานของ SSM (คุมงานติดตั้ง · Service · วางแผน/Manday · ประสานงาน · เอกสาร/ERP · Safety/SAT · เทคนิค) แล้วให้น้ำหนักตาม 3 บทบาท — ใช้คัดกรองเบื้องต้น ไม่แทนแบบทดสอบและการสัมภาษณ์</p>
+      ${res}
+      ${m.canEdit ? `<details class="cd-prompt"${f ? "" : " open"}><summary>${f ? "แก้ข้อความ CV / วิเคราะห์ใหม่" : "วางข้อความจาก CV เพื่อวิเคราะห์"}</summary>
+        <p class="sub">CV ใน Google Drive: เปิดไฟล์ → “เปิดด้วย Google เอกสาร” (อ่านตัวหนังสือจาก PDF/รูปให้) → คัดลอกทั้งหมดมาวางที่นี่ · ตรวจคำที่อ่านเพี้ยนก่อนกดวิเคราะห์</p>
+        <textarea id="cdCv" rows="8" style="width:100%;padding:8px 11px;border:1px solid #d6dae0;border-radius:9px;font:inherit;font-size:13.5px" placeholder="วางข้อความ CV / Resume ที่นี่ — ประวัติงาน ช่วงปี หน้าที่ ทักษะ">${esc(txt)}</textarea>
+        <div class="cd-bar" style="margin-top:6px"><button class="cd-btn sm" data-a="fit-run"${F ? "" : " disabled"}>🧭 วิเคราะห์และบันทึก</button>${f ? ` <button class="cd-btn ghost sm danger" data-a="fit-clear">ล้างผล</button>` : ""}<span class="sub" id="cdCvN"></span></div></details>` : f ? "" : `<p class="sub">ดิว / นุ่น เป็นผู้วาง CV เพื่อวิเคราะห์</p>`}</div>`;
   }
 
   function vCand() {
@@ -102,6 +126,7 @@
           <input type="url" id="cdLink" placeholder="วางลิงก์ไฟล์ Google Drive (จากโฟลเดอร์ CV)" style="flex:1;min-width:240px"><input type="text" id="cdLinkName" placeholder="ชื่อไฟล์ เช่น CV" style="width:140px"><button class="cd-btn sm" data-a="add-link">+ เพิ่มลิงก์</button>
           <a class="cd-btn ghost sm" href="${DRIVE_FOLDER}" target="_blank" rel="noopener">📁 เปิดโฟลเดอร์ CV</a></div>` : ""}
         ${m.canEdit ? `<label class="cd-lab">โน้ตของทีมสรรหา<textarea id="cdNote" rows="2">${esc(c.note || "")}</textarea></label><button class="cd-btn ghost sm" data-a="save-note">บันทึกโน้ต</button>` : c.note ? `<div class="cd-note">${esc(c.note)}</div>` : ""}</div>
+      ${vFit(c)}
       ${rb.scale ? `<details class="cd-card cd-guide"><summary>📏 วิธีให้คะแนน (สำหรับผู้สัมภาษณ์เท่านั้น)</summary><p>${esc(rb.note || "")}</p><p>ให้คะแนนข้อละ 20 คะแนน แบ่งเป็น 4 ด้าน ด้านละ 5 คะแนน: ${esc((rb.dims || []).join(" · "))}</p><ul>${rb.scale.map(x => `<li>${esc(x)}</li>`).join("")}</ul>${rb.usage ? `<p class="sub">${esc(rb.usage)}</p>` : ""}</details>` : ""}
       ${qs.map(q => { const r = (rb.questions || []).find(x => x.no === q.no) || {}; const sc = mine.scores[q.no] || [];
         return `<div class="cd-card cd-q"><div class="cd-qh"><div><span class="sub">ข้อ ${q.no} · ${q.points || 20} คะแนน</span><h3>${esc(q.title)}</h3></div><div class="cd-qt"><b>${sumQ(q.no)}</b> / 20</div></div>
@@ -183,7 +208,7 @@
     if (!DRAFT[c.id]) { const s = scoresOf(c).find(x => x.assessor === me().username); DRAFT[c.id] = s ? JSON.parse(JSON.stringify(s)) : { candidate_id: c.id, assessor: me().username, assessor_name: me().name, scores: {}, strengths: "", concerns: "" }; }
     return DRAFT[c.id];
   }
-  function keepText() { const c = D.candidates.find(x => x.id === S.id); if (!c) return; const m = myScore(c); const a = ROOT.querySelector("#cdStr"), b = ROOT.querySelector("#cdCon"); if (a) m.strengths = a.value; if (b) m.concerns = b.value; }
+  function keepText() { const c = D.candidates.find(x => x.id === S.id); if (!c) return; const cv = ROOT.querySelector("#cdCv"); if (cv) FIT_TXT[c.id] = cv.value; const m = myScore(c); const a = ROOT.querySelector("#cdStr"), b = ROOT.querySelector("#cdCon"); if (a) m.strengths = a.value; if (b) m.concerns = b.value; }
   async function act(a, ds) {
     const c = D.candidates.find(x => x.id === S.id);
     try {
@@ -204,6 +229,13 @@
       }
       if (!c) return;
       if (a === "print") return printCand(c);
+      if (a === "fit-run") { keepText(); const text = (FIT_TXT[c.id] || "").trim();
+        if (text.length < 40) return toast("วางข้อความจาก CV ก่อน (อย่างน้อยสองสามบรรทัด)", 1);
+        const j = await post("fit", { id: c.id, cv_text: text, fit: window.CandFit.analyze(text) }); c.cv_text = text; c.fit = j.fit; delete FIT_TXT[c.id];
+        toast("วิเคราะห์แล้ว — Site Control " + fitPct(c) + "%"); return draw(); }
+      if (a === "fit-clear") { if (!confirm("ล้างผลวิเคราะห์และข้อความ CV ที่วางไว้?")) return; await post("fit", { id: c.id, cv_text: "", fit: null }); c.cv_text = null; c.fit = null; delete FIT_TXT[c.id]; return draw(); }
+      if (a === "fit-ask") { keepText(); const m = myScore(c), add = (c.fit.gaps || []).map(g => "• " + g.ask).join("\n");
+        if ((m.concerns || "").includes(add)) return toast("ใส่ไว้แล้ว"); m.concerns = [m.concerns, "จากผลวิเคราะห์ CV:\n" + add].filter(Boolean).join("\n"); draw(); const e = ROOT.querySelector("#cdCon"); if (e) e.scrollIntoView({ block: "center" }); return toast("ใส่คำถามแล้ว — กด “บันทึกคะแนน” เพื่อเก็บ"); }
       if (a === "save-score") { keepText(); const m = myScore(c); const j = await post("score", { id: c.id, scores: m.scores, strengths: m.strengths, concerns: m.concerns });
         D.scores = D.scores.filter(s => !(s.candidate_id === c.id && s.assessor === me().username)).concat(j.score); delete DRAFT[c.id]; toast("บันทึกคะแนนแล้ว"); return draw(); }
       if (a === "save-note") { const note = ROOT.querySelector("#cdNote").value; await post("note", { id: c.id, note }); c.note = note; return toast("บันทึกโน้ตแล้ว"); }
@@ -245,6 +277,11 @@
 .cd-qr{width:150px;text-align:center}.cd-qr svg{width:150px;height:150px}
 .cd-trial{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:#fff4e6;border:1px solid #ffd8a8;color:#a14b00;border-radius:12px;padding:10px 14px;margin-bottom:14px;font-size:13.5px}
 .cd-log{padding:5px 0;border-bottom:1px solid #f1f3f5}
+.cd-fit{display:flex;flex-direction:column;gap:12px;margin:8px 0}.cd-fitroles{display:flex;flex-direction:column;gap:7px}.cd-fitrole{display:grid;grid-template-columns:minmax(150px,240px) 1fr 52px;gap:10px;align-items:center;font-size:13.5px}.cd-fitrole.main span{font-weight:600}.cd-fitrole b{text-align:right}
+.cd-fitbar{height:10px;background:#f1f3f5;border-radius:999px;overflow:hidden}.cd-fitbar i{display:block;height:100%;border-radius:999px}.cd-fitbar i.ok{background:#2b8a3e}.cd-fitbar i.mid{background:#f08c00}.cd-fitbar i.low{background:#adb5bd}
+.cd-fitn{display:inline-block;min-width:34px;text-align:center;font-weight:600;font-size:12.5px;padding:1px 7px;border-radius:999px}.cd-fitn.ok{background:#ebfbee;color:#2b8a3e}.cd-fitn.mid{background:#fff4e6;color:#d9480f}.cd-fitn.low{background:#f1f3f5;color:#6b7280}
+.cd-fitmeta{font-size:13px;color:#4b5563}.cd-kw{display:inline-block;background:var(--blush);color:var(--rak);border-radius:6px;padding:1px 7px;font-size:12px;margin:1px 0}
+.cd-fitgap{background:#fffbea;border:1px solid #ffe8a3;border-radius:10px;padding:10px 14px;font-size:13px}.cd-fitgap ul{margin:6px 0 8px;padding-left:20px}@media(max-width:640px){.cd-fitrole{grid-template-columns:1fr 46px}.cd-fitbar{grid-column:1/-1;grid-row:2}}
 .cd-toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:#1f2328;color:#fff;padding:10px 16px;border-radius:10px;z-index:300;font-size:13.5px}.cd-toast.bad{background:#c92a2a}
 `;
 
