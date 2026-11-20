@@ -128,6 +128,7 @@ const MENUS = [
   { id: 'manpower', name: 'Manpower' },
   { id: 'site-team', name: 'Site Team' },
   { id: 'qa-tools', name: 'QA Tools' },
+  { id: 'candidates', name: 'Candidates' },
 ];
 const MENU_IDS = MENUS.map((m) => m.id);
 function menuOfPath(path) {
@@ -138,6 +139,7 @@ function menuOfPath(path) {
   if (path.startsWith('/manpower/') || path.startsWith('/api/manpower/')) return 'manpower';
   if (path.startsWith('/site-team/') || path.startsWith('/api/site-team/')) return 'site-team';
   if (path.startsWith('/qa-tools/') || path.startsWith('/api/qa-tools/')) return 'qa-tools';
+  if (path.startsWith('/candidates/') || path.startsWith('/api/candidates/')) return 'candidates';
   const m = path.match(/^\/customers\/[^/]+\/[^/]+\/([^/]+)/);
   if (!m) return null; // not a tool page
   return MENU_IDS.find((id) => m[1].startsWith(id)) || '__admin';
@@ -1075,6 +1077,157 @@ async function readMasterProjects(cfg) {
     return { table: t, rows };
   }
   return { table: null, rows: [] };
+}
+
+// ---------- Candidates: public written test (/apply, no login) + internal review / scoring ----------
+// Tables cand_tests, candidates, cand_scores, cand_log + private bucket 'candidates' (database/candidates.sql).
+// Decisions (ดิว, 20 Nov 2026): one public link anyone can answer; applicants can't upload — CV / Resume is attached by
+// ดิว or นุ่น (vanalee.c) from the recruit Drive folder; rejected / withdrawn applicants are deleted after 90 days.
+// Everyone with the menu can read answers and score (own score sheet); only CAND_EDIT changes status, files, deletes.
+const CAND_EDIT = ['nantana.s', 'vanalee.c'];
+const CAND_STATUS = ['new', 'screening', 'interview', 'interviewed', 'offer', 'hired', 'rejected', 'withdrawn'];
+const CAND_KEEP_DAYS = 90;
+const CAND_FILE = /^c\d{1,10}\/[A-Za-z0-9_-]{6,60}\.(pdf|jpg)$/;
+const CAND_DRIVE = /^https:\/\/(drive|docs)\.google\.com\/[\w\-./?=&%#]{5,400}$/;
+const CAND_T = '/rest/v1/cand_tests', CAND_C = '/rest/v1/candidates', CAND_S = '/rest/v1/cand_scores', CAND_L = '/rest/v1/cand_log', CAND_BUCKET = 'candidates';
+const CAND_COLS = 'id,test_id,position,name,phone,email,line_id,answers,ai_note,consent_at,consent_ver,started_at,submitted_at,status,status_at,files,note,seen_by';
+async function sha256Hex(s) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join(''); }
+const candLog = (cfg, candidate_id, by, action, detail) => fetch(cfg.url + CAND_L, { method: 'POST', headers: authHeaders(cfg.service), body: JSON.stringify({ candidate_id, by, action, detail: mpStr(detail, 500) || null }) }).catch(() => null);
+async function candPurge(cfg) {              // PDPA: delete rejected / withdrawn applicants CAND_KEEP_DAYS after the decision
+  const cut = new Date(Date.now() - CAND_KEEP_DAYS * 864e5).toISOString();
+  const old = await restAll(cfg, `${CAND_C}?select=id,files&status=in.(rejected,withdrawn)&status_at=lt.${cut}`);
+  if (!old || !old.length) return 0;
+  const paths = old.flatMap((c) => (c.files || []).map((f) => f.p).filter((x) => x && CAND_FILE.test(x)));
+  if (paths.length) await fetch(`${cfg.url}/storage/v1/object/${CAND_BUCKET}`, { method: 'DELETE', headers: authHeaders(cfg.service), body: JSON.stringify({ prefixes: paths }) }).catch(() => null);
+  await fetch(`${cfg.url}${CAND_C}?id=in.(${old.map((c) => c.id).join(',')})`, { method: 'DELETE', headers: authHeaders(cfg.service) });
+  return old.length;
+}
+async function applyApi(cfg, req, url) {     // public — no session
+  const p = url.pathname.slice('/api/apply/'.length);
+  if (p === 'tests' && req.method === 'GET') {
+    const rows = await restAll(cfg, `${CAND_T}?select=slug,title,content&open=eq.true&order=id.asc`);
+    if (!rows) return json({ error: 'unavailable' }, 503);
+    return json({ tests: rows });
+  }
+  if (p === 'submit' && req.method === 'POST') {
+    const raw = await req.text(); if (raw.length > 200000) return json({ error: 'คำตอบยาวเกินไป' }, 413);
+    let d; try { d = JSON.parse(raw); } catch { return json({ error: 'ข้อมูลไม่ถูกต้อง' }, 400); }
+    if (d.website) return json({ ok: true });                    // honeypot: bots fill every field
+    const tr = await restAll(cfg, `${CAND_T}?select=id,title,content,open&slug=eq.${encodeURIComponent(mpStr(d.slug, 60))}`);
+    const t = tr && tr[0];
+    if (!t || !t.open) return json({ error: 'ตำแหน่งนี้ปิดรับสมัครแล้ว' }, 410);
+    const name = mpStr(d.name, 120), phone = String(d.phone || '').replace(/[^\d+]/g, '').slice(0, 15), email = mpStr(d.email, 160).toLowerCase();
+    if (name.length < 4) return json({ error: 'กรอกชื่อ-นามสกุล' }, 400);
+    if (phone.replace(/\D/g, '').length < 9) return json({ error: 'กรอกเบอร์โทรศัพท์ให้ถูกต้อง' }, 400);
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return json({ error: 'อีเมลไม่ถูกต้อง' }, 400);
+    if (d.consent !== true) return json({ error: 'กรุณายินยอมการเก็บข้อมูลก่อนส่ง' }, 400);
+    const qs = ((t.content || {}).questions || []).map((q) => String(q.no));
+    const answers = {};
+    for (const n of qs) { const a = String((d.answers || {})[n] || '').trim().slice(0, 20000); if (!a) return json({ error: `ยังไม่ได้ตอบข้อ ${n}` }, 400); answers[n] = a; }
+    const ip = (req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || '').split(',')[0].trim();
+    const ip_hash = ip ? (await sha256Hex(ip + '|' + cfg.secret)).slice(0, 32) : null;
+    const day = new Date(Date.now() - 864e5).toISOString();
+    if (ip_hash) { const n = await restAll(cfg, `${CAND_C}?select=id&ip_hash=eq.${ip_hash}&submitted_at=gt.${day}`); if (n && n.length >= 5) return json({ error: 'ส่งบ่อยเกินไป ลองใหม่ภายหลัง' }, 429); }
+    const dup = await restAll(cfg, `${CAND_C}?select=id&test_id=eq.${t.id}&phone=eq.${encodeURIComponent(phone)}&submitted_at=gt.${day}`);
+    if (dup && dup.length) return json({ error: 'เบอร์นี้ส่งแบบทดสอบไปแล้ว หากต้องการแก้ไข กรุณาติดต่อฝ่ายบุคคล' }, 409);
+    const started = Date.parse(d.started_at); const now = new Date().toISOString();
+    const r = await fetch(cfg.url + CAND_C, { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'return=representation' }, body: JSON.stringify({
+      test_id: t.id, position: t.title, name, phone, email: email || null, line_id: mpStr(d.line_id, 60) || null, answers, ai_note: mpStr(d.ai_note, 1000) || null,
+      consent_at: now, consent_ver: mpStr(d.consent_ver, 20) || 'v1', started_at: Number.isFinite(started) && started < Date.now() ? new Date(started).toISOString() : null, ip_hash }) });
+    if (!r.ok) return json({ error: 'ส่งไม่สำเร็จ ลองใหม่อีกครั้ง' }, 502);
+    const c = (await r.json())[0];
+    candLog(cfg, c.id, name, 'ส่งแบบทดสอบ', t.title);
+    return json({ ok: true });
+  }
+  return json({ error: 'not found' }, 404);
+}
+async function candApi(cfg, req, url, prof) {
+  const p = url.pathname.slice('/api/candidates/'.length);
+  const edit = CAND_EDIT.includes(String(prof.username || '').toLowerCase());
+  const who = prof.username || prof.email, whoName = prof.nameTh || prof.name || who;
+  const H = { ...authHeaders(cfg.service), prefer: 'return=representation' };
+  const one = async (id) => { const r = await restAll(cfg, `${CAND_C}?select=${CAND_COLS}&id=eq.${Number(id) || 0}`); return r && r[0]; };
+  const patch = (id, row) => fetch(`${cfg.url}${CAND_C}?id=eq.${id}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) });
+  if (req.method === 'GET') {
+    if (p === 'data') {
+      const purged = await candPurge(cfg).catch(() => 0);
+      const [tests, cands, scores] = await Promise.all([
+        restAll(cfg, `${CAND_T}?select=id,slug,title,open,content,rubric&order=id.asc`),
+        restAll(cfg, `${CAND_C}?select=${CAND_COLS}&order=submitted_at.desc`),
+        restAll(cfg, `${CAND_S}?select=*`),
+      ]);
+      if (!tests || !cands || !scores) return json({ error: 'no_table' }, 503);
+      return json({ me: { username: who, name: whoName, canEdit: edit }, keepDays: CAND_KEEP_DAYS, purged, tests, candidates: cands, scores });
+    }
+    if (p === 'log') { const rows = await restAll(cfg, `${CAND_L}?select=*&candidate_id=eq.${Number(url.searchParams.get('c')) || 0}&order=at.desc&limit=100`); return json({ log: rows || [] }); }
+    if (p === 'file') {
+      const path = url.searchParams.get('p') || ''; if (!CAND_FILE.test(path)) return json({ error: 'path' }, 400);
+      const r = await fetch(`${cfg.url}/storage/v1/object/${CAND_BUCKET}/${path}`, { headers: authHeaders(cfg.service) });
+      if (!r.ok) return json({ error: 'not found' }, 404);
+      return new Response(r.body, { headers: { 'content-type': path.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg', 'content-disposition': 'inline', 'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' } });
+    }
+    return json({ error: 'not found' }, 404);
+  }
+  if (req.method !== 'POST') return json({ error: 'method' }, 405);
+  if (p === 'upload') {
+    if (!edit) return json({ error: 'แนบไฟล์ได้เฉพาะดิวและนุ่น' }, 403);
+    const id = Number(url.searchParams.get('c')) || 0, ct = req.headers.get('content-type') || '';
+    const pdf = ct === 'application/pdf'; if (!pdf && !/^image\/(jpeg|png|webp)$/.test(ct)) return json({ error: 'รองรับเฉพาะ PDF หรือรูป' }, 415);
+    const buf = await req.arrayBuffer(); if (!buf.byteLength || buf.byteLength > 4 * 1024 * 1024) return json({ error: 'ไฟล์ใหญ่เกิน 4 MB' }, 413);
+    const path = `c${id}/${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}.${pdf ? 'pdf' : 'jpg'}`;
+    const h = authHeaders(cfg.service); h['content-type'] = pdf ? 'application/pdf' : 'image/jpeg';
+    const r = await fetch(`${cfg.url}/storage/v1/object/${CAND_BUCKET}/${path}`, { method: 'POST', headers: h, body: buf });
+    if (!r.ok) return json({ error: 'อัปโหลดไม่สำเร็จ — ให้ Admin ตรวจว่ารัน database/candidates.sql แล้ว' }, 502);
+    return json({ path });
+  }
+  let d; try { d = await req.json(); } catch { return json({ error: 'json' }, 400); }
+  const c = d.id ? await one(d.id) : null;
+  if (p === 'score') {
+    if (!c) return json({ error: 'ไม่พบผู้สมัคร' }, 404);
+    const sc = {}; let total = 0;
+    for (const [k, v] of Object.entries(d.scores || {})) { if (!/^\d{1,2}$/.test(k) || !Array.isArray(v)) continue; sc[k] = v.slice(0, 6).map((x) => (x === null || x === '' ? null : Math.min(5, Math.max(0, Math.round(Number(x)) || 0)))); total += sc[k].reduce((a, b) => a + (b || 0), 0); }
+    const row = { candidate_id: c.id, assessor: who, assessor_name: whoName, scores: sc, total, strengths: mpStr(d.strengths, 2000) || null, concerns: mpStr(d.concerns, 2000) || null, updated_at: new Date().toISOString() };
+    const r = await fetch(`${cfg.url}${CAND_S}?on_conflict=candidate_id,assessor`, { method: 'POST', headers: { ...H, prefer: 'return=representation,resolution=merge-duplicates' }, body: JSON.stringify(row) });
+    if (!r.ok) return json({ error: 'supabase' }, 502);
+    candLog(cfg, c.id, whoName, 'ให้คะแนน', `${total} / 100`);
+    return json({ ok: true, score: (await r.json())[0] });
+  }
+  if (p === 'seen') {
+    if (!c) return json({ error: 'ไม่พบผู้สมัคร' }, 404);
+    if (!(c.seen_by || []).includes(who)) await patch(c.id, { seen_by: [...(c.seen_by || []), who] });
+    return json({ ok: true });
+  }
+  if (!edit) return json({ error: 'แก้ไขได้เฉพาะดิวและนุ่น' }, 403);
+  if (p === 'test') {
+    const r = await fetch(`${cfg.url}${CAND_T}?id=eq.${Number(d.id) || 0}`, { method: 'PATCH', headers: H, body: JSON.stringify({ open: d.open === true, updated_at: new Date().toISOString() }) });
+    return r.ok ? json({ ok: true }) : json({ error: 'supabase' }, 502);
+  }
+  if (!c) return json({ error: 'ไม่พบผู้สมัคร' }, 404);
+  if (p === 'status') {
+    if (!CAND_STATUS.includes(d.status)) return json({ error: 'status' }, 400);
+    const r = await patch(c.id, { status: d.status, status_at: new Date().toISOString() });
+    if (!r.ok) return json({ error: 'supabase' }, 502);
+    candLog(cfg, c.id, whoName, 'เปลี่ยนสถานะ', `${c.status} → ${d.status}${d.note ? ' · ' + mpStr(d.note, 300) : ''}`);
+    return json({ ok: true });
+  }
+  if (p === 'files') {
+    const files = (Array.isArray(d.files) ? d.files : []).slice(0, 20).map((f) => ({ p: CAND_FILE.test(String(f.p || '')) ? String(f.p) : undefined, url: CAND_DRIVE.test(String(f.url || '')) ? String(f.url) : undefined,
+      name: mpStr(f.name, 120) || 'ไฟล์', at: mpStr(f.at, 40) || new Date().toISOString(), by: mpStr(f.by, 80) || whoName })).filter((f) => f.p || f.url);
+    const r = await patch(c.id, { files }); if (!r.ok) return json({ error: 'supabase' }, 502);
+    candLog(cfg, c.id, whoName, 'แก้ไขไฟล์แนบ', files.map((f) => f.name).join(', '));
+    return json({ ok: true });
+  }
+  if (p === 'note') {
+    const r = await patch(c.id, { note: mpStr(d.note, 3000) || null, phone: d.phone !== undefined ? String(d.phone || '').replace(/[^\d+]/g, '').slice(0, 15) : c.phone, email: d.email !== undefined ? mpStr(d.email, 160) || null : c.email, line_id: d.line_id !== undefined ? mpStr(d.line_id, 60) || null : c.line_id });
+    return r.ok ? json({ ok: true }) : json({ error: 'supabase' }, 502);
+  }
+  if (p === 'delete') {
+    const paths = (c.files || []).map((f) => f.p).filter(Boolean);
+    if (paths.length) await fetch(`${cfg.url}/storage/v1/object/${CAND_BUCKET}`, { method: 'DELETE', headers: authHeaders(cfg.service), body: JSON.stringify({ prefixes: paths }) }).catch(() => null);
+    const r = await fetch(`${cfg.url}${CAND_C}?id=eq.${c.id}`, { method: 'DELETE', headers: authHeaders(cfg.service) });
+    return r.ok ? json({ ok: true }) : json({ error: 'supabase' }, 502);
+  }
+  return json({ error: 'not found' }, 404);
 }
 
 // ---------- QA Tools: tool & measuring-equipment register, borrow / return, annual calibration ----------
@@ -2450,7 +2603,7 @@ export default async function middleware(req) {
   };
 
   // Logo on the sign-in page is public; nothing else is.
-  if (path === '/assets/rak-logo.svg') return;
+  if (path === '/assets/rak-logo.svg' || path === '/assets/rak-logo-light.png') return;
 
   if (!cfg.url || !cfg.anon || !cfg.service || !cfg.secret || cfg.secret.length < 32 || !cfg.superAdmin || cfg.defaultPassword.length < 6) {
     return page({ status: 503, title: 'กำลังตั้งค่า', body: `${LOCK}<h1>ระบบ login กำลังตั้งค่า</h1><p>ผู้ดูแลยังตั้งค่าการเข้าสู่ระบบไม่ครบ เว็บจึงปิดไว้ก่อนเพื่อความปลอดภัย</p><div class="note">ผู้ดูแล: ใส่ <code>SUPABASE_URL</code>, <code>SUPABASE_ANON_KEY</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code>, <code>SUPER_ADMIN</code> และ <code>DEFAULT_PASSWORD</code> ใน Vercel แล้ว redeploy</div>` });
@@ -2468,6 +2621,11 @@ export default async function middleware(req) {
     const origin = req.headers.get('origin');
     if (origin && origin !== cfg.app) return json({ error: 'bad origin' }, 403);
   }
+
+  // Candidates: public application form — no login. Static page in /apply/, data through /api/apply/*.
+  if (path === '/apply') return new Response(null, { status: 308, headers: { location: '/apply/' + url.search } });
+  if (path.startsWith('/apply/')) return;
+  if (path.startsWith('/api/apply/')) { try { return await applyApi(cfg, req, url); } catch { return json({ error: 'ระบบขัดข้อง ลองใหม่อีกครั้ง' }, 502); } }
 
   if (path === '/auth/login') {
     if (req.method !== 'POST') return Response.redirect(cfg.app + '/', 302);
@@ -2599,6 +2757,14 @@ export default async function middleware(req) {
     if (!live) return json({ error: 'login required' }, 401);
     if (!canOpen(live, 'punch-list')) return json({ error: 'no access' }, 403);
     try { return await punchApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
+  }
+
+  if (path.startsWith('/api/candidates/')) {
+    if (!signedIn) return json({ error: 'login required' }, 401);
+    const live = await liveProfile(cfg, user);
+    if (!live) return json({ error: 'login required' }, 401);
+    if (!canOpen(live, 'candidates')) return json({ error: 'no access' }, 403);
+    try { return await candApi(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); }
   }
 
   if (path.startsWith('/api/qa-tools/')) {
