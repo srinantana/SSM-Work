@@ -28,6 +28,7 @@
   const INS_L = Object.fromEntries(INS);
   const TABS = [["", "🏠 ภาพรวม"], ["people", "👷 รายชื่อทีม"], ["renew", "🔄 ต่ออายุ Passport"], ["visas", "🛂 วีซ่า"], ["certs", "🎓 Certificate"], ["insurance", "🛡️ ประกันเดินทาง"], ["trips", "✈️ เดินทางต่างประเทศ"]];
   const TRAVEL_MONTHS = 6;   // most countries need the passport valid ≥ 6 months after the return date
+  const PASS_SOON_MONTHS = 7;   // "Passport ใกล้หมดอายุ" (orange) under this many months left
   const RENEW_MONTHS = 9;    // flag for renewal this early: a Thai passport takes ~1–2 weeks plus the trip to an office
 
   let ROOT = null, D = null, ERR = "", LOADING = null;
@@ -59,13 +60,13 @@
     const has = !!(p.passport_no || p.passport_expiry || p.has_passport);
     if (!has) return { st: "none", stL: "ไม่มี Passport", m: null };
     const m = monthsLeft(p.passport_expiry);
-    if (m == null) return { st: "unk", stL: "ไม่ทราบวันหมดอายุ", m };
-    if (m < 0) return { st: "exp", stL: "หมดอายุแล้ว", m };
-    if (m < TRAVEL_MONTHS) return { st: "lt6", stL: "เหลือ < 6 เดือน", m };
-    if (m < RENEW_MONTHS + 3) return { st: "lt12", stL: "เหลือ < 1 ปี", m };
-    return { st: "ok", stL: "ใช้ได้", m };
+    // labels (Dew, 20 Nov 2026): มี Passport = green · ไม่มี Passport = grey · Passport หมดอายุ = red · ใกล้หมดอายุ (< 7 months) = orange
+    if (m == null) return { st: "unk", stL: "มี Passport (ไม่ทราบวันหมดอายุ)", m };
+    if (m < 0) return { st: "exp", stL: "Passport หมดอายุ", m };
+    if (m < PASS_SOON_MONTHS) return { st: "lt6", stL: "Passport ใกล้หมดอายุ", m };
+    return { st: "ok", stL: "มี Passport", m };
   }
-  const ST_CLS = { none: "st-none", unk: "st-none", exp: "st-bad", lt6: "st-bad", lt12: "st-warn", ok: "st-ok" };
+  const ST_CLS = { none: "st-none", unk: "st-none", exp: "st-bad", lt6: "st-warn", lt12: "st-ok", ok: "st-ok" };
   const needsRenew = r => r.active && (r.st === "exp" || r.st === "lt6" || (r.m != null && r.m < RENEW_MONTHS)) || ["needed", "in_progress"].includes(r.p.renewal_status);
   const mask = (v, keep = 4) => v ? "•".repeat(Math.max(0, String(v).length - keep)) + String(v).slice(-keep) : "";
   const fmtId = v => v && v.length === 13 ? `${v[0]}-${v.slice(1, 5)}-${v.slice(5, 10)}-${v.slice(10, 12)}-${v[12]}` : (v || "");
@@ -149,13 +150,13 @@
     const all = people().filter(r => r.active);
     const cnt = (f) => all.filter(f).length;
     const tiles = [
-      ["ทั้งหมด", all.length, "all", "👥", "people"], ["มี Passport ใช้ได้", cnt(r => r.st === "ok" || r.st === "lt12"), "ok", "✅", "people"],
+      ["ทั้งหมด", all.length, "all", "👥", "people"], ["มี Passport", cnt(r => r.st === "ok" || r.st === "lt12" || r.st === "unk"), "ok", "✅", "people"],
       ["ต้องต่ออายุ", cnt(needsRenew), "warn", "⏰", "renew"], ["หมดอายุแล้ว", cnt(r => r.st === "exp"), "bad", "⛔", "renew"], ["ไม่มี Passport", cnt(r => r.st === "none"), "none", "📭", "people"],
     ];
     const units = UNITS.map(([u, l]) => {
       const rs = all.filter(r => r.unit === u); if (!rs.length) return "";
       const c = k => rs.filter(r => r.st === k).length;
-      const ok = c("ok") + c("lt12"), bad = c("lt6") + c("exp"), no = c("none") + c("unk"), pc = x => (100 * x / rs.length).toFixed(1) + "%";
+      const ok = c("ok") + c("lt12") + c("unk"), bad = c("lt6") + c("exp"), no = c("none"), pc = x => (100 * x / rs.length).toFixed(1) + "%";
       return `<tr><th title="${esc(l)}">${unitBadge(u)}<div class="stm-bar" title="ใช้ได้ ${ok} · ใกล้หมด ${bad} · ไม่มี ${no}"><i class="b-ok" style="width:${pc(ok)}"></i><i class="b-bad" style="width:${pc(bad)}"></i><i class="b-no" style="width:${pc(no)}"></i></div></th><td class="n">${rs.length}</td><td class="n ok">${ok}</td><td class="n bad">${bad || ""}</td><td class="n muted">${no || ""}</td></tr>`;
     }).join("");
     const soon = all.filter(r => r.m != null && r.m < RENEW_MONTHS + 3).sort((a, b) => a.m - b.m).slice(0, 12);
@@ -417,11 +418,11 @@
   function filterBar(extra = "") {
     return `<div class="stm-bar2"><input type="search" id="stQ" placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัส" value="${esc(S.q)}">
       <select id="stU"><option value="">ทุกทีม</option>${UNITS.map(([u, l]) => `<option value="${u}"${S.unit === u ? " selected" : ""}>${esc(l)}</option>`).join("")}</select>
-      <select id="stS"><option value="">ทุกสถานะ</option>${[["ok", "ใช้ได้"], ["lt12", "เหลือ < 1 ปี"], ["lt6", "เหลือ < 6 เดือน"], ["exp", "หมดอายุแล้ว"], ["none", "ไม่มี Passport"]].map(([k, l]) => `<option value="${k}"${S.st === k ? " selected" : ""}>${l}</option>`).join("")}</select>${extra}</div>`;
+      <select id="stS"><option value="">ทุกสถานะ</option>${[["ok", "มี Passport"], ["lt6", "Passport ใกล้หมดอายุ (< 7 เดือน)"], ["exp", "Passport หมดอายุ"], ["none", "ไม่มี Passport"]].map(([k, l]) => `<option value="${k}"${S.st === k ? " selected" : ""}>${l}</option>`).join("")}</select>${extra}</div>`;
   }
   function filtered(rs) {
     const q = S.q.toLowerCase();
-    return rs.filter(r => (!S.unit || r.unit === S.unit) && (!S.st || r.st === S.st || (S.st === "none" && r.st === "unk"))
+    return rs.filter(r => (!S.unit || r.unit === S.unit) && (!S.st || r.st === S.st || (S.st === "ok" && (r.st === "unk" || r.st === "lt12")))
       && (!q || [r.name_th, r.name_en, r.nick, r.code].some(v => String(v || "").toLowerCase().includes(q))));
   }
   function vPeople() {
