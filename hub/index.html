@@ -286,7 +286,7 @@ const MODULES = [
      plan:["Planning Board คน × วัน แยกหน่วยงาน ME / PP / EE / PC / SC (ดูอย่างเดียว)","ลงงาน แก้ไข และบันทึกการลา โดย SC / PC / SSM พร้อมเตือนจองซ้ำ","Overview, Project Timeline, ค้นหาคนว่าง และ export","เชื่อม Service Plan และ Site Expense (man-day × rate)"]},
   {id:"site-team",   icon:"i-passport", live:true, name:"Site Team",    th:"ทีมหน้างาน · Passport",          desc:"รายชื่อทีมหน้างานแยกตามทีม · Passport หมดอายุเมื่อไหร่ · ต่ออายุและเบิกค่าใช้จ่าย · เลือกคนไปงานต่างประเทศ + รายชื่อทำประกันเดินทาง",
      plan:["ภาพรวม: ใคร ทีมไหน กี่คน มี Passport ไหม หมดอายุเมื่อไหร่","ต่ออายุ Passport: สถานะ + ค่าใช้จ่ายที่เบิก","ทริปต่างประเทศ: เลือกคน ตรวจ Passport ≥ 6 เดือนหลังกลับ · Export รายชื่อทำประกัน รายเที่ยว / รายปี","เลขบัตรประชาชน / Passport / วันเกิด เห็นเฉพาะ SC / PC / SSM"]},
-  {id:"qa-tools",    icon:"i-caliper", live:true, name:"QA Tools",     th:"ทะเบียนเครื่องมือ · ยืม-คืน · สอบเทียบ", desc:"ทะเบียนเครื่องมือพร้อมรูป รหัสทรัพย์สิน อายุ ผู้รับผิดชอบ · ยืม-คืน · ส่งสอบเทียบประจำปีและผลสอบเทียบ · ป้าย QR",
+  {id:"qa-tools",    icon:"i-caliper", live:true, beta:true, name:"QA Tools",     th:"ทะเบียนเครื่องมือ · ยืม-คืน · สอบเทียบ", desc:"ทะเบียนเครื่องมือพร้อมรูป รหัสทรัพย์สิน อายุ ผู้รับผิดชอบ · ยืม-คืน · ส่งสอบเทียบประจำปีและผลสอบเทียบ · ป้าย QR",
      plan:["แจ้งเตือนสอบเทียบใกล้ครบ / ยืมเกินกำหนด ทาง LINE หรืออีเมล","รายงานสอบเทียบประจำปีสำหรับ ISO audit"]},
   // Manual stays the LAST menu: open to every signed-in user, always sorted to the bottom (see visibleModules).
   {id:"manual",      icon:"i-book",    live:true, always:true, name:"คู่มือการใช้งาน", th:"คู่มือ SSM Work",       desc:"วิธีใช้งาน SSM Work ทีละเมนู · เข้าระบบ เปลี่ยนรหัสผ่าน และสิทธิ์การใช้งาน"},

@@ -1862,15 +1862,21 @@ const SITE_EXPENSE = {
 };
 // 20 Nov 2026: opened to everyone on the view list (rights per action stay in SITE_EXPENSE).
 const siteExpenseOpen = (prof) => SITE_EXPENSE.view.includes(String(prof.username || '').toLowerCase());
+// QA Tools — ทดลองใช้ (set by Dew, 20 Nov 2026): only ดิว and อาร์ต open it while they test the calibration flow.
+// To open it to everyone an admin ticks QA Tools for: set QA_TRIAL = null.
+const QA_TRIAL = ['nantana.s', 'sakkamon.c'];
+const qaOpen = (prof) => !QA_TRIAL || QA_TRIAL.includes(String(prof.username || '').toLowerCase());
 const sitePerms = (prof) => Object.keys(SITE_EXPENSE).filter((k) => SITE_EXPENSE[k].includes(String(prof.username || '').toLowerCase()));
 // Non-admins see only the menus an admin has ticked for them; a new account starts with none. Site Expense: list above only.
 const effectiveMenus = (prof) => {
   const base = prof.role === 'admin' ? MENU_IDS.slice() : Array.isArray(prof.modules) ? prof.modules.filter((id) => MENU_IDS.includes(id)) : [];
-  const out = base.filter((id) => id !== 'site-expense');
+  const out = base.filter((id) => id !== 'site-expense' && (id !== 'qa-tools' || qaOpen(prof)));
   if (sitePerms(prof).includes('view')) out.push('site-expense');
+  if (QA_TRIAL && qaOpen(prof) && !out.includes('qa-tools')) out.push('qa-tools');
   return MENU_IDS.filter((id) => out.includes(id));
 };
 const canOpen = (prof, menu) => menu === null || (menu === 'site-expense' ? siteExpenseOpen(prof) && effectiveMenus(prof).includes(menu)
+  : menu === 'qa-tools' ? effectiveMenus(prof).includes(menu)          // trial: QA_TRIAL only, admins included
   : prof.role === 'admin' || (menu !== '__admin' && effectiveMenus(prof).includes(menu)));
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } });
 
