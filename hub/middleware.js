@@ -1153,7 +1153,8 @@ async function candApi(cfg, req, url, prof) {
       const purged = await candPurge(cfg).catch(() => 0);
       const [tests, cands, scores] = await Promise.all([
         restAll(cfg, `${CAND_T}?select=id,slug,title,open,trial,content,rubric&order=id.asc`),
-        restAll(cfg, `${CAND_C}?select=${CAND_COLS}&order=submitted_at.desc`),
+        restAll(cfg, `${CAND_C}?select=${CAND_COLS},cv_text,fit&order=submitted_at.desc`)   // cv_text / fit added 20 Nov 2026
+          .then((r) => r || restAll(cfg, `${CAND_C}?select=${CAND_COLS}&order=submitted_at.desc`)),
         restAll(cfg, `${CAND_S}?select=*`),
       ]);
       if (!tests || !cands || !scores) return json({ error: 'no_table' }, 503);
@@ -1235,6 +1236,16 @@ async function candApi(cfg, req, url, prof) {
   if (p === 'note') {
     const r = await patch(c.id, { note: mpStr(d.note, 3000) || null, phone: d.phone !== undefined ? String(d.phone || '').replace(/[^\d+]/g, '').slice(0, 15) : c.phone, email: d.email !== undefined ? mpStr(d.email, 160) || null : c.email, line_id: d.line_id !== undefined ? mpStr(d.line_id, 60) || null : c.line_id });
     return r.ok ? json({ ok: true }) : json({ error: 'supabase' }, 502);
+  }
+  if (p === 'fit') {                         // วิเคราะห์ความเข้ากันได้เบื้องต้น: CV text + keyword result (computed in the browser by fit.js)
+    const fit = d.fit && typeof d.fit === 'object' ? d.fit : null;
+    if (fit && JSON.stringify(fit).length > 12000) return json({ error: 'ผลวิเคราะห์ใหญ่เกิน' }, 413);
+    const row = { cv_text: String(d.cv_text ?? '').replace(/\r/g, '').trim().slice(0, 20000) || null, fit: fit ? { ...fit, at: new Date().toISOString(), by: whoName } : null };
+    const r = await patch(c.id, row);
+    if (!r.ok) return json({ error: 'ยังไม่มีช่องเก็บผลวิเคราะห์ — ให้ Admin รัน database/candidates.sql (ส่วน cv_text / fit) ใน Supabase' }, 502);
+    const best = fit && (fit.roles || []).find((x) => x.k === 'sitecontrol');
+    candLog(cfg, c.id, whoName, 'วิเคราะห์ความเข้ากันได้', best ? `Site Control ${best.pct}%` : 'ล้างผล');
+    return json({ ok: true, fit: row.fit });
   }
   if (p === 'delete') {
     const paths = (c.files || []).map((f) => f.p).filter(Boolean);
