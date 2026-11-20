@@ -322,7 +322,7 @@
     const body = ppl.map(r => `<tr><td>${esc(label(r))}<div class="sub">${esc(r.code)}</div></td><td>${unitBadge(r.unit)}</td>${used.map(([k]) => cell(byKey.get(r.key), k)).join("")}</tr>`).join("")
       + outsiders.map(n => `<tr class="muted-row"><td>${esc(thNorm(n))}<div class="sub">ไม่อยู่ใน Site Team</div></td><td>—</td>${used.map(([k]) => cell(rows.filter(x => !x.r && thNorm(x.c.holder_name) === thNorm(n)).map(x => x.c), k)).join("")}</tr>`).join("");
     // 2) renewals: due / expired, not resigned — worked with จป
-    const ren = rows.filter(x => x.c.status !== "resign" && ["due", "exp"].includes(certSt(x.c)[0]) && (!S.cc || x.c.course === S.cc) && match(x.c.holder_name, x.r))
+    const ren = rows.filter(x => x.c.status !== "resign" && x.c.renew_status !== "done" && ["due", "exp"].includes(certSt(x.c)[0]) && (!S.cc || x.c.course === S.cc) && match(x.c.holder_name, x.r))
       .sort((a, b) => String(certDue(a.c) || a.c.expiry || "").localeCompare(String(certDue(b.c) || b.c.expiry || "")));
     const soon = rows.filter(x => x.c.status !== "resign" && certSt(x.c)[0] === "ok" && x.c.expiry && (!S.cc || x.c.course === S.cc) && parse(certDue(x.c)) <= addMonths(t, 6)).length;
     const bar = `<div class="stm-bar2"><input type="search" id="stQ" placeholder="ค้นหาชื่อ / ชื่อเล่น / รหัส" value="${esc(S.q)}">
