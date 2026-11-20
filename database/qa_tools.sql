@@ -5,7 +5,8 @@
 
 create table if not exists public.qa_tools (
   id              bigint generated always as identity primary key,
-  asset_no        text not null,                 -- รหัสทรัพย์สิน
+  asset_no        text not null,                 -- รหัสเครื่องมือ (ตามสติกเกอร์ เช่น PM-03, ST-05)
+  fixed_asset_no  text,                          -- รหัสทรัพย์สิน (AP02-xxxxx) ถ้ามี
   name            text not null,
   category        text,                          -- measuring / electrical / hand tool / power tool / safety / other
   brand           text,
@@ -13,8 +14,10 @@ create table if not exists public.qa_tools (
   serial_no       text,
   spec            text,                          -- range / resolution / accuracy
   location        text,                          -- where it is kept
-  owner_name      text,                          -- ผู้รับผิดชอบ
-  purchase_date   date,
+  owner_name      text,                          -- ผู้ถือครอง
+  department      text,                          -- แผนก
+  lendable        boolean not null default false, -- เครื่องมือกลาง ให้ยืมได้
+  purchase_date   date,                          -- วันที่เริ่มใช้ (ใช้คำนวณอายุ)
   price           numeric(12,2),
   needs_cal       boolean not null default true, -- ต้องสอบเทียบ
   cal_interval_m  int not null default 12,
@@ -94,3 +97,8 @@ alter table public.qa_tool_log   enable row level security;
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('qa-tools', 'qa-tools', false, 5242880, array['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
 on conflict (id) do nothing;
+
+-- Added 20 Nov 2026 (ผู้ถือครอง / แผนก / ให้ยืมได้ / รหัสทรัพย์สิน) — safe to run again on a database that already has the tables
+alter table public.qa_tools add column if not exists fixed_asset_no text;
+alter table public.qa_tools add column if not exists department text;
+alter table public.qa_tools add column if not exists lendable boolean not null default false;
