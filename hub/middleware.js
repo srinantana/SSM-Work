@@ -128,7 +128,7 @@ const MENUS = [
   { id: 'manpower', name: 'Manpower' },
   { id: 'site-team', name: 'Site Team' },
   { id: 'qa-tools', name: 'QA Tools' },
-  { id: 'candidates', name: 'Candidates' },
+  { id: 'candidates', name: 'SSM Candidates' },
 ];
 const MENU_IDS = MENUS.map((m) => m.id);
 function menuOfPath(path) {
