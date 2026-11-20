@@ -1089,7 +1089,7 @@ const CAND_STATUS = ['new', 'screening', 'interview', 'interviewed', 'offer', 'h
 const CAND_KEEP_DAYS = 90;
 const CAND_FILE = /^c\d{1,10}\/[A-Za-z0-9_-]{6,60}\.(pdf|jpg)$/;
 const CAND_DRIVE = /^https:\/\/(drive|docs)\.google\.com\/[\w\-./?=&%#]{5,400}$/;
-const CAND_T = '/rest/v1/cand_tests', CAND_C = '/rest/v1/candidates', CAND_S = '/rest/v1/cand_scores', CAND_L = '/rest/v1/cand_log', CAND_BUCKET = 'candidates';
+const CAND_T = '/rest/v1/cand_tests', CAND_C = '/rest/v1/candidates', CAND_S = '/rest/v1/cand_scores', CAND_L = '/rest/v1/cand_log', CAND_N = '/rest/v1/cand_notes', CAND_BUCKET = 'candidates';
 const CAND_COLS = 'id,test_id,position,name,phone,email,line_id,answers,ai_note,consent_at,consent_ver,started_at,submitted_at,status,status_at,files,note,seen_by';
 // Pre-created applicants (ดิว / นุ่น add a name from a CV before the test): answers = {} until the applicant submits.
 // The public submit then fills that row when the full name matches exactly, ignoring every space and a title prefix (Dew, 20 Nov 2026).
@@ -1174,14 +1174,15 @@ async function candApi(cfg, req, url, prof) {
   if (req.method === 'GET') {
     if (p === 'data') {
       const purged = await candPurge(cfg).catch(() => 0);
-      const [tests, cands, scores] = await Promise.all([
+      const [tests, cands, scores, notes] = await Promise.all([
         restAll(cfg, `${CAND_T}?select=id,slug,title,open,trial,content,rubric&order=id.asc`),
         restAll(cfg, `${CAND_C}?select=${CAND_COLS},cv_text,fit&order=submitted_at.desc`)   // cv_text / fit added 20 Nov 2026
           .then((r) => r || restAll(cfg, `${CAND_C}?select=${CAND_COLS}&order=submitted_at.desc`)),
         restAll(cfg, `${CAND_S}?select=*`),
+        restAll(cfg, `${CAND_N}?select=*&order=interview_date.desc,created_at.desc`),   // Interview notes (added 20 Nov 2026) — null until the table exists
       ]);
       if (!tests || !cands || !scores) return json({ error: 'no_table' }, 503);
-      return json({ me: { username: who, name: whoName, canEdit: edit }, keepDays: CAND_KEEP_DAYS, purged, tests, candidates: cands, scores });
+      return json({ me: { username: who, name: whoName, canEdit: edit }, keepDays: CAND_KEEP_DAYS, purged, tests, candidates: cands, scores, notes: notes || [], notesReady: !!notes });
     }
     if (p === 'log') { const rows = await restAll(cfg, `${CAND_L}?select=*&candidate_id=eq.${Number(url.searchParams.get('c')) || 0}&order=at.desc&limit=100`); return json({ log: rows || [] }); }
     if (p === 'file') {
@@ -1206,6 +1207,32 @@ async function candApi(cfg, req, url, prof) {
   }
   let d; try { d = await req.json(); } catch { return json({ error: 'json' }, 400); }
   const c = d.id ? await one(d.id) : null;
+  // Interview note: everyone with the menu writes their own notes; author or ดิว / นุ่น edit / delete.
+  if (p === 'inote' || p === 'inote-del') {
+    const REC = ['hire', 'consider', 'no'];
+    const nid = Number(d.note_id) || 0;
+    const old = nid ? ((await restAll(cfg, `${CAND_N}?select=*&id=eq.${nid}`)) || [])[0] : null;
+    if (nid && !old) return json({ error: 'ไม่พบบันทึก' }, 404);
+    if (old && old.author !== who && !edit) return json({ error: 'แก้ไข / ลบได้เฉพาะผู้บันทึก หรือดิว / นุ่น' }, 403);
+    if (p === 'inote-del') {
+      const r = await fetch(`${cfg.url}${CAND_N}?id=eq.${nid}`, { method: 'DELETE', headers: authHeaders(cfg.service) });
+      if (!r.ok) return json({ error: 'supabase' }, 502);
+      candLog(cfg, old.candidate_id, whoName, 'ลบ Interview note', `${old.interview_date || ''} · ${old.author_name || old.author}`);
+      return json({ ok: true });
+    }
+    if (!c) return json({ error: 'ไม่พบผู้สมัคร' }, 404);
+    const text = String(d.note ?? '').replace(/\r/g, '').trim().slice(0, 8000);
+    if (!text) return json({ error: 'พิมพ์บันทึกการสัมภาษณ์ก่อน' }, 400);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(String(d.interview_date || '')) ? d.interview_date : new Date().toISOString().slice(0, 10);
+    const row = { candidate_id: c.id, interview_date: date, round: mpStr(d.round, 40) || null, panel: mpStr(d.panel, 200) || null, note: text,
+      recommend: REC.includes(d.recommend) ? d.recommend : null, updated_at: new Date().toISOString() };
+    const r = old
+      ? await fetch(`${cfg.url}${CAND_N}?id=eq.${nid}`, { method: 'PATCH', headers: H, body: JSON.stringify(row) })
+      : await fetch(cfg.url + CAND_N, { method: 'POST', headers: H, body: JSON.stringify({ ...row, author: who, author_name: whoName }) });
+    if (!r.ok) return json({ error: r.status === 404 ? 'ยังไม่มีตาราง — ให้ Admin รัน database/candidates.sql (ส่วน cand_notes) ใน Supabase' : 'supabase' }, 502);
+    candLog(cfg, c.id, whoName, old ? 'แก้ Interview note' : 'เพิ่ม Interview note', `${date}${row.round ? ' · ' + row.round : ''}`);
+    return json({ ok: true, note: (await r.json())[0] });
+  }
   if (p === 'score') {
     if (!c) return json({ error: 'ไม่พบผู้สมัคร' }, 404);
     const sc = {}; let total = 0;
