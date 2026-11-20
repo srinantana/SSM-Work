@@ -1091,6 +1091,10 @@ const CAND_FILE = /^c\d{1,10}\/[A-Za-z0-9_-]{6,60}\.(pdf|jpg)$/;
 const CAND_DRIVE = /^https:\/\/(drive|docs)\.google\.com\/[\w\-./?=&%#]{5,400}$/;
 const CAND_T = '/rest/v1/cand_tests', CAND_C = '/rest/v1/candidates', CAND_S = '/rest/v1/cand_scores', CAND_L = '/rest/v1/cand_log', CAND_BUCKET = 'candidates';
 const CAND_COLS = 'id,test_id,position,name,phone,email,line_id,answers,ai_note,consent_at,consent_ver,started_at,submitted_at,status,status_at,files,note,seen_by';
+// Pre-created applicants (ดิว / นุ่น add a name from a CV before the test): answers = {} until the applicant submits.
+// The public submit then fills that row when the full name matches exactly, ignoring every space (Dew, 20 Nov 2026).
+const candNameKey = (s) => String(s ?? '').normalize('NFC').replace(/[\s\u200B-\u200D\u2060\uFEFF]/g, '');
+const CAND_EMPTY = 'answers=eq.%7B%7D';
 async function sha256Hex(s) { const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)); return [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join(''); }
 const candLog = (cfg, candidate_id, by, action, detail) => fetch(cfg.url + CAND_L, { method: 'POST', headers: authHeaders(cfg.service), body: JSON.stringify({ candidate_id, by, action, detail: mpStr(detail, 500) || null }) }).catch(() => null);
 async function candPurge(cfg) {              // PDPA: delete rejected / withdrawn applicants CAND_KEEP_DAYS after the decision
@@ -1128,12 +1132,25 @@ async function applyApi(cfg, req, url) {     // public — no session
     const ip_hash = ip ? (await sha256Hex(ip + '|' + cfg.secret)).slice(0, 32) : null;
     const day = new Date(Date.now() - 864e5).toISOString();
     if (ip_hash) { const n = await restAll(cfg, `${CAND_C}?select=id&ip_hash=eq.${ip_hash}&submitted_at=gt.${day}`); if (n && n.length >= 5) return json({ error: 'ส่งบ่อยเกินไป ลองใหม่ภายหลัง' }, 429); }
-    const dup = await restAll(cfg, `${CAND_C}?select=id&test_id=eq.${t.id}&phone=eq.${encodeURIComponent(phone)}&submitted_at=gt.${day}`);
+    const dup = await restAll(cfg, `${CAND_C}?select=id&test_id=eq.${t.id}&phone=eq.${encodeURIComponent(phone)}&submitted_at=gt.${day}&answers=neq.%7B%7D`);
     if (dup && dup.length) return json({ error: 'เบอร์นี้ส่งแบบทดสอบไปแล้ว หากต้องการแก้ไข กรุณาติดต่อฝ่ายบุคคล' }, 409);
     const started = Date.parse(d.started_at); const now = new Date().toISOString();
-    const r = await fetch(cfg.url + CAND_C, { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'return=representation' }, body: JSON.stringify({
-      test_id: t.id, position: t.title, name, phone, email: email || null, line_id: mpStr(d.line_id, 60) || null, answers, ai_note: mpStr(d.ai_note, 1000) || null,
-      consent_at: now, consent_ver: mpStr(d.consent_ver, 20) || 'v1', started_at: Number.isFinite(started) && started < Date.now() ? new Date(started).toISOString() : null, ip_hash }) });
+    const row = { test_id: t.id, position: t.title, name, phone, email: email || null, line_id: mpStr(d.line_id, 60) || null, answers, ai_note: mpStr(d.ai_note, 1000) || null,
+      consent_at: now, consent_ver: mpStr(d.consent_ver, 20) || 'v1', started_at: Number.isFinite(started) && started < Date.now() ? new Date(started).toISOString() : null, ip_hash };
+    // Same full name (every character, spaces ignored) as a pre-created applicant who has not answered yet → fill that row.
+    const key = candNameKey(name);
+    const pre = ((await restAll(cfg, `${CAND_C}?select=id,name,test_id,phone,email,line_id,submitted_at&${CAND_EMPTY}&order=submitted_at.desc`)) || [])
+      .filter((c) => candNameKey(c.name) === key && (!c.test_id || c.test_id === t.id));
+    if (pre.length) {
+      const c = pre[0];
+      const upd = { ...row, name: c.name, email: row.email || c.email || null, line_id: row.line_id || c.line_id || null, submitted_at: now, seen_by: [] };
+      const r = await fetch(`${cfg.url}${CAND_C}?id=eq.${c.id}&${CAND_EMPTY}`, { method: 'PATCH', headers: { ...authHeaders(cfg.service), prefer: 'return=representation' }, body: JSON.stringify(upd) });
+      if (r.ok && (await r.json()).length) {
+        candLog(cfg, c.id, name, 'ส่งแบบทดสอบ', `${t.title} · เข้าชื่อที่สร้างไว้แล้ว${c.phone && c.phone !== phone ? ` · เบอร์เดิม ${c.phone} → ${phone}` : ''}${pre.length > 1 ? ` · ชื่อซ้ำ ${pre.length} รายการ (ใช้รายการล่าสุด)` : ''}`);
+        return json({ ok: true });
+      }
+    }
+    const r = await fetch(cfg.url + CAND_C, { method: 'POST', headers: { ...authHeaders(cfg.service), prefer: 'return=representation' }, body: JSON.stringify(row) });
     if (!r.ok) return json({ error: 'ส่งไม่สำเร็จ ลองใหม่อีกครั้ง' }, 502);
     const c = (await r.json())[0];
     candLog(cfg, c.id, name, 'ส่งแบบทดสอบ', t.title);
@@ -1218,6 +1235,24 @@ async function candApi(cfg, req, url, prof) {
     await fetch(`${cfg.url}${CAND_L}?candidate_id=is.null`, { method: 'DELETE', headers: authHeaders(cfg.service) }).catch(() => null);
     return json({ ok: true, deleted: all.length });
   }
+  if (p === 'create') {                      // ดิว / นุ่น: add an applicant from a CV before the test — answers fill in when they submit
+    const name = mpStr(d.name, 120); if (candNameKey(name).length < 4) return json({ error: 'กรอกชื่อ-นามสกุล' }, 400);
+    const tid = Number(d.test_id) || null;
+    const tr = await restAll(cfg, `${CAND_T}?select=id,title${tid ? `&id=eq.${tid}` : '&order=id.asc&limit=1'}`);
+    const t = tr && tr[0];
+    const same = ((await restAll(cfg, `${CAND_C}?select=id,name`)) || []).find((x) => candNameKey(x.name) === candNameKey(name));
+    if (same) return json({ error: `มีชื่อนี้อยู่แล้ว (${same.name})`, id: same.id }, 409);
+    const files = (Array.isArray(d.files) ? d.files : []).slice(0, 5).filter((f) => CAND_DRIVE.test(String(f.url || '')))
+      .map((f) => ({ url: String(f.url), name: mpStr(f.name, 120) || 'CV', at: new Date().toISOString(), by: whoName }));
+    const now = new Date().toISOString();
+    const r = await fetch(cfg.url + CAND_C, { method: 'POST', headers: H, body: JSON.stringify({ test_id: t ? t.id : null, position: t ? t.title : null, name,
+      phone: String(d.phone || '').replace(/[^\d+]/g, '').slice(0, 15) || null, email: mpStr(d.email, 160).toLowerCase() || null, line_id: mpStr(d.line_id, 60) || null,
+      answers: {}, consent_at: now, consent_ver: 'manual-cv', submitted_at: now, files, note: mpStr(d.note, 3000) || null, seen_by: [who] }) });
+    if (!r.ok) return json({ error: 'supabase' }, 502);
+    const n = (await r.json())[0];
+    candLog(cfg, n.id, whoName, 'สร้างรายชื่อ', 'ก่อนทำแบบทดสอบ — คำตอบจะเข้าชื่อนี้เมื่อชื่อ-นามสกุลตรงกัน');
+    return json({ ok: true, id: n.id });
+  }
   if (!c) return json({ error: 'ไม่พบผู้สมัคร' }, 404);
   if (p === 'status') {
     if (!CAND_STATUS.includes(d.status)) return json({ error: 'status' }, 400);
@@ -1234,6 +1269,12 @@ async function candApi(cfg, req, url, prof) {
     return json({ ok: true });
   }
   if (p === 'note') {
+    if (d.name !== undefined) {               // แก้ชื่อ — must stay unique (spaces ignored) so a later test submission lands on one row
+      const nm = mpStr(d.name, 120); if (candNameKey(nm).length < 4) return json({ error: 'กรอกชื่อ-นามสกุล' }, 400);
+      const same = ((await restAll(cfg, `${CAND_C}?select=id,name&id=neq.${c.id}`)) || []).find((x) => candNameKey(x.name) === candNameKey(nm));
+      if (same) return json({ error: `มีชื่อนี้อยู่แล้ว (${same.name})` }, 409);
+      if (nm !== c.name) { const r0 = await patch(c.id, { name: nm }); if (!r0.ok) return json({ error: 'supabase' }, 502); candLog(cfg, c.id, whoName, 'แก้ชื่อ', `${c.name} → ${nm}`); }
+    }
     const r = await patch(c.id, { note: mpStr(d.note, 3000) || null, phone: d.phone !== undefined ? String(d.phone || '').replace(/[^\d+]/g, '').slice(0, 15) : c.phone, email: d.email !== undefined ? mpStr(d.email, 160) || null : c.email, line_id: d.line_id !== undefined ? mpStr(d.line_id, 60) || null : c.line_id });
     return r.ok ? json({ ok: true }) : json({ error: 'supabase' }, 502);
   }
