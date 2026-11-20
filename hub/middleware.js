@@ -337,6 +337,36 @@ async function siteExpenseRates(cfg) {
 // browser loaded (null for a new project) — a newer row on the server answers 409 with the server copy instead of overwriting.
 // The server works out what changed and checks the SITE_EXPENSE rights for each kind of change.
 const SE_TABLE = '/rest/v1/site_expense_projects';
+// Files (related documents, Actual receipts) live in the private bucket 'site-expense' (database/site_expense_files.sql);
+// POST /api/site-expense/file?kind=doc|rcpt&project=<id> uploads one (JPEG already shrunk in the browser, or PDF, ≤ 4 MB),
+// GET /api/site-expense/file?p=<path> streams it back to anyone who can open Site Expense.
+const SE_BUCKET = 'site-expense';
+const SE_FILE = /^(doc|rcpt)\/[\w-]{3,80}\/[A-Za-z0-9_-]{6,60}\.(jpg|pdf)$/;
+async function siteExpenseFile(cfg, req, url, prof) {
+  if (req.method === 'GET') {
+    const path = url.searchParams.get('p') || '';
+    if (!SE_FILE.test(path)) return json({ error: 'path' }, 400);
+    const r = await fetch(`${cfg.url}/storage/v1/object/${SE_BUCKET}/${path}`, { headers: authHeaders(cfg.service) });
+    if (!r.ok) return json({ error: 'not found' }, 404);
+    return new Response(r.body, { headers: { 'content-type': path.endsWith('.pdf') ? 'application/pdf' : 'image/jpeg', 'content-disposition': 'inline', 'cache-control': 'private, max-age=604800, immutable', 'x-content-type-options': 'nosniff' } });
+  }
+  if (req.method !== 'POST') return json({ error: 'method' }, 405);
+  const origin = req.headers.get('origin');
+  if (origin && origin !== cfg.app) return json({ error: 'bad origin' }, 403);
+  const kind = url.searchParams.get('kind'), pid = url.searchParams.get('project') || '';
+  if (!['doc', 'rcpt'].includes(kind) || !/^[\w-]{3,80}$/.test(pid)) return json({ error: 'kind / project' }, 400);
+  const perms = sitePerms(prof);
+  if (!(kind === 'doc' ? ['create', 'award'] : ['actual', 'check']).some((k) => perms.includes(k))) return json({ error: kind === 'doc' ? 'ไม่มีสิทธิ์แนบเอกสาร' : 'ไม่มีสิทธิ์แนบใบเสร็จ' }, 403);
+  const ct = req.headers.get('content-type') || '', pdf = ct === 'application/pdf';
+  if (!pdf && ct !== 'image/jpeg') return json({ error: 'รองรับเฉพาะรูปภาพหรือ PDF' }, 415);
+  const buf = await req.arrayBuffer();
+  if (!buf.byteLength || buf.byteLength > 4 * 1024 * 1024) return json({ error: 'ไฟล์ใหญ่เกิน 4 MB' }, 413);
+  const path = `${kind}/${pid}/${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}.${pdf ? 'pdf' : 'jpg'}`;
+  const h = authHeaders(cfg.service); h['content-type'] = pdf ? 'application/pdf' : 'image/jpeg'; h['x-upsert'] = 'false';
+  const r = await fetch(`${cfg.url}/storage/v1/object/${SE_BUCKET}/${path}`, { method: 'POST', headers: h, body: buf });
+  if (!r.ok) return json({ error: r.status === 404 || r.status === 400 ? 'ยังไม่มีที่เก็บไฟล์ — ให้ Admin รัน database/site_expense_files.sql' : 'storage' }, 502);
+  return json({ path });
+}
 const SE_HEADER = ['ij', 'name', 'customer', 'city', 'destination', 'country', 'allowance_tier', 'start', 'end'];
 function seNeeds(old, nw) {
   const ch = (k) => JSON.stringify(old[k] ?? null) !== JSON.stringify(nw[k] ?? null);
@@ -2851,6 +2881,7 @@ export default async function middleware(req) {
     const live = await liveProfile(cfg, user);
     if (!live) return json({ error: 'login required' }, 401);
     if (!canOpen(live, 'site-expense')) return json({ error: 'no access' }, 403);
+    if (url.pathname === '/api/site-expense/file') { try { return await siteExpenseFile(cfg, req, url, live); } catch { return json({ error: 'storage' }, 502); } }
     if (url.pathname === '/api/site-expense/projects') { try { return await siteExpenseProjects(cfg, req, url, live); } catch { return json({ error: 'supabase' }, 502); } }
     if (url.pathname !== '/api/site-expense/rates' || req.method !== 'GET') return json({ error: 'not found' }, 404);
     try { return await siteExpenseRates(cfg); } catch { return json({ error: 'supabase' }, 502); }
